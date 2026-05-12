@@ -15,21 +15,48 @@ The current production Dreame implementation still lives in the sibling repo `..
 - Long-term goal: HACS-friendly packaging and release flow.
 - Migration model: run in parallel with the old implementation until feature parity is reached.
 - Collision rule: keep new services, events, entity ids and card identifiers isolated from the current `pyscript.dreame_queue_*` implementation.
+- Public repo rule: do not commit secrets, local hostnames, private paths, local-only entity ids, or assumptions from one Home Assistant installation.
+- Dependency rule: it is acceptable for this integration to depend explicitly on the existing `dreame_vacuum` integration, but runtime setup must still validate that the selected dependency exists and is usable.
 
 ## Repository Map
 - `custom_components/ha_dreame/` - future Home Assistant integration
 - `frontend/dreame-queue-card/` - future home for the standalone Dreame dashboard card
 - `docs/` - migration guardrails and product notes
+- `docs/dreame-behavior-knowledge.md` - public-safe observed Dreame behavior and regression knowledge
 
 ## Validation
 - Python scaffold check:
-  - `python -m compileall custom_components/ha_dreame`
+  - `python3 -m compileall custom_components/ha_dreame`
+- Test suite:
+  - `python -m pytest`
+
+## Development Model
+- Use TDD for all functional changes and bug fixes.
+- Prefer visible red/green/refactor commit chains:
+  - `test:` commits add failing coverage for the expected behavior.
+  - `feat:` or `fix:` commits make those tests pass.
+  - `refactor:` commits are allowed after tests are green.
+- Keep feature branches small and centered on one behavior slice.
+- Use Conventional Commits for commits made in this repo.
+- Treat the private production implementation in `../ha-config` as a reference during migration, not as a runtime dependency.
+- Keep implementation code deterministic and testable before wiring it to Home Assistant runtime APIs.
 
 ## Deploy
 - This repo is not the production deploy path yet.
 - Do not deploy this scaffold to HAOS as a replacement for the running Dreame solution without explicit user approval.
+- During migration, local development deploys may install `ha_dreame` beside the old implementation, but new runtime behavior must be opt-in and namespaced.
 
 ## Working Rules
 - If the task is to fix the currently running Dreame setup, work in `../ha-config`.
 - If the task is to build the next-generation Dreame component, work here.
 - Prefer additive migration work over in-place replacement work.
+- Do not remove, rename, or disable production Dreame pieces in `../ha-config` unless the user explicitly asks for cutover work.
+
+## Dreame Behavior Knowledge
+- Update `docs/dreame-behavior-knowledge.md` whenever runtime debugging reveals durable Dreame behavior that should influence queue logic.
+- Keep behavior entries public-safe:
+  - use generic entity examples such as `vacuum.<robot>` and `sensor.<robot>_task_status`
+  - avoid private room names, local hostnames, user names, secrets, tokens, and private paths
+  - anonymize timestamps or examples when exact details are not needed for the behavior
+- Turn confirmed regressions or state-machine rules into automated tests in the same or next focused slice.
+- Mark each behavior as `Observed`, `Inferred`, or `Unknown` so future changes do not overfit weak evidence.
