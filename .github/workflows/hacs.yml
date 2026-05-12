@@ -1,0 +1,22 @@
+name: HACS
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: HACS validation
+        uses: hacs/action@main
+        with:
+          category: integration
+          # Brand assets are tracked as release readiness work; keep the structural
+          # HACS validation active while that external asset path is unresolved.
+          ignore: brands
