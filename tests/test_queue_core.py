@@ -41,6 +41,24 @@ def test_new_state_starts_idle_and_empty() -> None:
     assert current_item(state) is None
 
 
+def test_current_item_returns_none_when_id_is_stale() -> None:
+    """Test current item lookup tolerates stale state."""
+    state = QueueState(
+        run_state="running",
+        current_item_id="missing",
+        items=(
+            QueueItem(
+                item_id="item-1",
+                room_id=1,
+                room_name="Kitchen",
+                status="running",
+            ),
+        ),
+    )
+
+    assert current_item(state) is None
+
+
 def test_add_room_appends_pending_item_and_copies_overrides() -> None:
     """Test adding a room appends one pending item."""
     overrides = {"suction_level": "turbo"}
@@ -199,7 +217,9 @@ def test_update_item_overrides_only_allows_pending_items() -> None:
 
     completed_state = complete_current_room(state)
     with pytest.raises(InvalidOperation, match="Only pending"):
-        update_item_overrides(completed_state, item_id=completed_state.items[0].item_id, overrides={})
+        update_item_overrides(
+            completed_state, item_id=completed_state.items[0].item_id, overrides={}
+        )
 
 
 def test_clear_pending_keeps_running_item_and_resets_non_running_queue() -> None:
