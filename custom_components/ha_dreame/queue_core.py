@@ -238,7 +238,10 @@ def evaluate_reconcile_tick(
     dispatch_retry_max: int,
     vacuum_error_code: str = "",
     is_dock_prep_paused: bool = False,
+    force_retry_after_recovery: bool = False,
     non_fatal_error_codes: set[str] | None = None,
+    pause_waiting_seen: bool = False,
+    is_returning_state: bool = False,
     expected_room_name: str | None = None,
     observed_room_name: str | None = None,
     cleaning_progress: int | None = None,
@@ -280,19 +283,37 @@ def evaluate_reconcile_tick(
                 set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
                 event_reasons=tuple(event_reasons + ["vacuum_error_route_blocked"]),
             )
-        reason = "vacuum_error_waiting_user_action"
-        if normalized_error in normalized_non_fatal_errors:
-            reason = f"vacuum_error_non_fatal:{normalized_error}"
+        if normalized_task == "completed":
+            if not effective_task_status_cleared:
+                event_reasons.append("task_status_completed_ignored_not_cleared_after_dispatch")
+            elif normalized_error in {"", "unknown", "unavailable", "no_error"}:
+                event_reasons.append("task_status_completed_ignored_due_vacuum_error")
+            else:
+                event_reasons.append(
+                    f"task_status_completed_ignored_due_vacuum_error:{normalized_error}"
+                )
+
         return ReconcileDecision(
             set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
             reset_dispatch_retry_count=True,
-            event_reasons=tuple(event_reasons + [reason]),
+            event_reasons=tuple(
+                event_reasons
+                + [_vacuum_error_wait_reason(normalized_error, normalized_non_fatal_errors)]
+            ),
         )
 
     if normalized_task == "completed":
         if not effective_task_status_cleared:
             event_reasons.append("task_status_completed_ignored_not_cleared_after_dispatch")
         else:
+            if pause_waiting_seen and is_returning_state:
+                return ReconcileDecision(
+                    mark_out_of_sync_reason="manual_return_to_dock_after_pause",
+                    set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+                    event_reasons=tuple(
+                        event_reasons + ["task_status_completed_after_manual_pause_returning"]
+                    ),
+                )
             return ReconcileDecision(
                 complete_current_room=True,
                 set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
@@ -304,7 +325,10 @@ def evaluate_reconcile_tick(
             return ReconcileDecision(
                 set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
                 reset_dispatch_retry_count=True,
-                event_reasons=tuple(event_reasons + ["vacuum_error_waiting_user_action"]),
+                event_reasons=tuple(
+                    event_reasons
+                    + [_vacuum_error_wait_reason(normalized_error, normalized_non_fatal_errors)]
+                ),
             )
         if (
             dock_prep_resume_ready
@@ -332,7 +356,10 @@ def evaluate_reconcile_tick(
             return ReconcileDecision(
                 set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
                 reset_dispatch_retry_count=True,
-                event_reasons=tuple(event_reasons + ["vacuum_error_waiting_user_action"]),
+                event_reasons=tuple(
+                    event_reasons
+                    + [_vacuum_error_wait_reason(normalized_error, normalized_non_fatal_errors)]
+                ),
             )
         return ReconcileDecision(
             set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
@@ -361,6 +388,13 @@ def evaluate_reconcile_tick(
             dispatch_retry_count=dispatch_retry_count,
         )
 
+    if force_retry_after_recovery:
+        return ReconcileDecision(
+            retry_current_room=True,
+            set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+            event_reasons=tuple(event_reasons + ["retry_dispatch_after_error_recovery"]),
+        )
+
     if dispatch_retry_count >= dispatch_retry_max:
         return ReconcileDecision(
             mark_out_of_sync_reason=(
@@ -387,6 +421,12 @@ def evaluate_reconcile_tick(
         set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
         event_reasons=tuple(event_reasons),
     )
+
+
+def _vacuum_error_wait_reason(normalized_error: str, normalized_non_fatal_errors: set[str]) -> str:
+    if normalized_error in normalized_non_fatal_errors:
+        return f"vacuum_error_non_fatal:{normalized_error}"
+    return "vacuum_error_waiting_user_action"
 
 
 def _evaluate_active_reconcile(
