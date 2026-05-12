@@ -5,6 +5,9 @@
     "@hallsbyra"
   ],
   "config_flow": true,
+  "dependencies": [
+    "dreame_vacuum"
+  ],
   "documentation": "https://github.com/hallsbyra/ha-dreame",
   "integration_type": "service",
   "iot_class": "calculated",

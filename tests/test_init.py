@@ -1,11 +1,13 @@
 """Tests for HA Dreame integration setup."""
 
+import pytest
+
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ha_dreame.const import DOMAIN, TITLE
+from custom_components.ha_dreame.const import CONF_VACUUM_ENTITY_ID, DOMAIN, TITLE
 
-CONF_VACUUM_ENTITY_ID = "vacuum_entity_id"
+pytestmark = pytest.mark.usefixtures("mock_dreame_vacuum_dependency")
 
 
 async def test_setup_and_unload_entry(hass: HomeAssistant) -> None:
