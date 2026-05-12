@@ -30,9 +30,13 @@ Build a standalone Dreame solution that can eventually replace the current mix o
 ## Validation
 
 ```bash
+python -m ruff check .
+python -m ruff format --check .
 python -m compileall custom_components/ha_dreame
 python -m pytest
 ```
+
+GitHub Actions also runs HACS validation and Hassfest.
 
 ## GitHub
 

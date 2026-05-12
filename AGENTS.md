@@ -23,12 +23,18 @@ The current production Dreame implementation still lives in the sibling repo `..
 - `frontend/dreame-queue-card/` - future home for the standalone Dreame dashboard card
 - `docs/` - migration guardrails and product notes
 - `docs/dreame-behavior-knowledge.md` - public-safe observed Dreame behavior and regression knowledge
+- `docs/merge-policy.md` - merge strategy for preserving TDD commit chains
+- `docs/release-checklist.md` - release readiness gates
 
 ## Validation
 - Python scaffold check:
   - `python3 -m compileall custom_components/ha_dreame`
 - Test suite:
   - `python -m pytest`
+- Lint and format:
+  - `python -m ruff check .`
+  - `python -m ruff format --check .`
+- GitHub Actions also runs HACS validation and Hassfest.
 
 ## Development Model
 - Use TDD for all functional changes and bug fixes.
@@ -36,10 +42,13 @@ The current production Dreame implementation still lives in the sibling repo `..
   - `test:` commits add failing coverage for the expected behavior.
   - `feat:` or `fix:` commits make those tests pass.
   - `refactor:` commits are allowed after tests are green.
+- Prefer rebase merge for normal PRs so `main` stays linear while the red/green chain is preserved.
+- Do not squash TDD branches unless the PR explicitly says the intermediate commits are not useful.
 - Keep feature branches small and centered on one behavior slice.
 - Use Conventional Commits for commits made in this repo.
 - Treat the private production implementation in `../ha-config` as a reference during migration, not as a runtime dependency.
 - Keep implementation code deterministic and testable before wiring it to Home Assistant runtime APIs.
+- Track quality-scale progress in `custom_components/ha_dreame/quality_scale.yaml`.
 
 ## Deploy
 - This repo is not the production deploy path yet.
