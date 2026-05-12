@@ -79,6 +79,12 @@ async def test_unload_entry_clears_runtime_data(hass: HomeAssistant) -> None:
     [
         pytest.param({}, None, DREAME_VACUUM_DOMAIN, id="missing-config-data"),
         pytest.param(
+            {CONF_VACUUM_ENTITY_ID: "vacuum.missing"},
+            None,
+            DREAME_VACUUM_DOMAIN,
+            id="missing-registry-entry",
+        ),
+        pytest.param(
             {CONF_VACUUM_ENTITY_ID: "sensor.dreame_robot"},
             "sensor.dreame_robot",
             DREAME_VACUUM_DOMAIN,

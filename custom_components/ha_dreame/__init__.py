@@ -6,8 +6,11 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryError
+from homeassistant.helpers import entity_registry as er
 
-from .const import CONF_VACUUM_ENTITY_ID, DOMAIN
+from .const import CONF_VACUUM_ENTITY_ID, DOMAIN, DREAME_VACUUM_DOMAIN, VACUUM_DOMAIN
+from .runtime import HaDreameRuntimeData
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,16 +23,16 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up a config entry."""
+    runtime_data = _build_runtime_data(hass, entry)
+
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {
-        "status": "configured",
-        CONF_VACUUM_ENTITY_ID: entry.data[CONF_VACUUM_ENTITY_ID],
-    }
+    entry.runtime_data = runtime_data
+    hass.data[DOMAIN][entry.entry_id] = entry
     _LOGGER.info(
         "Loaded %s config entry %s for %s",
         DOMAIN,
         entry.entry_id,
-        entry.data[CONF_VACUUM_ENTITY_ID],
+        runtime_data.vacuum_entity_id,
     )
     return True
 
@@ -37,4 +40,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+    if hasattr(entry, "runtime_data"):
+        del entry.runtime_data
     return True
+
+
+def _build_runtime_data(hass: HomeAssistant, entry: ConfigEntry) -> HaDreameRuntimeData:
+    """Build validated runtime data for a config entry."""
+    vacuum_entity_id = entry.data.get(CONF_VACUUM_ENTITY_ID)
+
+    if not isinstance(vacuum_entity_id, str) or not vacuum_entity_id:
+        raise ConfigEntryError("Config entry is missing a Dreame vacuum entity id")
+
+    domain = vacuum_entity_id.split(".", maxsplit=1)[0]
+    if domain != VACUUM_DOMAIN:
+        raise ConfigEntryError(f"Configured Dreame entity is not a vacuum: {vacuum_entity_id}")
+
+    registry_entry = er.async_get(hass).async_get(vacuum_entity_id)
+    if registry_entry is None:
+        raise ConfigEntryError(f"Configured Dreame vacuum does not exist: {vacuum_entity_id}")
+
+    if registry_entry.platform != DREAME_VACUUM_DOMAIN:
+        raise ConfigEntryError(f"Configured vacuum is not from Dreame: {vacuum_entity_id}")
+
+    return HaDreameRuntimeData(vacuum_entity_id=vacuum_entity_id)
