@@ -1,0 +1,165 @@
+# Dreame Behavior Knowledge
+
+## Purpose
+
+This document captures observed Dreame robot behavior that should shape queue orchestration,
+state reconciliation, and regression tests in `ha_dreame`.
+
+It is public-safe by design. Use generic entity examples and avoid private room names, hostnames,
+paths, tokens, and installation-specific assumptions.
+
+## Documentation Rule
+
+Update this document whenever runtime debugging reveals durable behavior that should influence the
+integration. Each new entry should include:
+
+- confidence: `Observed`, `Inferred`, or `Unknown`
+- the relevant generic signals
+- the controller implication
+- follow-up tests or implementation tasks
+
+Confirmed regressions should become automated tests in the same or next focused slice.
+
+## Confidence Legend
+
+- `Observed`: verified from runtime logs, state history, or repeatable manual testing.
+- `Inferred`: likely from observed behavior or code, but not fully proven.
+- `Unknown`: needs a planned experiment before it can drive controller behavior.
+
+## Canonical Signals
+
+Use these signals first when debugging or designing reconciliation logic. Entity ids below are
+examples only.
+
+| Signal | Meaning | Notes |
+|---|---|---|
+| `vacuum.<robot>` state | High-level robot state such as `cleaning`, `returning`, `paused`, or `error` | Useful but too coarse for dock and wash nuance |
+| `sensor.<robot>_state` | Detailed robot phase such as washing, sweeping, drying, or paused wash states | Better for dock-prep and wash state machines |
+| `sensor.<robot>_task_status` | Task lifecycle such as room cleaning or completed | Can be stale briefly after dispatch |
+| `sensor.<robot>_current_room` | Robot-reported current room | Context signal, not strict proof of intended target room |
+| `sensor.<robot>_error` | Robot error or maintenance code | Some error states are recoverable operator states |
+| `sensor.<robot>_self_wash_base_status` | Dock wash state such as idle, washing, or paused | Important for low-water and dock-prep recovery |
+| `sensor.<robot>_clean_water_tank_status` | Clean-water tank presence | Useful to detect refill completion |
+| `sensor.<robot>_cleaning_progress` | Job progress percentage | Secondary signal; not sufficient by itself |
+| `sensor.<robot>_cleaned_area` | Cleaned area in the current job | May help explain wash decisions |
+| `number.<robot>_self_clean_area` | Configured area between wash cycles | May affect when the robot returns to wash |
+
+## Observed Behavior Rules
+
+### Stale Completion Status After Dispatch
+
+- Confidence: `Observed`
+- Behavior: `task_status=completed` can remain visible immediately after dispatch.
+- Controller implication: do not complete a queue item until a non-completed task status has been
+  seen after dispatch.
+- Test implication: cover stale-completed-at-dispatch as a non-completion state.
+
+### Recoverable Robot Errors
+
+- Confidence: `Observed`
+- Behavior: some robot error states indicate user-action recovery, such as tank or maintenance
+  handling, rather than terminal queue failure.
+- Controller implication: preserve the queue run and avoid consuming retry budget until recovery is
+  impossible or explicitly timed out.
+- Test implication: cover recoverable errors as hold states, not immediate `out_of_sync`.
+
+### Dock Wash Pause Can Hide Behind High-Level Cleaning State
+
+- Confidence: `Observed`
+- Behavior: the high-level vacuum state can still report active cleaning while dock wash is paused.
+- Controller implication: include detailed robot state and self-wash-base status in reconciliation.
+  Resume attempts should wait until blocking refill or tank conditions are cleared.
+- Test implication: cover paused dock wash with high-level `cleaning` as a recoverable hold.
+
+### Current Room Is Noisy During Transitions
+
+- Confidence: `Observed`
+- Behavior: `current_room` can report a transit/base/adjacent room during dispatch, dock prep, or
+  traversal before the robot reaches the intended room.
+- Controller implication: do not treat early room mismatch as proof of wrong-room cleaning without
+  supporting progress and activity context.
+- Test implication: cover early mismatch at zero or unavailable progress as non-fatal.
+
+### Low Positive Progress Can Still Be Transition Noise
+
+- Confidence: `Observed`
+- Behavior: low non-zero progress can appear while `current_room` still reports a different room,
+  then self-correct.
+- Controller implication: use a sustained mismatch and a meaningful progress threshold before
+  issuing stop and redispatch.
+- Test implication: cover low-progress mismatch as wait/reconcile, not immediate retry.
+
+### Late Room Flips Near Completion
+
+- Confidence: `Observed`
+- Behavior: `current_room` can flip near completion even while the robot is finishing the intended
+  work.
+- Controller implication: suppress room-mismatch redispatch near completion to avoid restarting an
+  almost finished room.
+- Test implication: cover high-progress mismatch as non-redispatch behavior.
+
+### Progress Is Job-Level And Secondary
+
+- Confidence: `Observed`
+- Behavior: progress can be job-level rather than room-level, and may jump or reset between phases.
+- Controller implication: never complete a room from progress alone. Use progress only with task
+  status, robot state, error state, and dispatch context.
+- Test implication: progress-only completion should be rejected.
+
+### Post-Run Maintenance States Are Not Queue Failures By Default
+
+- Confidence: `Observed`
+- Behavior: maintenance prompts can appear after a completed run.
+- Controller implication: classify post-run maintenance separately from queue execution failure.
+- Test implication: cover post-completion maintenance as completed-with-maintenance, not failed.
+
+### Runtime Tuning Entities May Become Unavailable During Active Runs
+
+- Confidence: `Observed`
+- Behavior: some tuning/select entities can become unavailable while advanced robot modes are active.
+- Controller implication: command planning should not assume those entities remain available during
+  execution. Apply runtime options before dispatch when possible, and provide fallback behavior.
+- Test implication: cover unavailable tuning entity paths before command dispatch logic is added.
+
+## Known Pitfalls
+
+1. `task_status` alone is insufficient.
+2. `current_room` alone is insufficient.
+3. Progress alone is insufficient.
+4. Dock and wash states can look stuck while still recoverable.
+5. Recoverable operator states should not immediately consume retry budget.
+6. Active command mode must be guarded while old and new controllers run in parallel.
+
+## Experiment Protocol
+
+When running a planned manual test, record:
+
+1. Start and end window.
+2. Intended queue or app action.
+3. Manual intervention such as pause, refill, stop, or resume.
+4. Final outcome.
+5. Generic signal timeline for the canonical signals above.
+6. Controller implication.
+7. Follow-up tests or code tasks.
+
+## Evidence Log Template
+
+```markdown
+### YYYY-MM-DD - <test name>
+- Confidence:
+- Setup:
+- Expected:
+- Observed timeline:
+  - t0:
+  - t1:
+- Outcome:
+- Controller implication:
+- Follow-up tests:
+```
+
+## Open Questions
+
+1. Under what conditions does a multi-room app run return for a mid-job wash?
+2. Can cleaned area and progress predict imminent wash return reliably enough to help queue timing?
+3. Which detailed state sequence always means it is safe to dispatch the next room?
+4. Which error codes are recoverable hold states versus terminal failures?
