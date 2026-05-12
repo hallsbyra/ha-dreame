@@ -1,21 +1,19 @@
 """Tests for the HA Dreame config flow."""
 
+import pytest
+
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import entity_registry as er
 
-from custom_components.ha_dreame.const import DOMAIN, TITLE
+from custom_components.ha_dreame.const import CONF_VACUUM_ENTITY_ID, DOMAIN, DREAME_VACUUM_DOMAIN
 
-CONF_VACUUM_ENTITY_ID = "vacuum_entity_id"
-DREAME_VACUUM_DOMAIN = "dreame_vacuum"
+pytestmark = pytest.mark.usefixtures("mock_dreame_vacuum_dependency")
 
 
 def _schema_keys(schema: object) -> set[str]:
-    return {
-        getattr(key, "schema", key)
-        for key in getattr(schema, "schema", {})
-    }
+    return {getattr(key, "schema", key) for key in getattr(schema, "schema", {})}
 
 
 def _register_vacuum(

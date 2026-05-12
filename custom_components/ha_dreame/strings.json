@@ -3,11 +3,19 @@
     "step": {
       "user": {
         "title": "HA Dreame",
-        "description": "This is an early scaffold for the future standalone Dreame integration. It does not replace the current production setup in ha-config."
+        "description": "Select the existing Dreame vacuum entity to bridge into HA Dreame.",
+        "data": {
+          "vacuum_entity_id": "Dreame vacuum"
+        }
       }
     },
+    "error": {
+      "entity_not_found": "The selected entity does not exist.",
+      "not_vacuum": "The selected entity is not a vacuum.",
+      "not_dreame_vacuum": "The selected vacuum is not provided by the Dreame integration."
+    },
     "abort": {
-      "already_configured": "HA Dreame is already configured."
+      "already_configured": "This Dreame vacuum is already configured."
     }
   }
 }
