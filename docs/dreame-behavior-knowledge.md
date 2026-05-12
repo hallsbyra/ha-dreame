@@ -121,6 +121,27 @@ examples only.
   execution. Apply runtime options before dispatch when possible, and provide fallback behavior.
 - Test implication: cover unavailable tuning entity paths before command dispatch logic is added.
 
+### Cleaning Profile Sentinel Values
+
+- Confidence: `Observed`
+- Behavior: queue overrides have used sentinel values to represent disabled cleaning branches:
+  `water_volume <= 0` means vacuum-only intent, and `suction_level < 0` means mop-only intent.
+- Controller implication: profile derivation must resolve a single cleaning mode before dispatch
+  and must reject profiles where both vacuuming and mopping are disabled.
+- Test implication: cover vacuum-only, mop-only, combined, and invalid disabled-both profiles in
+  the pure profile core before command dispatch logic is added.
+
+### Custom Cleaning Is Not Safe As A Generic Dispatch Step
+
+- Confidence: `Observed`
+- Behavior: forcing a custom-cleaning profile immediately before room dispatch can fail while the
+  robot is active or preparing to run, and it may still not enforce vacuum-only intent reliably.
+- Controller implication: ordinary queue dispatch should prefer resolved mode and runtime property
+  planning over unconditional custom-cleaning calls. Reserve custom-cleaning commands for explicit
+  advanced map overrides once command dispatch is implemented and guarded.
+- Test implication: command-planning tests should distinguish ordinary profile derivation from
+  explicit advanced custom-cleaning requests.
+
 ## Known Pitfalls
 
 1. `task_status` alone is insufficient.
@@ -128,7 +149,8 @@ examples only.
 3. Progress alone is insufficient.
 4. Dock and wash states can look stuck while still recoverable.
 5. Recoverable operator states should not immediately consume retry budget.
-6. Active command mode must be guarded while old and new controllers run in parallel.
+6. Custom-cleaning commands should not be used as an unconditional dispatch prelude.
+7. Active command mode must be guarded while old and new controllers run in parallel.
 
 ## Experiment Protocol
 
