@@ -1,0 +1,45 @@
+name: Dreame behavior observation
+description: Record public-safe observed robot behavior that may affect queue logic.
+title: "Behavior: "
+labels: ["behavior"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Keep this public-safe. Do not include secrets, private hostnames, private paths, exact home context, or local-only entity ids.
+  - type: dropdown
+    id: confidence
+    attributes:
+      label: Confidence
+      options:
+        - Observed
+        - Inferred
+        - Unknown
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup
+      description: Describe the action or scenario using generic names.
+    validations:
+      required: true
+  - type: textarea
+    id: timeline
+    attributes:
+      label: Observed signal timeline
+      description: Use generic signal names such as `vacuum.<robot>` and `sensor.<robot>_task_status`.
+    validations:
+      required: true
+  - type: textarea
+    id: implication
+    attributes:
+      label: Controller implication
+      description: Explain what this means for queue logic, reconciliation, or command safety.
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: Follow-up tests
+      description: List regression tests or experiments this observation should create.
