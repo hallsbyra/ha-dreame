@@ -15,6 +15,7 @@ def test_manifest_matches_domain_and_title() -> None:
     assert manifest["domain"] == DOMAIN
     assert manifest["name"] == TITLE
     assert manifest["config_flow"] is True
+    assert "dreame_vacuum" in manifest["dependencies"]
     assert manifest["version"]
 
 
