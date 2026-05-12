@@ -1,0 +1,43 @@
+name: Implementation slice
+description: Plan a focused TDD slice for the HACS integration.
+title: "Slice: "
+labels: ["slice"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What user-visible or developer-visible behavior should this slice add?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Keep this narrow enough for one red/green/refactor chain.
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: Test-first plan
+      description: List the failing tests or regression coverage to add first.
+    validations:
+      required: true
+  - type: textarea
+    id: public_safety
+    attributes:
+      label: Public-safety check
+      description: Note any private assumptions that must stay out of the public repo.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation
+      description: Which local and CI checks should pass?
+      value: |
+        - [ ] `python -m ruff check .`
+        - [ ] `python -m ruff format --check .`
+        - [ ] `python -m compileall custom_components/ha_dreame`
+        - [ ] `python -m pytest`
