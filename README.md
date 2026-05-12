@@ -31,6 +31,7 @@ Build a standalone Dreame solution that can eventually replace the current mix o
 
 ```bash
 python -m compileall custom_components/ha_dreame
+python -m pytest
 ```
 
 ## GitHub
