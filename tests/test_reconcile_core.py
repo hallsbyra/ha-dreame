@@ -75,6 +75,81 @@ def test_reconcile_completed_after_status_cleared_completes_room() -> None:
     assert decision.event_reasons == ("task_status_completed",)
 
 
+def test_reconcile_completed_after_manual_pause_return_marks_out_of_sync() -> None:
+    """Test manual pause followed by return does not complete the room."""
+    decision = _decision(
+        vacuum_state="returning",
+        task_status="completed",
+        pause_waiting_seen=True,
+        is_returning_state=True,
+        seconds_since_last_command=30,
+    )
+
+    assert decision.complete_current_room is False
+    assert decision.retry_current_room is False
+    assert decision.mark_out_of_sync_reason == "manual_return_to_dock_after_pause"
+    assert decision.event_reasons == ("task_status_completed_after_manual_pause_returning",)
+
+
+def test_reconcile_stale_completed_status_retries_after_interval() -> None:
+    """Test stale completed status falls through to retry recovery."""
+    decision = _decision(
+        vacuum_state="idle",
+        task_status="completed",
+        task_status_cleared_since_dispatch=False,
+        seconds_since_last_command=30,
+        dispatch_retry_interval_sec=20,
+    )
+
+    assert decision.complete_current_room is False
+    assert decision.retry_current_room is True
+    assert decision.mark_out_of_sync_reason is None
+    assert decision.event_reasons == (
+        "task_status_completed_ignored_not_cleared_after_dispatch",
+        "retry_dispatch_requested:1",
+    )
+
+
+def test_reconcile_stale_completed_status_escalates_after_retry_budget() -> None:
+    """Test stale completed status can still exhaust retry budget."""
+    decision = _decision(
+        vacuum_state="idle",
+        task_status="completed",
+        task_status_cleared_since_dispatch=False,
+        seconds_since_last_command=30,
+        dispatch_retry_count=2,
+        dispatch_retry_max=2,
+        expected_room_id=1,
+        observed_room_id=7,
+    )
+
+    assert decision.complete_current_room is False
+    assert decision.retry_current_room is False
+    assert decision.mark_out_of_sync_reason == (
+        "dispatch_retry_exhausted:expected_1:observed_7:vacuum_idle"
+    )
+    assert decision.event_reasons == (
+        "task_status_completed_ignored_not_cleared_after_dispatch",
+        "dispatch_retry_exhausted",
+    )
+
+
+def test_reconcile_stale_completed_status_waits_during_dock_prep() -> None:
+    """Test stale completed status does not retry while dock prep is active."""
+    decision = _decision(
+        vacuum_state="docked",
+        task_status="completed",
+        task_status_cleared_since_dispatch=False,
+        is_dock_prep_state=True,
+        seconds_since_last_command=120,
+    )
+
+    assert decision.complete_current_room is False
+    assert decision.retry_current_room is False
+    assert decision.mark_out_of_sync_reason is None
+    assert decision.event_reasons == ("task_status_completed_ignored_not_cleared_after_dispatch",)
+
+
 def test_reconcile_route_error_marks_blocked() -> None:
     """Test route errors become terminal blocked decisions."""
     decision = _decision(
@@ -89,6 +164,46 @@ def test_reconcile_route_error_marks_blocked() -> None:
     assert decision.retry_current_room is False
     assert decision.mark_out_of_sync_reason == "vacuum_route_error:expected_1:observed_7"
     assert decision.event_reasons == ("vacuum_error_route_blocked",)
+
+
+def test_reconcile_error_state_ignores_completed_status() -> None:
+    """Test completed status does not complete while vacuum is in error."""
+    decision = _decision(
+        vacuum_state="error",
+        task_status="completed",
+        vacuum_error_code="water_tank_dry",
+        task_status_cleared_since_dispatch=True,
+        seconds_since_last_command=120,
+    )
+
+    assert decision.complete_current_room is False
+    assert decision.retry_current_room is False
+    assert decision.mark_out_of_sync_reason is None
+    assert decision.reset_dispatch_retry_count is True
+    assert decision.event_reasons == (
+        "task_status_completed_ignored_due_vacuum_error:water_tank_dry",
+        "vacuum_error_waiting_user_action",
+    )
+
+
+def test_reconcile_error_state_with_stale_completed_waits_for_recovery() -> None:
+    """Test stale completed status in error state waits for recovery."""
+    decision = _decision(
+        vacuum_state="error",
+        task_status="completed",
+        task_status_cleared_since_dispatch=False,
+        seconds_since_last_command=120,
+        dispatch_retry_count=2,
+    )
+
+    assert decision.complete_current_room is False
+    assert decision.retry_current_room is False
+    assert decision.mark_out_of_sync_reason is None
+    assert decision.reset_dispatch_retry_count is True
+    assert decision.event_reasons == (
+        "task_status_completed_ignored_not_cleared_after_dispatch",
+        "vacuum_error_waiting_user_action",
+    )
 
 
 def test_reconcile_recoverable_error_waits_and_resets_retry_count() -> None:
@@ -125,6 +240,37 @@ def test_reconcile_non_fatal_error_reports_non_fatal_reason() -> None:
     assert decision.event_reasons == ("vacuum_error_non_fatal:remove_mop",)
 
 
+def test_reconcile_force_retry_after_error_recovery_ignores_interval_and_budget() -> None:
+    """Test recovery retry bypasses normal interval and exhausted retry budget."""
+    decision = _decision(
+        vacuum_state="docked",
+        task_status="room_cleaning",
+        seconds_since_last_command=1,
+        dispatch_retry_count=2,
+        dispatch_retry_max=2,
+        force_retry_after_recovery=True,
+    )
+
+    assert decision.complete_current_room is False
+    assert decision.retry_current_room is True
+    assert decision.mark_out_of_sync_reason is None
+    assert decision.event_reasons == ("retry_dispatch_after_error_recovery",)
+
+
+def test_reconcile_force_retry_after_error_recovery_noops_when_active() -> None:
+    """Test recovery retry does nothing once robot is already active."""
+    decision = _decision(
+        vacuum_state="cleaning",
+        task_status="room_cleaning",
+        force_retry_after_recovery=True,
+    )
+
+    assert decision.complete_current_room is False
+    assert decision.retry_current_room is False
+    assert decision.mark_out_of_sync_reason is None
+    assert decision.event_reasons == ()
+
+
 def test_reconcile_dock_prep_pause_waits_for_resume_ready() -> None:
     """Test dock-prep pause does not retry while resume prerequisites are missing."""
     decision = _decision(
@@ -158,6 +304,25 @@ def test_reconcile_dock_prep_pause_with_blocking_error_waits_for_user_action() -
     assert decision.resume_current_room is False
     assert decision.reset_dispatch_retry_count is True
     assert decision.event_reasons == ("vacuum_error_waiting_user_action",)
+
+
+def test_reconcile_dock_prep_pause_reports_non_fatal_error() -> None:
+    """Test non-fatal error names are preserved during dock-prep pause."""
+    decision = _decision(
+        vacuum_state="cleaning",
+        task_status="room_cleaning",
+        vacuum_error_code="remove_mop",
+        non_fatal_error_codes={"remove_mop"},
+        is_dock_prep_state=True,
+        is_dock_prep_paused=True,
+        dock_prep_resume_ready=True,
+        seconds_since_last_command=120,
+    )
+
+    assert decision.retry_current_room is False
+    assert decision.resume_current_room is False
+    assert decision.reset_dispatch_retry_count is True
+    assert decision.event_reasons == ("vacuum_error_non_fatal:remove_mop",)
 
 
 def test_reconcile_dock_prep_pause_waits_for_retry_interval() -> None:
@@ -220,6 +385,22 @@ def test_reconcile_paused_robot_with_blocking_error_waits_for_user_action() -> N
     assert decision.mark_out_of_sync_reason is None
     assert decision.reset_dispatch_retry_count is True
     assert decision.event_reasons == ("vacuum_error_waiting_user_action",)
+
+
+def test_reconcile_paused_robot_reports_non_fatal_error() -> None:
+    """Test non-fatal error names are preserved while paused."""
+    decision = _decision(
+        vacuum_state="paused",
+        task_status="room_cleaning_paused",
+        vacuum_error_code="remove_mop",
+        non_fatal_error_codes={"remove_mop"},
+        seconds_since_last_command=120,
+    )
+
+    assert decision.retry_current_room is False
+    assert decision.mark_out_of_sync_reason is None
+    assert decision.reset_dispatch_retry_count is True
+    assert decision.event_reasons == ("vacuum_error_non_fatal:remove_mop",)
 
 
 def test_reconcile_matching_room_names_suppress_room_id_mismatch() -> None:
