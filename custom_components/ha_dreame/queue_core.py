@@ -41,6 +41,19 @@ class QueueState:
     current_item_id: str | None = None
 
 
+@dataclass(frozen=True)
+class ReconcileDecision:
+    """One deterministic reconciliation decision."""
+
+    complete_current_room: bool = False
+    retry_current_room: bool = False
+    resume_current_room: bool = False
+    mark_out_of_sync_reason: str | None = None
+    set_task_status_cleared_since_dispatch: bool = False
+    reset_dispatch_retry_count: bool = False
+    event_reasons: tuple[str, ...] = ()
+
+
 TERMINAL_ITEM_STATUSES = {"completed", "skipped"}
 
 
@@ -207,6 +220,283 @@ def current_item(state: QueueState) -> QueueItem | None:
         if item.item_id == state.current_item_id:
             return item
     return None
+
+
+def evaluate_reconcile_tick(
+    *,
+    vacuum_state: str,
+    task_status: str,
+    awaiting_completion_event: bool,
+    seconds_since_last_command: float | None,
+    task_status_cleared_since_dispatch: bool,
+    dispatch_retry_count: int,
+    expected_room_id: int | None,
+    observed_room_id: int | None,
+    is_dock_prep_state: bool,
+    active_states: set[str],
+    dispatch_retry_interval_sec: int,
+    dispatch_retry_max: int,
+    vacuum_error_code: str = "",
+    is_dock_prep_paused: bool = False,
+    non_fatal_error_codes: set[str] | None = None,
+    expected_room_name: str | None = None,
+    observed_room_name: str | None = None,
+    cleaning_progress: int | None = None,
+    active_room_mismatch_streak: int = 0,
+    active_room_mismatch_required_streak: int = 1,
+    active_room_mismatch_min_progress: int = 1,
+    active_room_mismatch_max_progress: int | None = None,
+    dock_prep_resume_ready: bool = False,
+) -> ReconcileDecision:
+    """Evaluate one robot/queue reconciliation tick."""
+    if not awaiting_completion_event:
+        return ReconcileDecision()
+
+    normalized_vacuum = (vacuum_state or "").lower()
+    normalized_task = (task_status or "").lower()
+    normalized_error = (vacuum_error_code or "").lower()
+    normalized_expected_room_name = (expected_room_name or "").strip().lower()
+    normalized_observed_room_name = (observed_room_name or "").strip().lower()
+    normalized_non_fatal_errors = {
+        str(code).lower() for code in (non_fatal_error_codes or set()) if str(code).strip()
+    }
+
+    event_reasons: list[str] = []
+    set_task_status_cleared_since_dispatch = False
+    effective_task_status_cleared = bool(task_status_cleared_since_dispatch)
+
+    if normalized_task not in {"", "unknown", "unavailable", "completed"}:
+        if not effective_task_status_cleared:
+            set_task_status_cleared_since_dispatch = True
+            effective_task_status_cleared = True
+            event_reasons.append("task_status_cleared_after_dispatch")
+
+    if normalized_vacuum == "error":
+        if normalized_error == "route":
+            return ReconcileDecision(
+                mark_out_of_sync_reason=(
+                    f"vacuum_route_error:expected_{expected_room_id}:observed_{observed_room_id}"
+                ),
+                set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+                event_reasons=tuple(event_reasons + ["vacuum_error_route_blocked"]),
+            )
+        reason = "vacuum_error_waiting_user_action"
+        if normalized_error in normalized_non_fatal_errors:
+            reason = f"vacuum_error_non_fatal:{normalized_error}"
+        return ReconcileDecision(
+            set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+            reset_dispatch_retry_count=True,
+            event_reasons=tuple(event_reasons + [reason]),
+        )
+
+    if normalized_task == "completed":
+        if not effective_task_status_cleared:
+            event_reasons.append("task_status_completed_ignored_not_cleared_after_dispatch")
+        else:
+            return ReconcileDecision(
+                complete_current_room=True,
+                set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+                event_reasons=tuple(event_reasons + ["task_status_completed"]),
+            )
+
+    if is_dock_prep_state and is_dock_prep_paused and not normalized_task.endswith("_paused"):
+        if normalized_error not in {"", "unknown", "unavailable", "no_error"}:
+            return ReconcileDecision(
+                set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+                reset_dispatch_retry_count=True,
+                event_reasons=tuple(event_reasons + ["vacuum_error_waiting_user_action"]),
+            )
+        if (
+            dock_prep_resume_ready
+            and seconds_since_last_command is not None
+            and seconds_since_last_command >= dispatch_retry_interval_sec
+        ):
+            return ReconcileDecision(
+                resume_current_room=True,
+                set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+                event_reasons=tuple(event_reasons + ["dock_prep_paused_resume_requested"]),
+            )
+        wait_reason = (
+            "dock_prep_paused_waiting_retry_interval"
+            if dock_prep_resume_ready
+            else "dock_prep_paused_waiting_resume_ready"
+        )
+        return ReconcileDecision(
+            set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+            event_reasons=tuple(event_reasons + [wait_reason]),
+        )
+
+    is_paused_state = normalized_vacuum == "paused" or normalized_task.endswith("_paused")
+    if is_paused_state:
+        if normalized_error not in {"", "unknown", "unavailable", "no_error"}:
+            return ReconcileDecision(
+                set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+                reset_dispatch_retry_count=True,
+                event_reasons=tuple(event_reasons + ["vacuum_error_waiting_user_action"]),
+            )
+        return ReconcileDecision(
+            set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+            event_reasons=tuple(event_reasons + ["vacuum_paused_waiting"]),
+        )
+
+    normalized_active_states = {state.lower() for state in active_states}
+    desired_in_progress = normalized_vacuum in normalized_active_states or is_dock_prep_state
+    if desired_in_progress:
+        return _evaluate_active_reconcile(
+            event_reasons=event_reasons,
+            set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+            normalized_vacuum=normalized_vacuum,
+            is_dock_prep_state=is_dock_prep_state,
+            expected_room_id=expected_room_id,
+            observed_room_id=observed_room_id,
+            normalized_expected_room_name=normalized_expected_room_name,
+            normalized_observed_room_name=normalized_observed_room_name,
+            cleaning_progress=cleaning_progress,
+            active_room_mismatch_streak=active_room_mismatch_streak,
+            active_room_mismatch_required_streak=active_room_mismatch_required_streak,
+            active_room_mismatch_min_progress=active_room_mismatch_min_progress,
+            active_room_mismatch_max_progress=active_room_mismatch_max_progress,
+            seconds_since_last_command=seconds_since_last_command,
+            dispatch_retry_interval_sec=dispatch_retry_interval_sec,
+            dispatch_retry_count=dispatch_retry_count,
+        )
+
+    if dispatch_retry_count >= dispatch_retry_max:
+        return ReconcileDecision(
+            mark_out_of_sync_reason=(
+                f"dispatch_retry_exhausted:expected_{expected_room_id}:"
+                f"observed_{observed_room_id}:vacuum_{normalized_vacuum}"
+            ),
+            set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+            event_reasons=tuple(event_reasons + ["dispatch_retry_exhausted"]),
+        )
+
+    if (
+        seconds_since_last_command is not None
+        and seconds_since_last_command >= dispatch_retry_interval_sec
+    ):
+        return ReconcileDecision(
+            retry_current_room=True,
+            set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+            event_reasons=tuple(
+                event_reasons + [f"retry_dispatch_requested:{dispatch_retry_count + 1}"]
+            ),
+        )
+
+    return ReconcileDecision(
+        set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+        event_reasons=tuple(event_reasons),
+    )
+
+
+def _evaluate_active_reconcile(
+    *,
+    event_reasons: list[str],
+    set_task_status_cleared_since_dispatch: bool,
+    normalized_vacuum: str,
+    is_dock_prep_state: bool,
+    expected_room_id: int | None,
+    observed_room_id: int | None,
+    normalized_expected_room_name: str,
+    normalized_observed_room_name: str,
+    cleaning_progress: int | None,
+    active_room_mismatch_streak: int,
+    active_room_mismatch_required_streak: int,
+    active_room_mismatch_min_progress: int,
+    active_room_mismatch_max_progress: int | None,
+    seconds_since_last_command: float | None,
+    dispatch_retry_interval_sec: int,
+    dispatch_retry_count: int,
+) -> ReconcileDecision:
+    room_mismatch = False
+    if normalized_vacuum == "cleaning" and not is_dock_prep_state:
+        if normalized_expected_room_name and normalized_observed_room_name:
+            room_mismatch = normalized_expected_room_name != normalized_observed_room_name
+        else:
+            room_mismatch = (
+                expected_room_id is not None
+                and observed_room_id is not None
+                and expected_room_id != observed_room_id
+            )
+
+    if not room_mismatch:
+        return ReconcileDecision(
+            set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+            event_reasons=tuple(event_reasons),
+        )
+
+    if cleaning_progress is not None and cleaning_progress < active_room_mismatch_min_progress:
+        event_reasons.append(
+            (
+                "active_room_mismatch_waiting_progress:"
+                f"expected_{expected_room_id}:observed_{observed_room_id}:"
+                f"progress_{cleaning_progress}:min_{active_room_mismatch_min_progress}"
+            )
+        )
+        return ReconcileDecision(
+            set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+            event_reasons=tuple(event_reasons),
+        )
+
+    if (
+        cleaning_progress is not None
+        and active_room_mismatch_max_progress is not None
+        and cleaning_progress >= active_room_mismatch_max_progress
+    ):
+        event_reasons.append(
+            (
+                "active_room_mismatch_waiting_near_completion:"
+                f"expected_{expected_room_id}:observed_{observed_room_id}:"
+                f"progress_{cleaning_progress}:max_{active_room_mismatch_max_progress}"
+            )
+        )
+        return ReconcileDecision(
+            set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+            event_reasons=tuple(event_reasons),
+        )
+
+    next_mismatch_streak = int(active_room_mismatch_streak) + 1
+    if next_mismatch_streak < int(active_room_mismatch_required_streak):
+        event_reasons.append(
+            (
+                "active_room_mismatch_waiting_streak:"
+                f"expected_{expected_room_id}:observed_{observed_room_id}:"
+                f"streak_{next_mismatch_streak}"
+            )
+        )
+        return ReconcileDecision(
+            set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+            event_reasons=tuple(event_reasons),
+        )
+
+    if (
+        seconds_since_last_command is not None
+        and seconds_since_last_command >= dispatch_retry_interval_sec
+    ):
+        return ReconcileDecision(
+            retry_current_room=True,
+            set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+            event_reasons=tuple(
+                event_reasons
+                + [
+                    (
+                        f"active_room_mismatch_retry:{dispatch_retry_count + 1}:"
+                        f"expected_{expected_room_id}:observed_{observed_room_id}"
+                    )
+                ]
+            ),
+        )
+
+    event_reasons.append(
+        (
+            "active_room_mismatch_waiting_retry_interval:"
+            f"expected_{expected_room_id}:observed_{observed_room_id}"
+        )
+    )
+    return ReconcileDecision(
+        set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+        event_reasons=tuple(event_reasons),
+    )
 
 
 def _finish_current_room(

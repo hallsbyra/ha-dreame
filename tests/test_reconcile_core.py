@@ -57,9 +57,7 @@ def test_reconcile_stale_completed_status_does_not_complete_room() -> None:
     assert decision.complete_current_room is False
     assert decision.retry_current_room is False
     assert decision.mark_out_of_sync_reason is None
-    assert decision.event_reasons == (
-        "task_status_completed_ignored_not_cleared_after_dispatch",
-    )
+    assert decision.event_reasons == ("task_status_completed_ignored_not_cleared_after_dispatch",)
 
 
 def test_reconcile_completed_after_status_cleared_completes_room() -> None:
@@ -144,6 +142,24 @@ def test_reconcile_dock_prep_pause_waits_for_resume_ready() -> None:
     assert decision.event_reasons == ("dock_prep_paused_waiting_resume_ready",)
 
 
+def test_reconcile_dock_prep_pause_with_blocking_error_waits_for_user_action() -> None:
+    """Test dock-prep pause with an error waits instead of resuming."""
+    decision = _decision(
+        vacuum_state="cleaning",
+        task_status="room_cleaning",
+        vacuum_error_code="water_tank_dry",
+        is_dock_prep_state=True,
+        is_dock_prep_paused=True,
+        dock_prep_resume_ready=True,
+        seconds_since_last_command=120,
+    )
+
+    assert decision.retry_current_room is False
+    assert decision.resume_current_room is False
+    assert decision.reset_dispatch_retry_count is True
+    assert decision.event_reasons == ("vacuum_error_waiting_user_action",)
+
+
 def test_reconcile_dock_prep_pause_waits_for_retry_interval() -> None:
     """Test dock-prep resume waits for the retry interval."""
     decision = _decision(
@@ -191,6 +207,21 @@ def test_reconcile_paused_robot_waits_without_retry() -> None:
     assert decision.event_reasons == ("vacuum_paused_waiting",)
 
 
+def test_reconcile_paused_robot_with_blocking_error_waits_for_user_action() -> None:
+    """Test paused robot with an error stays in recoverable hold."""
+    decision = _decision(
+        vacuum_state="paused",
+        task_status="room_cleaning_paused",
+        vacuum_error_code="water_tank_dry",
+        seconds_since_last_command=120,
+    )
+
+    assert decision.retry_current_room is False
+    assert decision.mark_out_of_sync_reason is None
+    assert decision.reset_dispatch_retry_count is True
+    assert decision.event_reasons == ("vacuum_error_waiting_user_action",)
+
+
 def test_reconcile_matching_room_names_suppress_room_id_mismatch() -> None:
     """Test room names are preferred over unstable room ids when available."""
     decision = _decision(
@@ -205,6 +236,23 @@ def test_reconcile_matching_room_names_suppress_room_id_mismatch() -> None:
     assert decision.retry_current_room is False
     assert decision.mark_out_of_sync_reason is None
     assert not any(reason.startswith("active_room_mismatch") for reason in decision.event_reasons)
+
+
+def test_reconcile_room_id_mismatch_retries_when_names_are_missing() -> None:
+    """Test room ids are used when names are unavailable."""
+    decision = _decision(
+        vacuum_state="cleaning",
+        expected_room_id=1,
+        observed_room_id=7,
+        expected_room_name=None,
+        observed_room_name=None,
+        seconds_since_last_command=120,
+    )
+
+    assert decision.retry_current_room is True
+    assert any(
+        reason.startswith("active_room_mismatch_retry:") for reason in decision.event_reasons
+    )
 
 
 def test_reconcile_early_room_mismatch_waits_for_min_progress() -> None:
@@ -301,7 +349,9 @@ def test_reconcile_room_mismatch_retries_after_streak_and_interval() -> None:
 
     assert decision.retry_current_room is True
     assert decision.mark_out_of_sync_reason is None
-    assert any(reason.startswith("active_room_mismatch_retry:2:") for reason in decision.event_reasons)
+    assert any(
+        reason.startswith("active_room_mismatch_retry:2:") for reason in decision.event_reasons
+    )
 
 
 def test_reconcile_non_active_state_retries_after_interval() -> None:
