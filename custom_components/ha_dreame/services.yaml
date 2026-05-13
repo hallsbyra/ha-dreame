@@ -14,6 +14,17 @@ add_queue_room:
       selector:
         text:
 
+remove_queue_item:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        text:
+    item_id:
+      required: true
+      selector:
+        text:
+
 get_runtime_status:
   fields:
     config_entry_id:
