@@ -3,14 +3,17 @@
 import pytest
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ha_dreame.const import (
     CONF_ALLOW_ROBOT_COMMANDS,
+    CONF_CONFIG_ENTRY_ID,
     CONF_VACUUM_ENTITY_ID,
     DOMAIN,
     DREAME_VACUUM_DOMAIN,
+    SERVICE_GET_RUNTIME_STATUS,
     TITLE,
 )
 from custom_components.ha_dreame.runtime import HaDreameRuntimeData
@@ -45,6 +48,20 @@ def _mock_entry(
     return MockConfigEntry(domain=DOMAIN, title=TITLE, data=data, options=options)
 
 
+async def _call_runtime_status_service(
+    hass: HomeAssistant,
+    config_entry_id: str,
+) -> dict[str, object]:
+    """Call the runtime status service and return its response."""
+    return await hass.services.async_call(
+        DOMAIN,
+        SERVICE_GET_RUNTIME_STATUS,
+        {CONF_CONFIG_ENTRY_ID: config_entry_id},
+        blocking=True,
+        return_response=True,
+    )
+
+
 async def test_setup_entry_attaches_runtime_data(hass: HomeAssistant) -> None:
     """Test that a config entry exposes typed runtime data."""
     vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
@@ -58,6 +75,81 @@ async def test_setup_entry_attaches_runtime_data(hass: HomeAssistant) -> None:
     assert entry.runtime_data.vacuum_entity_id == vacuum_entity_id
     assert entry.runtime_data.commands_enabled is False
     assert hass.data[DOMAIN][entry.entry_id] is entry
+
+
+async def test_setup_entry_registers_runtime_status_service(
+    hass: HomeAssistant,
+) -> None:
+    """Test setup registers the read-only runtime status service."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.services.has_service(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
+
+
+async def test_runtime_status_service_returns_entry_runtime_data(
+    hass: HomeAssistant,
+) -> None:
+    """Test the read-only runtime status service response."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert await _call_runtime_status_service(hass, entry.entry_id) == {
+        CONF_ALLOW_ROBOT_COMMANDS: True,
+        CONF_CONFIG_ENTRY_ID: entry.entry_id,
+        CONF_VACUUM_ENTITY_ID: vacuum_entity_id,
+    }
+
+
+async def test_runtime_status_service_reflects_reloaded_command_gate(
+    hass: HomeAssistant,
+) -> None:
+    """Test the service reports command gate changes after options reload."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    await hass.async_block_till_done()
+
+    assert await _call_runtime_status_service(hass, entry.entry_id) == {
+        CONF_ALLOW_ROBOT_COMMANDS: True,
+        CONF_CONFIG_ENTRY_ID: entry.entry_id,
+        CONF_VACUUM_ENTITY_ID: vacuum_entity_id,
+    }
+
+
+async def test_runtime_status_service_rejects_unknown_entry(
+    hass: HomeAssistant,
+) -> None:
+    """Test the service rejects unknown config entry ids."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    with pytest.raises(HomeAssistantError):
+        await _call_runtime_status_service(hass, "missing-entry")
 
 
 async def test_setup_entry_reads_enabled_command_gate_from_options(
@@ -148,6 +240,24 @@ async def test_unload_entry_clears_runtime_data(hass: HomeAssistant) -> None:
 
     assert not hasattr(entry, "runtime_data")
     assert entry.entry_id not in hass.data[DOMAIN]
+
+
+async def test_unload_last_entry_removes_runtime_status_service(
+    hass: HomeAssistant,
+) -> None:
+    """Test unloading the last entry removes the read-only service."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.services.has_service(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert not hass.services.has_service(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
 
 
 @pytest.mark.parametrize(
