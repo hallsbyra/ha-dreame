@@ -9,8 +9,13 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ha_dreame.const import (
     ATTR_COMPLETED_ITEMS,
+    ATTR_ITEM_ID,
+    ATTR_OVERRIDES,
     ATTR_PENDING_ITEMS,
+    ATTR_QUEUE_ITEMS,
+    ATTR_RESULT,
     ATTR_RUNNING_ITEMS,
+    ATTR_STATUS,
     ATTR_TOTAL_ITEMS,
     CONF_ALLOW_ROBOT_COMMANDS,
     CONF_CONFIG_ENTRY_ID,
@@ -183,9 +188,20 @@ async def test_add_queue_room_service_updates_runtime_queue_state(
     assert queue_state.items[0].room_id == 42
     assert queue_state.items[0].room_name == "Room 42"
     assert queue_state.items[0].status == "pending"
+    item = queue_state.items[0]
     assert response == {
         ATTR_COMPLETED_ITEMS: 0,
         ATTR_PENDING_ITEMS: 1,
+        ATTR_QUEUE_ITEMS: [
+            {
+                ATTR_ITEM_ID: item.item_id,
+                ATTR_OVERRIDES: {},
+                ATTR_RESULT: None,
+                ATTR_STATUS: "pending",
+                CONF_ROOM_ID: 42,
+                CONF_ROOM_NAME: "Room 42",
+            }
+        ],
         ATTR_RUNNING_ITEMS: 0,
         ATTR_TOTAL_ITEMS: 1,
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
