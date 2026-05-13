@@ -17,6 +17,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from .const import (
     ATTR_COMPLETED_ITEMS,
     ATTR_PENDING_ITEMS,
+    ATTR_QUEUE_ITEMS,
     ATTR_RUNNING_ITEMS,
     ATTR_TOTAL_ITEMS,
     CONF_ALLOW_ROBOT_COMMANDS,
@@ -31,6 +32,7 @@ from .const import (
     VACUUM_DOMAIN,
 )
 from .queue_core import QueueError, QueueState, add_room, new_state
+from .queue_snapshot import count_queue_items, queue_item_snapshots
 from .runtime import HaDreameRuntimeData
 
 _LOGGER = logging.getLogger(__name__)
@@ -173,18 +175,14 @@ def _queue_status_response(entry: ConfigEntry) -> dict[str, Any]:
     """Return a compact runtime queue status response."""
     queue_state = entry.runtime_data.queue_state
     return {
-        ATTR_COMPLETED_ITEMS: _count_queue_items(queue_state, "completed"),
-        ATTR_PENDING_ITEMS: _count_queue_items(queue_state, "pending"),
-        ATTR_RUNNING_ITEMS: _count_queue_items(queue_state, "running"),
+        ATTR_COMPLETED_ITEMS: count_queue_items(queue_state, "completed"),
+        ATTR_PENDING_ITEMS: count_queue_items(queue_state, "pending"),
+        ATTR_QUEUE_ITEMS: queue_item_snapshots(queue_state),
+        ATTR_RUNNING_ITEMS: count_queue_items(queue_state, "running"),
         ATTR_TOTAL_ITEMS: len(queue_state.items),
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
         "run_state": queue_state.run_state,
     }
-
-
-def _count_queue_items(queue_state: QueueState, status: str) -> int:
-    """Count queue items with one status."""
-    return sum(item.status == status for item in queue_state.items)
 
 
 def _build_runtime_data(hass: HomeAssistant, entry: ConfigEntry) -> HaDreameRuntimeData:

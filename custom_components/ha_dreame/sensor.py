@@ -13,6 +13,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     ATTR_COMPLETED_ITEMS,
     ATTR_PENDING_ITEMS,
+    ATTR_QUEUE_ITEMS,
     ATTR_RUNNING_ITEMS,
     ATTR_TOTAL_ITEMS,
     CONF_VACUUM_ENTITY_ID,
@@ -20,6 +21,7 @@ from .const import (
     TITLE,
 )
 from .queue_core import QueueState
+from .queue_snapshot import count_queue_items, queue_item_snapshots
 from .runtime import HaDreameRuntimeData
 
 
@@ -56,18 +58,14 @@ class HaDreameQueueStatusSensor(CoordinatorEntity, SensorEntity):
         queue_state = self._queue_state
         return {
             CONF_VACUUM_ENTITY_ID: self._runtime_data.vacuum_entity_id,
-            ATTR_PENDING_ITEMS: _count_items(queue_state, "pending"),
-            ATTR_RUNNING_ITEMS: _count_items(queue_state, "running"),
-            ATTR_COMPLETED_ITEMS: _count_items(queue_state, "completed"),
+            ATTR_PENDING_ITEMS: count_queue_items(queue_state, "pending"),
+            ATTR_RUNNING_ITEMS: count_queue_items(queue_state, "running"),
+            ATTR_COMPLETED_ITEMS: count_queue_items(queue_state, "completed"),
             ATTR_TOTAL_ITEMS: len(queue_state.items),
+            ATTR_QUEUE_ITEMS: queue_item_snapshots(queue_state),
         }
 
     @property
     def _queue_state(self) -> QueueState:
         """Return the queue state from runtime data."""
         return self._runtime_data.queue_state
-
-
-def _count_items(queue_state: QueueState, status: str) -> int:
-    """Count queue items with one status."""
-    return sum(item.status == status for item in queue_state.items)
