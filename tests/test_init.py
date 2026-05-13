@@ -77,6 +77,59 @@ async def test_setup_entry_reads_enabled_command_gate_from_options(
     assert entry.runtime_data.commands_enabled is True
 
 
+async def test_options_update_reloads_runtime_data_when_enabling_commands(
+    hass: HomeAssistant,
+) -> None:
+    """Test enabling commands through options refreshes runtime data."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.runtime_data.commands_enabled is False
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] == "create_entry"
+    assert entry.runtime_data.commands_enabled is True
+    assert hass.data[DOMAIN][entry.entry_id] is entry
+
+
+async def test_options_update_reloads_runtime_data_when_disabling_commands(
+    hass: HomeAssistant,
+) -> None:
+    """Test disabling commands through options refreshes runtime data."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.runtime_data.commands_enabled is True
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_ALLOW_ROBOT_COMMANDS: False},
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] == "create_entry"
+    assert entry.runtime_data.commands_enabled is False
+    assert hass.data[DOMAIN][entry.entry_id] is entry
+
+
 async def test_unload_entry_clears_runtime_data(hass: HomeAssistant) -> None:
     """Test that unloading clears runtime state."""
     vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
