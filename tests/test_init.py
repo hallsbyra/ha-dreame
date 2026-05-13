@@ -7,6 +7,7 @@ from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ha_dreame.const import (
+    CONF_ALLOW_ROBOT_COMMANDS,
     CONF_VACUUM_ENTITY_ID,
     DOMAIN,
     DREAME_VACUUM_DOMAIN,
@@ -36,8 +37,12 @@ def _register_entity(
     return entry.entity_id
 
 
-def _mock_entry(data: dict[str, str]) -> MockConfigEntry:
-    return MockConfigEntry(domain=DOMAIN, title=TITLE, data=data)
+def _mock_entry(
+    data: dict[str, str],
+    *,
+    options: dict[str, bool] | None = None,
+) -> MockConfigEntry:
+    return MockConfigEntry(domain=DOMAIN, title=TITLE, data=data, options=options)
 
 
 async def test_setup_entry_attaches_runtime_data(hass: HomeAssistant) -> None:
@@ -51,7 +56,25 @@ async def test_setup_entry_attaches_runtime_data(hass: HomeAssistant) -> None:
 
     assert isinstance(entry.runtime_data, HaDreameRuntimeData)
     assert entry.runtime_data.vacuum_entity_id == vacuum_entity_id
+    assert entry.runtime_data.commands_enabled is False
     assert hass.data[DOMAIN][entry.entry_id] is entry
+
+
+async def test_setup_entry_reads_enabled_command_gate_from_options(
+    hass: HomeAssistant,
+) -> None:
+    """Test that runtime data reflects explicit command enablement."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.runtime_data.commands_enabled is True
 
 
 async def test_unload_entry_clears_runtime_data(hass: HomeAssistant) -> None:
