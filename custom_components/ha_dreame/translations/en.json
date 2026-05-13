@@ -17,5 +17,16 @@
     "abort": {
       "already_configured": "This Dreame vacuum is already configured."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "HA Dreame options",
+        "description": "Robot command dispatch is disabled by default while testing HA Dreame beside another controller.",
+        "data": {
+          "allow_robot_commands": "Allow HA Dreame to send robot commands"
+        }
+      }
+    }
   }
 }
