@@ -14,6 +14,13 @@ add_queue_room:
       selector:
         text:
 
+clear_pending_queue:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        text:
+
 remove_queue_item:
   fields:
     config_entry_id:
