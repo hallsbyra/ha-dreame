@@ -12,6 +12,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import ConfigEntryError, HomeAssistantError
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
     CONF_ALLOW_ROBOT_COMMANDS,
@@ -22,7 +23,7 @@ from .const import (
     SERVICE_GET_RUNTIME_STATUS,
     VACUUM_DOMAIN,
 )
-from .queue_core import new_state
+from .queue_core import QueueState, new_state
 from .runtime import HaDreameRuntimeData
 
 _LOGGER = logging.getLogger(__name__)
@@ -126,6 +127,20 @@ def _build_runtime_data(hass: HomeAssistant, entry: ConfigEntry) -> HaDreameRunt
 
     return HaDreameRuntimeData(
         commands_enabled=entry.options.get(CONF_ALLOW_ROBOT_COMMANDS) is True,
-        queue_state=new_state(),
+        queue_coordinator=_build_queue_coordinator(hass, entry),
         vacuum_entity_id=vacuum_entity_id,
     )
+
+
+def _build_queue_coordinator(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+) -> DataUpdateCoordinator[QueueState]:
+    """Build the runtime queue state coordinator for a config entry."""
+    coordinator = DataUpdateCoordinator[QueueState](
+        hass,
+        _LOGGER,
+        name=f"{DOMAIN}_{entry.entry_id}_queue",
+    )
+    coordinator.async_set_updated_data(new_state())
+    return coordinator
