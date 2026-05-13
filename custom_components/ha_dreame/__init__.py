@@ -15,19 +15,33 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
+    ATTR_COMPLETED_ITEMS,
+    ATTR_PENDING_ITEMS,
+    ATTR_RUNNING_ITEMS,
+    ATTR_TOTAL_ITEMS,
     CONF_ALLOW_ROBOT_COMMANDS,
     CONF_CONFIG_ENTRY_ID,
+    CONF_ROOM_ID,
+    CONF_ROOM_NAME,
     CONF_VACUUM_ENTITY_ID,
     DOMAIN,
     DREAME_VACUUM_DOMAIN,
+    SERVICE_ADD_QUEUE_ROOM,
     SERVICE_GET_RUNTIME_STATUS,
     VACUUM_DOMAIN,
 )
-from .queue_core import QueueState, new_state
+from .queue_core import QueueError, QueueState, add_room, new_state
 from .runtime import HaDreameRuntimeData
 
 _LOGGER = logging.getLogger(__name__)
 
+ADD_QUEUE_ROOM_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_CONFIG_ENTRY_ID): str,
+        vol.Required(CONF_ROOM_ID): vol.Coerce(int),
+        vol.Required(CONF_ROOM_NAME): vol.All(str, vol.Length(min=1)),
+    }
+)
 GET_RUNTIME_STATUS_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 
@@ -67,6 +81,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if hasattr(entry, "runtime_data"):
         del entry.runtime_data
     if not hass.data.get(DOMAIN):
+        hass.services.async_remove(DOMAIN, SERVICE_ADD_QUEUE_ROOM)
         hass.services.async_remove(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
     return True
 
@@ -78,26 +93,73 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 def _async_register_services(hass: HomeAssistant) -> None:
     """Register HA Dreame services."""
-    if hass.services.has_service(DOMAIN, SERVICE_GET_RUNTIME_STATUS):
-        return
+    if not hass.services.has_service(DOMAIN, SERVICE_ADD_QUEUE_ROOM):
 
-    async def _async_get_runtime_status(call: ServiceCall) -> ServiceResponse:
-        return _runtime_status_response(hass, call.data[CONF_CONFIG_ENTRY_ID])
+        async def _async_add_queue_room(call: ServiceCall) -> ServiceResponse:
+            return _add_queue_room_response(
+                hass,
+                call.data[CONF_CONFIG_ENTRY_ID],
+                room_id=call.data[CONF_ROOM_ID],
+                room_name=call.data[CONF_ROOM_NAME],
+            )
 
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_GET_RUNTIME_STATUS,
-        _async_get_runtime_status,
-        schema=GET_RUNTIME_STATUS_SCHEMA,
-        supports_response=SupportsResponse.ONLY,
-    )
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_ADD_QUEUE_ROOM,
+            _async_add_queue_room,
+            schema=ADD_QUEUE_ROOM_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+
+    if not hass.services.has_service(DOMAIN, SERVICE_GET_RUNTIME_STATUS):
+
+        async def _async_get_runtime_status(call: ServiceCall) -> ServiceResponse:
+            return _runtime_status_response(hass, call.data[CONF_CONFIG_ENTRY_ID])
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_GET_RUNTIME_STATUS,
+            _async_get_runtime_status,
+            schema=GET_RUNTIME_STATUS_SCHEMA,
+            supports_response=SupportsResponse.ONLY,
+        )
+
+
+def _runtime_entry(hass: HomeAssistant, config_entry_id: str) -> ConfigEntry:
+    """Return a loaded HA Dreame entry for service handling."""
+    entry = hass.data.get(DOMAIN, {}).get(config_entry_id)
+    if entry is None or not hasattr(entry, "runtime_data"):
+        raise HomeAssistantError(f"HA Dreame entry is not loaded: {config_entry_id}")
+    return entry
+
+
+def _add_queue_room_response(
+    hass: HomeAssistant,
+    config_entry_id: str,
+    *,
+    room_id: int,
+    room_name: str,
+) -> dict[str, Any]:
+    """Append one room to the runtime queue and return a queue snapshot."""
+    entry = _runtime_entry(hass, config_entry_id)
+    runtime_data = entry.runtime_data
+
+    try:
+        queue_state = add_room(
+            runtime_data.queue_state,
+            room_id=room_id,
+            room_name=room_name,
+        )
+    except QueueError as err:
+        raise HomeAssistantError(str(err)) from err
+
+    runtime_data.set_queue_state(queue_state)
+    return _queue_status_response(entry)
 
 
 def _runtime_status_response(hass: HomeAssistant, config_entry_id: str) -> dict[str, Any]:
     """Return read-only runtime status for one HA Dreame entry."""
-    entry = hass.data.get(DOMAIN, {}).get(config_entry_id)
-    if entry is None or not hasattr(entry, "runtime_data"):
-        raise HomeAssistantError(f"HA Dreame entry is not loaded: {config_entry_id}")
+    entry = _runtime_entry(hass, config_entry_id)
 
     runtime_data = entry.runtime_data
     return {
@@ -105,6 +167,24 @@ def _runtime_status_response(hass: HomeAssistant, config_entry_id: str) -> dict[
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
         CONF_VACUUM_ENTITY_ID: runtime_data.vacuum_entity_id,
     }
+
+
+def _queue_status_response(entry: ConfigEntry) -> dict[str, Any]:
+    """Return a compact runtime queue status response."""
+    queue_state = entry.runtime_data.queue_state
+    return {
+        ATTR_COMPLETED_ITEMS: _count_queue_items(queue_state, "completed"),
+        ATTR_PENDING_ITEMS: _count_queue_items(queue_state, "pending"),
+        ATTR_RUNNING_ITEMS: _count_queue_items(queue_state, "running"),
+        ATTR_TOTAL_ITEMS: len(queue_state.items),
+        CONF_CONFIG_ENTRY_ID: entry.entry_id,
+        "run_state": queue_state.run_state,
+    }
+
+
+def _count_queue_items(queue_state: QueueState, status: str) -> int:
+    """Count queue items with one status."""
+    return sum(item.status == status for item in queue_state.items)
 
 
 def _build_runtime_data(hass: HomeAssistant, entry: ConfigEntry) -> HaDreameRuntimeData:
