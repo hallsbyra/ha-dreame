@@ -26,6 +26,7 @@ from custom_components.ha_dreame.const import (
     DOMAIN,
     DREAME_VACUUM_DOMAIN,
     SERVICE_ADD_QUEUE_ROOM,
+    SERVICE_CLEAR_PENDING_QUEUE,
     SERVICE_MOVE_QUEUE_ITEM,
     SERVICE_REMOVE_QUEUE_ITEM,
     SENSOR_QUEUE_STATUS,
@@ -294,6 +295,51 @@ async def test_queue_status_sensor_updates_when_move_queue_item_service_runs(
         "Room 9",
         "Room 7",
     ]
+
+
+async def test_queue_status_sensor_updates_when_clear_pending_queue_service_runs(
+    hass: HomeAssistant,
+) -> None:
+    """Test the queue status sensor reacts to the clear pending queue service."""
+    vacuum_entity_id = _register_vacuum(hass)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=TITLE,
+        data={CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    for room_id, room_name in ((7, "Room 7"), (8, "Room 8")):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_ADD_QUEUE_ROOM,
+            {
+                CONF_CONFIG_ENTRY_ID: entry.entry_id,
+                CONF_ROOM_ID: room_id,
+                CONF_ROOM_NAME: room_name,
+            },
+            blocking=True,
+        )
+
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_CLEAR_PENDING_QUEUE,
+        {CONF_CONFIG_ENTRY_ID: entry.entry_id},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.ha_dreame_queue_status")
+
+    assert state.state == "idle"
+    assert state.attributes[ATTR_PENDING_ITEMS] == 0
+    assert state.attributes[ATTR_RUNNING_ITEMS] == 0
+    assert state.attributes[ATTR_COMPLETED_ITEMS] == 0
+    assert state.attributes[ATTR_TOTAL_ITEMS] == 0
+    assert state.attributes[ATTR_QUEUE_ITEMS] == []
 
 
 async def test_unload_entry_marks_queue_status_sensor_unavailable(
