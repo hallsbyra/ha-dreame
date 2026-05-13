@@ -30,12 +30,21 @@ from .const import (
     DOMAIN,
     DREAME_VACUUM_DOMAIN,
     SERVICE_ADD_QUEUE_ROOM,
+    SERVICE_CLEAR_PENDING_QUEUE,
     SERVICE_GET_RUNTIME_STATUS,
     SERVICE_MOVE_QUEUE_ITEM,
     SERVICE_REMOVE_QUEUE_ITEM,
     VACUUM_DOMAIN,
 )
-from .queue_core import QueueError, QueueState, add_room, move_item, new_state, remove_item
+from .queue_core import (
+    QueueError,
+    QueueState,
+    add_room,
+    clear_pending,
+    move_item,
+    new_state,
+    remove_item,
+)
 from .queue_snapshot import count_queue_items, queue_item_snapshots
 from .runtime import HaDreameRuntimeData
 
@@ -48,6 +57,7 @@ ADD_QUEUE_ROOM_SCHEMA = vol.Schema(
         vol.Required(CONF_ROOM_NAME): vol.All(str, vol.Length(min=1)),
     }
 )
+CLEAR_PENDING_QUEUE_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
 GET_RUNTIME_STATUS_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
 MOVE_QUEUE_ITEM_SCHEMA = vol.Schema(
     {
@@ -101,6 +111,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         del entry.runtime_data
     if not hass.data.get(DOMAIN):
         hass.services.async_remove(DOMAIN, SERVICE_ADD_QUEUE_ROOM)
+        hass.services.async_remove(DOMAIN, SERVICE_CLEAR_PENDING_QUEUE)
         hass.services.async_remove(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
         hass.services.async_remove(DOMAIN, SERVICE_MOVE_QUEUE_ITEM)
         hass.services.async_remove(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM)
@@ -129,6 +140,22 @@ def _async_register_services(hass: HomeAssistant) -> None:
             SERVICE_ADD_QUEUE_ROOM,
             _async_add_queue_room,
             schema=ADD_QUEUE_ROOM_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+
+    if not hass.services.has_service(DOMAIN, SERVICE_CLEAR_PENDING_QUEUE):
+
+        async def _async_clear_pending_queue(call: ServiceCall) -> ServiceResponse:
+            return _clear_pending_queue_response(
+                hass,
+                call.data[CONF_CONFIG_ENTRY_ID],
+            )
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_CLEAR_PENDING_QUEUE,
+            _async_clear_pending_queue,
+            schema=CLEAR_PENDING_QUEUE_SCHEMA,
             supports_response=SupportsResponse.OPTIONAL,
         )
 
@@ -206,6 +233,23 @@ def _add_queue_room_response(
             room_id=room_id,
             room_name=room_name,
         )
+    except QueueError as err:
+        raise HomeAssistantError(str(err)) from err
+
+    runtime_data.set_queue_state(queue_state)
+    return _queue_status_response(entry)
+
+
+def _clear_pending_queue_response(
+    hass: HomeAssistant,
+    config_entry_id: str,
+) -> dict[str, Any]:
+    """Clear pending queue items and return a queue snapshot."""
+    entry = _runtime_entry(hass, config_entry_id)
+    runtime_data = entry.runtime_data
+
+    try:
+        queue_state = clear_pending(runtime_data.queue_state)
     except QueueError as err:
         raise HomeAssistantError(str(err)) from err
 
