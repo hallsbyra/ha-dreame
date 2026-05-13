@@ -21,6 +21,7 @@ from custom_components.ha_dreame.const import (
     CONF_CONFIG_ENTRY_ID,
     CONF_ITEM_ID,
     CONF_NEW_POSITION,
+    CONF_OVERRIDES,
     CONF_ROOM_ID,
     CONF_ROOM_NAME,
     CONF_VACUUM_ENTITY_ID,
@@ -31,9 +32,10 @@ from custom_components.ha_dreame.const import (
     SERVICE_GET_RUNTIME_STATUS,
     SERVICE_MOVE_QUEUE_ITEM,
     SERVICE_REMOVE_QUEUE_ITEM,
+    SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES,
     TITLE,
 )
-from custom_components.ha_dreame.queue_core import QueueState, add_room
+from custom_components.ha_dreame.queue_core import QueueState, add_room, start_run
 from custom_components.ha_dreame.runtime import HaDreameRuntimeData
 
 pytestmark = pytest.mark.usefixtures("mock_dreame_vacuum_dependency")
@@ -155,6 +157,27 @@ async def _call_clear_pending_queue_service(
     )
 
 
+async def _call_update_queue_item_overrides_service(
+    hass: HomeAssistant,
+    config_entry_id: str,
+    *,
+    item_id: str = "item-1",
+    overrides: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Call the update queue item overrides service and return its response."""
+    return await hass.services.async_call(
+        DOMAIN,
+        SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES,
+        {
+            CONF_CONFIG_ENTRY_ID: config_entry_id,
+            CONF_ITEM_ID: item_id,
+            CONF_OVERRIDES: overrides or {},
+        },
+        blocking=True,
+        return_response=True,
+    )
+
+
 async def test_setup_entry_attaches_runtime_data(hass: HomeAssistant) -> None:
     """Test that a config entry exposes typed runtime data."""
     vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
@@ -263,6 +286,20 @@ async def test_setup_entry_registers_clear_pending_queue_service(
     await hass.async_block_till_done()
 
     assert hass.services.has_service(DOMAIN, SERVICE_CLEAR_PENDING_QUEUE)
+
+
+async def test_setup_entry_registers_update_queue_item_overrides_service(
+    hass: HomeAssistant,
+) -> None:
+    """Test setup registers the internal queue item overrides service."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.services.has_service(DOMAIN, SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES)
 
 
 async def test_add_queue_room_service_updates_runtime_queue_state(
@@ -540,6 +577,95 @@ async def test_clear_pending_queue_service_rejects_unknown_entry(
         await _call_clear_pending_queue_service(hass, "missing-entry")
 
 
+async def test_update_queue_item_overrides_service_updates_runtime_queue_state(
+    hass: HomeAssistant,
+) -> None:
+    """Test the update overrides service replaces pending item overrides."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    add_response = await _call_add_queue_room_service(
+        hass,
+        entry.entry_id,
+        room_id=7,
+        room_name="Room 7",
+    )
+    item_id = add_response[ATTR_QUEUE_ITEMS][0][ATTR_ITEM_ID]
+    overrides = {
+        "cleaning_mode": "mop",
+        "repeats": 2,
+        "suction_level": "turbo",
+        "water_level": "high",
+    }
+
+    response = await _call_update_queue_item_overrides_service(
+        hass,
+        entry.entry_id,
+        item_id=item_id,
+        overrides=overrides,
+    )
+
+    queue_state = entry.runtime_data.queue_state
+    assert queue_state.items[0].overrides == overrides
+    assert response == {
+        ATTR_COMPLETED_ITEMS: 0,
+        ATTR_PENDING_ITEMS: 1,
+        ATTR_QUEUE_ITEMS: [
+            {
+                ATTR_ITEM_ID: item_id,
+                ATTR_OVERRIDES: overrides,
+                ATTR_RESULT: None,
+                ATTR_STATUS: "pending",
+                CONF_ROOM_ID: 7,
+                CONF_ROOM_NAME: "Room 7",
+            }
+        ],
+        ATTR_RUNNING_ITEMS: 0,
+        ATTR_TOTAL_ITEMS: 1,
+        CONF_CONFIG_ENTRY_ID: entry.entry_id,
+        "run_state": "idle",
+    }
+
+
+async def test_update_queue_item_overrides_service_rejects_invalid_requests(
+    hass: HomeAssistant,
+) -> None:
+    """Test the update overrides service rejects invalid requests."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    add_response = await _call_add_queue_room_service(hass, entry.entry_id)
+    item_id = add_response[ATTR_QUEUE_ITEMS][0][ATTR_ITEM_ID]
+
+    with pytest.raises(HomeAssistantError):
+        await _call_update_queue_item_overrides_service(hass, "missing-entry")
+
+    with pytest.raises(HomeAssistantError):
+        await _call_update_queue_item_overrides_service(
+            hass,
+            entry.entry_id,
+            item_id="missing-item",
+        )
+
+    entry.runtime_data.set_queue_state(start_run(entry.runtime_data.queue_state))
+
+    with pytest.raises(HomeAssistantError):
+        await _call_update_queue_item_overrides_service(
+            hass,
+            entry.entry_id,
+            item_id=item_id,
+            overrides={"repeats": 2},
+        )
+
+
 async def test_runtime_status_service_returns_entry_runtime_data(
     hass: HomeAssistant,
 ) -> None:
@@ -705,6 +831,7 @@ async def test_unload_last_entry_removes_runtime_status_service(
     assert hass.services.has_service(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
     assert hass.services.has_service(DOMAIN, SERVICE_MOVE_QUEUE_ITEM)
     assert hass.services.has_service(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM)
+    assert hass.services.has_service(DOMAIN, SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES)
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
@@ -714,6 +841,7 @@ async def test_unload_last_entry_removes_runtime_status_service(
     assert not hass.services.has_service(DOMAIN, SERVICE_CLEAR_PENDING_QUEUE)
     assert not hass.services.has_service(DOMAIN, SERVICE_MOVE_QUEUE_ITEM)
     assert not hass.services.has_service(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM)
+    assert not hass.services.has_service(DOMAIN, SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES)
 
 
 @pytest.mark.parametrize(

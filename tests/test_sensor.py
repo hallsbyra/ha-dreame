@@ -20,6 +20,7 @@ from custom_components.ha_dreame.const import (
     CONF_CONFIG_ENTRY_ID,
     CONF_ITEM_ID,
     CONF_NEW_POSITION,
+    CONF_OVERRIDES,
     CONF_ROOM_ID,
     CONF_ROOM_NAME,
     CONF_VACUUM_ENTITY_ID,
@@ -29,6 +30,7 @@ from custom_components.ha_dreame.const import (
     SERVICE_CLEAR_PENDING_QUEUE,
     SERVICE_MOVE_QUEUE_ITEM,
     SERVICE_REMOVE_QUEUE_ITEM,
+    SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES,
     SENSOR_QUEUE_STATUS,
     TITLE,
 )
@@ -340,6 +342,61 @@ async def test_queue_status_sensor_updates_when_clear_pending_queue_service_runs
     assert state.attributes[ATTR_COMPLETED_ITEMS] == 0
     assert state.attributes[ATTR_TOTAL_ITEMS] == 0
     assert state.attributes[ATTR_QUEUE_ITEMS] == []
+
+
+async def test_queue_status_sensor_updates_when_update_overrides_service_runs(
+    hass: HomeAssistant,
+) -> None:
+    """Test the queue status sensor reacts to queue item override updates."""
+    vacuum_entity_id = _register_vacuum(hass)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=TITLE,
+        data={CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_ADD_QUEUE_ROOM,
+        {
+            CONF_CONFIG_ENTRY_ID: entry.entry_id,
+            CONF_ROOM_ID: 7,
+            CONF_ROOM_NAME: "Room 7",
+        },
+        blocking=True,
+    )
+    item_id = entry.runtime_data.queue_state.items[0].item_id
+    overrides = {
+        "cleaning_mode": "vacuum",
+        "repeats": 2,
+        "suction_level": "turbo",
+    }
+
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES,
+        {
+            CONF_CONFIG_ENTRY_ID: entry.entry_id,
+            CONF_ITEM_ID: item_id,
+            CONF_OVERRIDES: overrides,
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.ha_dreame_queue_status")
+
+    assert state.state == "idle"
+    assert state.attributes[ATTR_PENDING_ITEMS] == 1
+    assert state.attributes[ATTR_RUNNING_ITEMS] == 0
+    assert state.attributes[ATTR_COMPLETED_ITEMS] == 0
+    assert state.attributes[ATTR_TOTAL_ITEMS] == 1
+    assert state.attributes[ATTR_QUEUE_ITEMS][0][ATTR_ITEM_ID] == item_id
+    assert state.attributes[ATTR_QUEUE_ITEMS][0][ATTR_OVERRIDES] == overrides
 
 
 async def test_unload_entry_marks_queue_status_sensor_unavailable(
