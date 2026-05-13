@@ -1,0 +1,6 @@
+get_runtime_status:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        text:
