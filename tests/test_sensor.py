@@ -9,8 +9,13 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ha_dreame.const import (
     ATTR_COMPLETED_ITEMS,
+    ATTR_ITEM_ID,
+    ATTR_OVERRIDES,
     ATTR_PENDING_ITEMS,
+    ATTR_QUEUE_ITEMS,
+    ATTR_RESULT,
     ATTR_RUNNING_ITEMS,
+    ATTR_STATUS,
     ATTR_TOTAL_ITEMS,
     CONF_CONFIG_ENTRY_ID,
     CONF_ROOM_ID,
@@ -65,6 +70,7 @@ async def test_queue_status_sensor_exposes_initial_queue_state(
     assert state.attributes[ATTR_RUNNING_ITEMS] == 0
     assert state.attributes[ATTR_COMPLETED_ITEMS] == 0
     assert state.attributes[ATTR_TOTAL_ITEMS] == 0
+    assert state.attributes[ATTR_QUEUE_ITEMS] == []
 
 
 async def test_queue_status_sensor_has_stable_unique_id(
@@ -121,6 +127,16 @@ async def test_queue_status_sensor_updates_when_runtime_queue_state_changes(
     assert state.attributes[ATTR_RUNNING_ITEMS] == 1
     assert state.attributes[ATTR_COMPLETED_ITEMS] == 0
     assert state.attributes[ATTR_TOTAL_ITEMS] == 1
+    assert state.attributes[ATTR_QUEUE_ITEMS] == [
+        {
+            ATTR_ITEM_ID: running_state.items[0].item_id,
+            ATTR_OVERRIDES: {},
+            ATTR_RESULT: None,
+            ATTR_STATUS: "running",
+            CONF_ROOM_ID: 1,
+            CONF_ROOM_NAME: "Room 1",
+        }
+    ]
 
 
 async def test_queue_status_sensor_updates_when_add_queue_room_service_runs(
@@ -157,6 +173,10 @@ async def test_queue_status_sensor_updates_when_add_queue_room_service_runs(
     assert state.attributes[ATTR_RUNNING_ITEMS] == 0
     assert state.attributes[ATTR_COMPLETED_ITEMS] == 0
     assert state.attributes[ATTR_TOTAL_ITEMS] == 1
+    assert state.attributes[ATTR_QUEUE_ITEMS][0][CONF_ROOM_ID] == 7
+    assert state.attributes[ATTR_QUEUE_ITEMS][0][CONF_ROOM_NAME] == "Room 7"
+    assert state.attributes[ATTR_QUEUE_ITEMS][0][ATTR_STATUS] == "pending"
+    assert state.attributes[ATTR_QUEUE_ITEMS][0][ATTR_ITEM_ID]
 
 
 async def test_unload_entry_marks_queue_status_sensor_unavailable(
