@@ -8,11 +8,18 @@ from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ha_dreame.const import (
+    ATTR_COMPLETED_ITEMS,
+    ATTR_PENDING_ITEMS,
+    ATTR_RUNNING_ITEMS,
+    ATTR_TOTAL_ITEMS,
     CONF_ALLOW_ROBOT_COMMANDS,
     CONF_CONFIG_ENTRY_ID,
+    CONF_ROOM_ID,
+    CONF_ROOM_NAME,
     CONF_VACUUM_ENTITY_ID,
     DOMAIN,
     DREAME_VACUUM_DOMAIN,
+    SERVICE_ADD_QUEUE_ROOM,
     SERVICE_GET_RUNTIME_STATUS,
     TITLE,
 )
@@ -58,6 +65,27 @@ async def _call_runtime_status_service(
         DOMAIN,
         SERVICE_GET_RUNTIME_STATUS,
         {CONF_CONFIG_ENTRY_ID: config_entry_id},
+        blocking=True,
+        return_response=True,
+    )
+
+
+async def _call_add_queue_room_service(
+    hass: HomeAssistant,
+    config_entry_id: str,
+    *,
+    room_id: int = 1,
+    room_name: str = "Room 1",
+) -> dict[str, object]:
+    """Call the add queue room service and return its response."""
+    return await hass.services.async_call(
+        DOMAIN,
+        SERVICE_ADD_QUEUE_ROOM,
+        {
+            CONF_CONFIG_ENTRY_ID: config_entry_id,
+            CONF_ROOM_ID: room_id,
+            CONF_ROOM_NAME: room_name,
+        },
         blocking=True,
         return_response=True,
     )
@@ -115,6 +143,69 @@ async def test_setup_entry_registers_runtime_status_service(
     await hass.async_block_till_done()
 
     assert hass.services.has_service(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
+
+
+async def test_setup_entry_registers_add_queue_room_service(
+    hass: HomeAssistant,
+) -> None:
+    """Test setup registers the internal add queue room service."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.services.has_service(DOMAIN, SERVICE_ADD_QUEUE_ROOM)
+
+
+async def test_add_queue_room_service_updates_runtime_queue_state(
+    hass: HomeAssistant,
+) -> None:
+    """Test the add queue room service appends a pending queue item."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    response = await _call_add_queue_room_service(
+        hass,
+        entry.entry_id,
+        room_id=42,
+        room_name="Room 42",
+    )
+
+    queue_state = entry.runtime_data.queue_state
+    assert queue_state.run_state == "idle"
+    assert len(queue_state.items) == 1
+    assert queue_state.items[0].room_id == 42
+    assert queue_state.items[0].room_name == "Room 42"
+    assert queue_state.items[0].status == "pending"
+    assert response == {
+        ATTR_COMPLETED_ITEMS: 0,
+        ATTR_PENDING_ITEMS: 1,
+        ATTR_RUNNING_ITEMS: 0,
+        ATTR_TOTAL_ITEMS: 1,
+        CONF_CONFIG_ENTRY_ID: entry.entry_id,
+        "run_state": "idle",
+    }
+
+
+async def test_add_queue_room_service_rejects_unknown_entry(
+    hass: HomeAssistant,
+) -> None:
+    """Test the add queue room service rejects unknown config entry ids."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    with pytest.raises(HomeAssistantError):
+        await _call_add_queue_room_service(hass, "missing-entry")
 
 
 async def test_runtime_status_service_returns_entry_runtime_data(
@@ -284,6 +375,7 @@ async def test_unload_last_entry_removes_runtime_status_service(
     await hass.async_block_till_done()
 
     assert not hass.services.has_service(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
+    assert not hass.services.has_service(DOMAIN, SERVICE_ADD_QUEUE_ROOM)
 
 
 @pytest.mark.parametrize(
