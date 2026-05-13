@@ -25,6 +25,23 @@ remove_queue_item:
       selector:
         text:
 
+move_queue_item:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        text:
+    item_id:
+      required: true
+      selector:
+        text:
+    new_position:
+      required: true
+      selector:
+        number:
+          min: 0
+          mode: box
+
 get_runtime_status:
   fields:
     config_entry_id:
