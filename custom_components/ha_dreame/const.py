@@ -1,8 +1,13 @@
 """Constants for HA Dreame."""
 
 ATTR_COMPLETED_ITEMS = "completed_items"
+ATTR_ITEM_ID = "item_id"
+ATTR_OVERRIDES = "overrides"
 ATTR_PENDING_ITEMS = "pending_items"
+ATTR_QUEUE_ITEMS = "queue_items"
+ATTR_RESULT = "result"
 ATTR_RUNNING_ITEMS = "running_items"
+ATTR_STATUS = "status"
 ATTR_TOTAL_ITEMS = "total_items"
 CONF_ALLOW_ROBOT_COMMANDS = "allow_robot_commands"
 CONF_CONFIG_ENTRY_ID = "config_entry_id"
