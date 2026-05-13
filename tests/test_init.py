@@ -20,6 +20,7 @@ from custom_components.ha_dreame.const import (
     CONF_ALLOW_ROBOT_COMMANDS,
     CONF_CONFIG_ENTRY_ID,
     CONF_ITEM_ID,
+    CONF_NEW_POSITION,
     CONF_ROOM_ID,
     CONF_ROOM_NAME,
     CONF_VACUUM_ENTITY_ID,
@@ -27,6 +28,7 @@ from custom_components.ha_dreame.const import (
     DREAME_VACUUM_DOMAIN,
     SERVICE_ADD_QUEUE_ROOM,
     SERVICE_GET_RUNTIME_STATUS,
+    SERVICE_MOVE_QUEUE_ITEM,
     SERVICE_REMOVE_QUEUE_ITEM,
     TITLE,
 )
@@ -117,6 +119,27 @@ async def _call_remove_queue_item_service(
     )
 
 
+async def _call_move_queue_item_service(
+    hass: HomeAssistant,
+    config_entry_id: str,
+    *,
+    item_id: str = "item-1",
+    new_position: int = 0,
+) -> dict[str, object]:
+    """Call the move queue item service and return its response."""
+    return await hass.services.async_call(
+        DOMAIN,
+        SERVICE_MOVE_QUEUE_ITEM,
+        {
+            CONF_CONFIG_ENTRY_ID: config_entry_id,
+            CONF_ITEM_ID: item_id,
+            CONF_NEW_POSITION: new_position,
+        },
+        blocking=True,
+        return_response=True,
+    )
+
+
 async def test_setup_entry_attaches_runtime_data(hass: HomeAssistant) -> None:
     """Test that a config entry exposes typed runtime data."""
     vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
@@ -197,6 +220,20 @@ async def test_setup_entry_registers_remove_queue_item_service(
     await hass.async_block_till_done()
 
     assert hass.services.has_service(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM)
+
+
+async def test_setup_entry_registers_move_queue_item_service(
+    hass: HomeAssistant,
+) -> None:
+    """Test setup registers the internal move queue item service."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.services.has_service(DOMAIN, SERVICE_MOVE_QUEUE_ITEM)
 
 
 async def test_add_queue_room_service_updates_runtime_queue_state(
@@ -329,6 +366,95 @@ async def test_remove_queue_item_service_rejects_unknown_entry_and_missing_item(
 
     with pytest.raises(HomeAssistantError):
         await _call_remove_queue_item_service(hass, entry.entry_id, item_id="missing-item")
+
+
+async def test_move_queue_item_service_updates_runtime_queue_order(
+    hass: HomeAssistant,
+) -> None:
+    """Test the move queue item service reorders pending queue items."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    await _call_add_queue_room_service(
+        hass,
+        entry.entry_id,
+        room_id=1,
+        room_name="Room 1",
+    )
+    await _call_add_queue_room_service(
+        hass,
+        entry.entry_id,
+        room_id=2,
+        room_name="Room 2",
+    )
+    await _call_add_queue_room_service(
+        hass,
+        entry.entry_id,
+        room_id=3,
+        room_name="Room 3",
+    )
+    moved_item_id = entry.runtime_data.queue_state.items[0].item_id
+
+    response = await _call_move_queue_item_service(
+        hass,
+        entry.entry_id,
+        item_id=moved_item_id,
+        new_position=2,
+    )
+
+    queue_state = entry.runtime_data.queue_state
+    assert [item.room_name for item in queue_state.items] == [
+        "Room 2",
+        "Room 3",
+        "Room 1",
+    ]
+    assert response[ATTR_PENDING_ITEMS] == 3
+    assert response[ATTR_RUNNING_ITEMS] == 0
+    assert response[ATTR_COMPLETED_ITEMS] == 0
+    assert response[ATTR_TOTAL_ITEMS] == 3
+    assert response[CONF_CONFIG_ENTRY_ID] == entry.entry_id
+    assert response["run_state"] == "idle"
+    assert [item[ATTR_ITEM_ID] for item in response[ATTR_QUEUE_ITEMS]] == [
+        item.item_id for item in queue_state.items
+    ]
+    assert [item[CONF_ROOM_NAME] for item in response[ATTR_QUEUE_ITEMS]] == [
+        "Room 2",
+        "Room 3",
+        "Room 1",
+    ]
+
+
+async def test_move_queue_item_service_rejects_unknown_entry_and_invalid_move(
+    hass: HomeAssistant,
+) -> None:
+    """Test the move queue item service rejects invalid requests."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    add_response = await _call_add_queue_room_service(hass, entry.entry_id)
+    item_id = add_response[ATTR_QUEUE_ITEMS][0][ATTR_ITEM_ID]
+
+    with pytest.raises(HomeAssistantError):
+        await _call_move_queue_item_service(hass, "missing-entry")
+
+    with pytest.raises(HomeAssistantError):
+        await _call_move_queue_item_service(hass, entry.entry_id, item_id="missing-item")
+
+    with pytest.raises(HomeAssistantError):
+        await _call_move_queue_item_service(
+            hass,
+            entry.entry_id,
+            item_id=item_id,
+            new_position=1,
+        )
 
 
 async def test_runtime_status_service_returns_entry_runtime_data(
@@ -493,6 +619,7 @@ async def test_unload_last_entry_removes_runtime_status_service(
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     assert hass.services.has_service(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
+    assert hass.services.has_service(DOMAIN, SERVICE_MOVE_QUEUE_ITEM)
     assert hass.services.has_service(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM)
 
     assert await hass.config_entries.async_unload(entry.entry_id)
@@ -500,6 +627,7 @@ async def test_unload_last_entry_removes_runtime_status_service(
 
     assert not hass.services.has_service(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
     assert not hass.services.has_service(DOMAIN, SERVICE_ADD_QUEUE_ROOM)
+    assert not hass.services.has_service(DOMAIN, SERVICE_MOVE_QUEUE_ITEM)
     assert not hass.services.has_service(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM)
 
 
