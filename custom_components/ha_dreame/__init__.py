@@ -24,6 +24,7 @@ from .const import (
     CONF_CONFIG_ENTRY_ID,
     CONF_ITEM_ID,
     CONF_NEW_POSITION,
+    CONF_OVERRIDES,
     CONF_ROOM_ID,
     CONF_ROOM_NAME,
     CONF_VACUUM_ENTITY_ID,
@@ -34,6 +35,7 @@ from .const import (
     SERVICE_GET_RUNTIME_STATUS,
     SERVICE_MOVE_QUEUE_ITEM,
     SERVICE_REMOVE_QUEUE_ITEM,
+    SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES,
     VACUUM_DOMAIN,
 )
 from .queue_core import (
@@ -44,6 +46,7 @@ from .queue_core import (
     move_item,
     new_state,
     remove_item,
+    update_item_overrides,
 )
 from .queue_snapshot import count_queue_items, queue_item_snapshots
 from .runtime import HaDreameRuntimeData
@@ -70,6 +73,13 @@ REMOVE_QUEUE_ITEM_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_CONFIG_ENTRY_ID): str,
         vol.Required(CONF_ITEM_ID): vol.All(str, vol.Length(min=1)),
+    }
+)
+UPDATE_QUEUE_ITEM_OVERRIDES_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_CONFIG_ENTRY_ID): str,
+        vol.Required(CONF_ITEM_ID): vol.All(str, vol.Length(min=1)),
+        vol.Required(CONF_OVERRIDES): dict,
     }
 )
 PLATFORMS: list[Platform] = [Platform.SENSOR]
@@ -115,6 +125,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
         hass.services.async_remove(DOMAIN, SERVICE_MOVE_QUEUE_ITEM)
         hass.services.async_remove(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM)
+        hass.services.async_remove(DOMAIN, SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES)
     return True
 
 
@@ -207,6 +218,26 @@ def _async_register_services(hass: HomeAssistant) -> None:
             supports_response=SupportsResponse.OPTIONAL,
         )
 
+    if not hass.services.has_service(DOMAIN, SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES):
+
+        async def _async_update_queue_item_overrides(
+            call: ServiceCall,
+        ) -> ServiceResponse:
+            return _update_queue_item_overrides_response(
+                hass,
+                call.data[CONF_CONFIG_ENTRY_ID],
+                item_id=call.data[CONF_ITEM_ID],
+                overrides=call.data[CONF_OVERRIDES],
+            )
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES,
+            _async_update_queue_item_overrides,
+            schema=UPDATE_QUEUE_ITEM_OVERRIDES_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+
 
 def _runtime_entry(hass: HomeAssistant, config_entry_id: str) -> ConfigEntry:
     """Return a loaded HA Dreame entry for service handling."""
@@ -292,6 +323,30 @@ def _move_queue_item_response(
             runtime_data.queue_state,
             item_id=item_id,
             new_position=new_position,
+        )
+    except QueueError as err:
+        raise HomeAssistantError(str(err)) from err
+
+    runtime_data.set_queue_state(queue_state)
+    return _queue_status_response(entry)
+
+
+def _update_queue_item_overrides_response(
+    hass: HomeAssistant,
+    config_entry_id: str,
+    *,
+    item_id: str,
+    overrides: dict[str, Any],
+) -> dict[str, Any]:
+    """Update one pending queue item's overrides and return a queue snapshot."""
+    entry = _runtime_entry(hass, config_entry_id)
+    runtime_data = entry.runtime_data
+
+    try:
+        queue_state = update_item_overrides(
+            runtime_data.queue_state,
+            item_id=item_id,
+            overrides=overrides,
         )
     except QueueError as err:
         raise HomeAssistantError(str(err)) from err
