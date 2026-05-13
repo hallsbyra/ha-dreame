@@ -19,6 +19,7 @@ from custom_components.ha_dreame.const import (
     ATTR_TOTAL_ITEMS,
     CONF_ALLOW_ROBOT_COMMANDS,
     CONF_CONFIG_ENTRY_ID,
+    CONF_ITEM_ID,
     CONF_ROOM_ID,
     CONF_ROOM_NAME,
     CONF_VACUUM_ENTITY_ID,
@@ -26,6 +27,7 @@ from custom_components.ha_dreame.const import (
     DREAME_VACUUM_DOMAIN,
     SERVICE_ADD_QUEUE_ROOM,
     SERVICE_GET_RUNTIME_STATUS,
+    SERVICE_REMOVE_QUEUE_ITEM,
     TITLE,
 )
 from custom_components.ha_dreame.queue_core import QueueState, add_room
@@ -90,6 +92,25 @@ async def _call_add_queue_room_service(
             CONF_CONFIG_ENTRY_ID: config_entry_id,
             CONF_ROOM_ID: room_id,
             CONF_ROOM_NAME: room_name,
+        },
+        blocking=True,
+        return_response=True,
+    )
+
+
+async def _call_remove_queue_item_service(
+    hass: HomeAssistant,
+    config_entry_id: str,
+    *,
+    item_id: str = "item-1",
+) -> dict[str, object]:
+    """Call the remove queue item service and return its response."""
+    return await hass.services.async_call(
+        DOMAIN,
+        SERVICE_REMOVE_QUEUE_ITEM,
+        {
+            CONF_CONFIG_ENTRY_ID: config_entry_id,
+            CONF_ITEM_ID: item_id,
         },
         blocking=True,
         return_response=True,
@@ -164,6 +185,20 @@ async def test_setup_entry_registers_add_queue_room_service(
     assert hass.services.has_service(DOMAIN, SERVICE_ADD_QUEUE_ROOM)
 
 
+async def test_setup_entry_registers_remove_queue_item_service(
+    hass: HomeAssistant,
+) -> None:
+    """Test setup registers the internal remove queue item service."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.services.has_service(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM)
+
+
 async def test_add_queue_room_service_updates_runtime_queue_state(
     hass: HomeAssistant,
 ) -> None:
@@ -222,6 +257,78 @@ async def test_add_queue_room_service_rejects_unknown_entry(
 
     with pytest.raises(HomeAssistantError):
         await _call_add_queue_room_service(hass, "missing-entry")
+
+
+async def test_remove_queue_item_service_updates_runtime_queue_state(
+    hass: HomeAssistant,
+) -> None:
+    """Test the remove queue item service removes a pending queue item."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    await _call_add_queue_room_service(
+        hass,
+        entry.entry_id,
+        room_id=1,
+        room_name="Room 1",
+    )
+    add_response = await _call_add_queue_room_service(
+        hass,
+        entry.entry_id,
+        room_id=2,
+        room_name="Room 2",
+    )
+    removed_item_id = add_response[ATTR_QUEUE_ITEMS][0][ATTR_ITEM_ID]
+
+    response = await _call_remove_queue_item_service(
+        hass,
+        entry.entry_id,
+        item_id=removed_item_id,
+    )
+
+    queue_state = entry.runtime_data.queue_state
+    remaining_item = queue_state.items[0]
+    assert [item.room_name for item in queue_state.items] == ["Room 2"]
+    assert response == {
+        ATTR_COMPLETED_ITEMS: 0,
+        ATTR_PENDING_ITEMS: 1,
+        ATTR_QUEUE_ITEMS: [
+            {
+                ATTR_ITEM_ID: remaining_item.item_id,
+                ATTR_OVERRIDES: {},
+                ATTR_RESULT: None,
+                ATTR_STATUS: "pending",
+                CONF_ROOM_ID: 2,
+                CONF_ROOM_NAME: "Room 2",
+            }
+        ],
+        ATTR_RUNNING_ITEMS: 0,
+        ATTR_TOTAL_ITEMS: 1,
+        CONF_CONFIG_ENTRY_ID: entry.entry_id,
+        "run_state": "idle",
+    }
+
+
+async def test_remove_queue_item_service_rejects_unknown_entry_and_missing_item(
+    hass: HomeAssistant,
+) -> None:
+    """Test the remove queue item service rejects invalid requests."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    with pytest.raises(HomeAssistantError):
+        await _call_remove_queue_item_service(hass, "missing-entry")
+
+    with pytest.raises(HomeAssistantError):
+        await _call_remove_queue_item_service(hass, entry.entry_id, item_id="missing-item")
 
 
 async def test_runtime_status_service_returns_entry_runtime_data(
@@ -386,12 +493,14 @@ async def test_unload_last_entry_removes_runtime_status_service(
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     assert hass.services.has_service(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
+    assert hass.services.has_service(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM)
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
 
     assert not hass.services.has_service(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
     assert not hass.services.has_service(DOMAIN, SERVICE_ADD_QUEUE_ROOM)
+    assert not hass.services.has_service(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM)
 
 
 @pytest.mark.parametrize(
