@@ -1,3 +1,19 @@
+add_queue_room:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        text:
+    room_id:
+      required: true
+      selector:
+        number:
+          mode: box
+    room_name:
+      required: true
+      selector:
+        text:
+
 get_runtime_status:
   fields:
     config_entry_id:
