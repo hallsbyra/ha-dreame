@@ -9,4 +9,5 @@ from dataclasses import dataclass
 class HaDreameRuntimeData:
     """Runtime data attached to a configured HA Dreame entry."""
 
+    commands_enabled: bool
     vacuum_entity_id: str

@@ -9,7 +9,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers import entity_registry as er
 
-from .const import CONF_VACUUM_ENTITY_ID, DOMAIN, DREAME_VACUUM_DOMAIN, VACUUM_DOMAIN
+from .const import (
+    CONF_ALLOW_ROBOT_COMMANDS,
+    CONF_VACUUM_ENTITY_ID,
+    DOMAIN,
+    DREAME_VACUUM_DOMAIN,
+    VACUUM_DOMAIN,
+)
 from .runtime import HaDreameRuntimeData
 
 _LOGGER = logging.getLogger(__name__)
@@ -63,4 +69,7 @@ def _build_runtime_data(hass: HomeAssistant, entry: ConfigEntry) -> HaDreameRunt
     if registry_entry.platform != DREAME_VACUUM_DOMAIN:
         raise ConfigEntryError(f"Configured vacuum is not from Dreame: {vacuum_entity_id}")
 
-    return HaDreameRuntimeData(vacuum_entity_id=vacuum_entity_id)
+    return HaDreameRuntimeData(
+        commands_enabled=entry.options.get(CONF_ALLOW_ROBOT_COMMANDS) is True,
+        vacuum_entity_id=vacuum_entity_id,
+    )
