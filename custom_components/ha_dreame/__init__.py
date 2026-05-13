@@ -22,6 +22,7 @@ from .const import (
     ATTR_TOTAL_ITEMS,
     CONF_ALLOW_ROBOT_COMMANDS,
     CONF_CONFIG_ENTRY_ID,
+    CONF_ITEM_ID,
     CONF_ROOM_ID,
     CONF_ROOM_NAME,
     CONF_VACUUM_ENTITY_ID,
@@ -29,9 +30,10 @@ from .const import (
     DREAME_VACUUM_DOMAIN,
     SERVICE_ADD_QUEUE_ROOM,
     SERVICE_GET_RUNTIME_STATUS,
+    SERVICE_REMOVE_QUEUE_ITEM,
     VACUUM_DOMAIN,
 )
-from .queue_core import QueueError, QueueState, add_room, new_state
+from .queue_core import QueueError, QueueState, add_room, new_state, remove_item
 from .queue_snapshot import count_queue_items, queue_item_snapshots
 from .runtime import HaDreameRuntimeData
 
@@ -45,6 +47,12 @@ ADD_QUEUE_ROOM_SCHEMA = vol.Schema(
     }
 )
 GET_RUNTIME_STATUS_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
+REMOVE_QUEUE_ITEM_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_CONFIG_ENTRY_ID): str,
+        vol.Required(CONF_ITEM_ID): vol.All(str, vol.Length(min=1)),
+    }
+)
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 
@@ -85,6 +93,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not hass.data.get(DOMAIN):
         hass.services.async_remove(DOMAIN, SERVICE_ADD_QUEUE_ROOM)
         hass.services.async_remove(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
+        hass.services.async_remove(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM)
     return True
 
 
@@ -126,6 +135,23 @@ def _async_register_services(hass: HomeAssistant) -> None:
             supports_response=SupportsResponse.ONLY,
         )
 
+    if not hass.services.has_service(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM):
+
+        async def _async_remove_queue_item(call: ServiceCall) -> ServiceResponse:
+            return _remove_queue_item_response(
+                hass,
+                call.data[CONF_CONFIG_ENTRY_ID],
+                item_id=call.data[CONF_ITEM_ID],
+            )
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_REMOVE_QUEUE_ITEM,
+            _async_remove_queue_item,
+            schema=REMOVE_QUEUE_ITEM_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+
 
 def _runtime_entry(hass: HomeAssistant, config_entry_id: str) -> ConfigEntry:
     """Return a loaded HA Dreame entry for service handling."""
@@ -152,6 +178,25 @@ def _add_queue_room_response(
             room_id=room_id,
             room_name=room_name,
         )
+    except QueueError as err:
+        raise HomeAssistantError(str(err)) from err
+
+    runtime_data.set_queue_state(queue_state)
+    return _queue_status_response(entry)
+
+
+def _remove_queue_item_response(
+    hass: HomeAssistant,
+    config_entry_id: str,
+    *,
+    item_id: str,
+) -> dict[str, Any]:
+    """Remove one pending queue item and return a queue snapshot."""
+    entry = _runtime_entry(hass, config_entry_id)
+    runtime_data = entry.runtime_data
+
+    try:
+        queue_state = remove_item(runtime_data.queue_state, item_id=item_id)
     except QueueError as err:
         raise HomeAssistantError(str(err)) from err
 
