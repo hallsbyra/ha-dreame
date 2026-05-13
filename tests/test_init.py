@@ -17,6 +17,7 @@ from custom_components.ha_dreame.const import (
     TITLE,
 )
 from custom_components.ha_dreame.runtime import HaDreameRuntimeData
+from custom_components.ha_dreame.queue_core import QueueState
 
 pytestmark = pytest.mark.usefixtures("mock_dreame_vacuum_dependency")
 
@@ -74,6 +75,9 @@ async def test_setup_entry_attaches_runtime_data(hass: HomeAssistant) -> None:
     assert isinstance(entry.runtime_data, HaDreameRuntimeData)
     assert entry.runtime_data.vacuum_entity_id == vacuum_entity_id
     assert entry.runtime_data.commands_enabled is False
+    assert isinstance(entry.runtime_data.queue_state, QueueState)
+    assert entry.runtime_data.queue_state.run_state == "idle"
+    assert entry.runtime_data.queue_state.items == ()
     assert hass.data[DOMAIN][entry.entry_id] is entry
 
 
