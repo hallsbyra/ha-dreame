@@ -24,3 +24,5 @@ It exists in parallel with the currently working Dreame solution in `ha-config`.
 - Do not reuse the old `dreame_queue` service names in the new implementation.
 - Do not claim parity with the production setup until both behavior and operator workflow are proven.
 - Treat this repo as additive until an explicit cutover plan exists.
+- Default new runtime behavior to read-only / command-disabled while both implementations are installed.
+- Require explicit operator enablement before `ha_dreame` sends robot commands.

@@ -15,6 +15,7 @@ The current production Dreame implementation still lives in the sibling repo `..
 - Long-term goal: HACS-friendly packaging and release flow.
 - Migration model: run in parallel with the old implementation until feature parity is reached.
 - Collision rule: keep new services, events, entity ids and card identifiers isolated from the current `pyscript.dreame_queue_*` implementation.
+- Command safety rule: new runtime behavior starts read-only / command-disabled by default. Any code path that sends robot commands must require explicit operator enablement before it can run.
 - Public repo rule: do not commit secrets, local hostnames, private paths, local-only entity ids, or assumptions from one Home Assistant installation.
 - Dependency rule: it is acceptable for this integration to depend explicitly on the existing `dreame_vacuum` integration, but runtime setup must still validate that the selected dependency exists and is usable.
 
@@ -53,7 +54,7 @@ The current production Dreame implementation still lives in the sibling repo `..
 ## Deploy
 - This repo is not the production deploy path yet.
 - Do not deploy this scaffold to HAOS as a replacement for the running Dreame solution without explicit user approval.
-- During migration, local development deploys may install `ha_dreame` beside the old implementation, but new runtime behavior must be opt-in and namespaced.
+- During migration, local development deploys may install `ha_dreame` beside the old implementation. New runtime behavior must be namespaced, and robot command dispatch must stay disabled until explicit operator enablement is implemented and turned on.
 
 ## Working Rules
 - If the task is to fix the currently running Dreame setup, work in `../ha-config`.

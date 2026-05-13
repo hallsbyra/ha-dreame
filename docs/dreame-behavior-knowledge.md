@@ -150,7 +150,8 @@ examples only.
 4. Dock and wash states can look stuck while still recoverable.
 5. Recoverable operator states should not immediately consume retry budget.
 6. Custom-cleaning commands should not be used as an unconditional dispatch prelude.
-7. Active command mode must be guarded while old and new controllers run in parallel.
+7. New runtime behavior must default to read-only / command-disabled while old and new controllers run in parallel.
+8. Active robot command dispatch must require explicit operator enablement.
 
 ## Experiment Protocol
 

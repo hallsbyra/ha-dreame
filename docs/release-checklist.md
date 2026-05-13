@@ -14,8 +14,8 @@
 
 - [ ] Queue core has tests for creation, mutation, start, cancel, skip, completion, and drift.
 - [ ] Behavior knowledge regressions have corresponding automated tests.
-- [ ] Shadow mode can observe a real Dreame setup without sending commands.
-- [ ] Active command mode is explicitly opt-in.
+- [ ] Read-only/default command-disabled behavior is verified while installed beside the old implementation.
+- [ ] Robot command dispatch is explicitly opt-in.
 - [ ] The integration can coexist with the old production implementation.
 - [ ] Known limitations and troubleshooting are documented.
 
