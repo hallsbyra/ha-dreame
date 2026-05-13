@@ -7,6 +7,7 @@ from typing import Any
 
 import voluptuous as vol
 
+from homeassistant.const import Platform
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import ConfigEntryError, HomeAssistantError
@@ -21,11 +22,13 @@ from .const import (
     SERVICE_GET_RUNTIME_STATUS,
     VACUUM_DOMAIN,
 )
+from .queue_core import new_state
 from .runtime import HaDreameRuntimeData
 
 _LOGGER = logging.getLogger(__name__)
 
 GET_RUNTIME_STATUS_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
+PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -43,6 +46,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.runtime_data = runtime_data
     hass.data[DOMAIN][entry.entry_id] = entry
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _LOGGER.info(
         "Loaded %s config entry %s for %s",
         DOMAIN,
@@ -54,6 +58,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if not unload_ok:
+        return False
+
     hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     if hasattr(entry, "runtime_data"):
         del entry.runtime_data
@@ -118,5 +126,6 @@ def _build_runtime_data(hass: HomeAssistant, entry: ConfigEntry) -> HaDreameRunt
 
     return HaDreameRuntimeData(
         commands_enabled=entry.options.get(CONF_ALLOW_ROBOT_COMMANDS) is True,
+        queue_state=new_state(),
         vacuum_entity_id=vacuum_entity_id,
     )
