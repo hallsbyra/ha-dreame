@@ -49,6 +49,21 @@ move_queue_item:
           min: 0
           mode: box
 
+update_queue_item_overrides:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        text:
+    item_id:
+      required: true
+      selector:
+        text:
+    overrides:
+      required: true
+      selector:
+        object:
+
 get_runtime_status:
   fields:
     config_entry_id:
