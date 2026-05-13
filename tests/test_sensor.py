@@ -18,6 +18,7 @@ from custom_components.ha_dreame.const import (
     SENSOR_QUEUE_STATUS,
     TITLE,
 )
+from custom_components.ha_dreame.queue_core import add_room, start_run
 
 pytestmark = pytest.mark.usefixtures("mock_dreame_vacuum_dependency")
 
@@ -83,6 +84,39 @@ async def test_queue_status_sensor_has_stable_unique_id(
     assert registry_entry.config_entry_id == entry.entry_id
     assert registry_entry.platform == DOMAIN
     assert registry_entry.unique_id == f"{entry.entry_id}_{SENSOR_QUEUE_STATUS}"
+
+
+async def test_queue_status_sensor_updates_when_runtime_queue_state_changes(
+    hass: HomeAssistant,
+) -> None:
+    """Test the queue status sensor reacts to runtime queue state updates."""
+    vacuum_entity_id = _register_vacuum(hass)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=TITLE,
+        data={CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    queued_state = add_room(
+        entry.runtime_data.queue_state,
+        room_id=1,
+        room_name="Room 1",
+    )
+    running_state = start_run(queued_state)
+    entry.runtime_data.set_queue_state(running_state)
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.ha_dreame_queue_status")
+
+    assert state.state == "running"
+    assert state.attributes[ATTR_PENDING_ITEMS] == 0
+    assert state.attributes[ATTR_RUNNING_ITEMS] == 1
+    assert state.attributes[ATTR_COMPLETED_ITEMS] == 0
+    assert state.attributes[ATTR_TOTAL_ITEMS] == 1
 
 
 async def test_unload_entry_marks_queue_status_sensor_unavailable(

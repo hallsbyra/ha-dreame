@@ -16,8 +16,8 @@ from custom_components.ha_dreame.const import (
     SERVICE_GET_RUNTIME_STATUS,
     TITLE,
 )
+from custom_components.ha_dreame.queue_core import QueueState, add_room
 from custom_components.ha_dreame.runtime import HaDreameRuntimeData
-from custom_components.ha_dreame.queue_core import QueueState
 
 pytestmark = pytest.mark.usefixtures("mock_dreame_vacuum_dependency")
 
@@ -79,6 +79,28 @@ async def test_setup_entry_attaches_runtime_data(hass: HomeAssistant) -> None:
     assert entry.runtime_data.queue_state.run_state == "idle"
     assert entry.runtime_data.queue_state.items == ()
     assert hass.data[DOMAIN][entry.entry_id] is entry
+
+
+async def test_runtime_data_updates_queue_state(
+    hass: HomeAssistant,
+) -> None:
+    """Test runtime data exposes an updateable queue state surface."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    updated_state = add_room(
+        entry.runtime_data.queue_state,
+        room_id=1,
+        room_name="Room 1",
+    )
+    entry.runtime_data.set_queue_state(updated_state)
+    await hass.async_block_till_done()
+
+    assert entry.runtime_data.queue_state == updated_state
 
 
 async def test_setup_entry_registers_runtime_status_service(
