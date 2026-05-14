@@ -35,17 +35,22 @@ from .const import (
     SERVICE_GET_RUNTIME_STATUS,
     SERVICE_MOVE_QUEUE_ITEM,
     SERVICE_REMOVE_QUEUE_ITEM,
+    SERVICE_START_QUEUE,
     SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES,
     VACUUM_DOMAIN,
 )
+from .dispatch_executor import async_execute_dispatch_plan
+from .dispatch_plan import build_room_dispatch_plan
 from .queue_core import (
     QueueError,
     QueueState,
     add_room,
     clear_pending,
+    current_item,
     move_item,
     new_state,
     remove_item,
+    start_run,
     update_item_overrides,
 )
 from .queue_snapshot import count_queue_items, queue_item_snapshots
@@ -75,6 +80,7 @@ REMOVE_QUEUE_ITEM_SCHEMA = vol.Schema(
         vol.Required(CONF_ITEM_ID): vol.All(str, vol.Length(min=1)),
     }
 )
+START_QUEUE_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
 UPDATE_QUEUE_ITEM_OVERRIDES_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_CONFIG_ENTRY_ID): str,
@@ -125,6 +131,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
         hass.services.async_remove(DOMAIN, SERVICE_MOVE_QUEUE_ITEM)
         hass.services.async_remove(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM)
+        hass.services.async_remove(DOMAIN, SERVICE_START_QUEUE)
         hass.services.async_remove(DOMAIN, SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES)
     return True
 
@@ -215,6 +222,22 @@ def _async_register_services(hass: HomeAssistant) -> None:
             SERVICE_MOVE_QUEUE_ITEM,
             _async_move_queue_item,
             schema=MOVE_QUEUE_ITEM_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+
+    if not hass.services.has_service(DOMAIN, SERVICE_START_QUEUE):
+
+        async def _async_start_queue(call: ServiceCall) -> ServiceResponse:
+            return await _async_start_queue_response(
+                hass,
+                call.data[CONF_CONFIG_ENTRY_ID],
+            )
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_START_QUEUE,
+            _async_start_queue,
+            schema=START_QUEUE_SCHEMA,
             supports_response=SupportsResponse.OPTIONAL,
         )
 
@@ -350,6 +373,39 @@ def _update_queue_item_overrides_response(
         )
     except QueueError as err:
         raise HomeAssistantError(str(err)) from err
+
+    runtime_data.set_queue_state(queue_state)
+    return _queue_status_response(entry)
+
+
+async def _async_start_queue_response(
+    hass: HomeAssistant,
+    config_entry_id: str,
+) -> dict[str, Any]:
+    """Start queue execution and dispatch the first pending room."""
+    entry = _runtime_entry(hass, config_entry_id)
+    runtime_data = entry.runtime_data
+
+    if not runtime_data.commands_enabled:
+        raise HomeAssistantError("HA Dreame robot commands are disabled")
+
+    try:
+        queue_state = start_run(runtime_data.queue_state)
+        item = current_item(queue_state)
+        if item is None:
+            raise HomeAssistantError("No current room to dispatch")
+        plan = build_room_dispatch_plan(
+            item,
+            vacuum_entity_id=runtime_data.vacuum_entity_id,
+        )
+    except QueueError as err:
+        raise HomeAssistantError(str(err)) from err
+
+    await async_execute_dispatch_plan(
+        hass,
+        plan,
+        commands_enabled=runtime_data.commands_enabled,
+    )
 
     runtime_data.set_queue_state(queue_state)
     return _queue_status_response(entry)
