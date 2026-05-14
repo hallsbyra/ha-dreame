@@ -2,7 +2,7 @@
 
 import pytest
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -32,6 +32,7 @@ from custom_components.ha_dreame.const import (
     SERVICE_GET_RUNTIME_STATUS,
     SERVICE_MOVE_QUEUE_ITEM,
     SERVICE_REMOVE_QUEUE_ITEM,
+    SERVICE_START_QUEUE,
     SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES,
     TITLE,
 )
@@ -178,6 +179,20 @@ async def _call_update_queue_item_overrides_service(
     )
 
 
+async def _call_start_queue_service(
+    hass: HomeAssistant,
+    config_entry_id: str,
+) -> dict[str, object]:
+    """Call the start queue service and return its response."""
+    return await hass.services.async_call(
+        DOMAIN,
+        SERVICE_START_QUEUE,
+        {CONF_CONFIG_ENTRY_ID: config_entry_id},
+        blocking=True,
+        return_response=True,
+    )
+
+
 async def test_setup_entry_attaches_runtime_data(hass: HomeAssistant) -> None:
     """Test that a config entry exposes typed runtime data."""
     vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
@@ -300,6 +315,20 @@ async def test_setup_entry_registers_update_queue_item_overrides_service(
     await hass.async_block_till_done()
 
     assert hass.services.has_service(DOMAIN, SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES)
+
+
+async def test_setup_entry_registers_start_queue_service(
+    hass: HomeAssistant,
+) -> None:
+    """Test setup registers the command-gated start queue service."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.services.has_service(DOMAIN, SERVICE_START_QUEUE)
 
 
 async def test_add_queue_room_service_updates_runtime_queue_state(
@@ -666,6 +695,166 @@ async def test_update_queue_item_overrides_service_rejects_invalid_requests(
         )
 
 
+async def test_start_queue_service_rejects_disabled_command_gate_without_dispatch(
+    hass: HomeAssistant,
+) -> None:
+    """Test disabled command gate prevents start and dispatch."""
+    calls: list[dict[str, object]] = []
+
+    async def _record_clean_segment(call: ServiceCall) -> None:
+        calls.append(dict(call.data))
+
+    hass.services.async_register(
+        DREAME_VACUUM_DOMAIN,
+        "vacuum_clean_segment",
+        _record_clean_segment,
+    )
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    await _call_add_queue_room_service(
+        hass,
+        entry.entry_id,
+        room_id=7,
+        room_name="Room 7",
+    )
+
+    with pytest.raises(HomeAssistantError, match="robot commands are disabled"):
+        await _call_start_queue_service(hass, entry.entry_id)
+
+    assert calls == []
+    queue_state = entry.runtime_data.queue_state
+    assert queue_state.run_state == "idle"
+    assert queue_state.items[0].status == "pending"
+    assert queue_state.current_item_id is None
+
+
+async def test_start_queue_service_rejects_empty_queue(
+    hass: HomeAssistant,
+) -> None:
+    """Test the start queue service rejects empty queues."""
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    with pytest.raises(HomeAssistantError, match="Queue is empty"):
+        await _call_start_queue_service(hass, entry.entry_id)
+
+    assert entry.runtime_data.queue_state.run_state == "idle"
+    assert entry.runtime_data.queue_state.items == ()
+
+
+async def test_start_queue_service_dispatches_first_room_and_updates_runtime_state(
+    hass: HomeAssistant,
+) -> None:
+    """Test start queue dispatches the first pending room and marks it running."""
+    calls: list[dict[str, object]] = []
+
+    async def _record_clean_segment(call: ServiceCall) -> None:
+        calls.append(dict(call.data))
+
+    hass.services.async_register(
+        DREAME_VACUUM_DOMAIN,
+        "vacuum_clean_segment",
+        _record_clean_segment,
+    )
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    await _call_add_queue_room_service(
+        hass,
+        entry.entry_id,
+        room_id=7,
+        room_name="Room 7",
+    )
+
+    response = await _call_start_queue_service(hass, entry.entry_id)
+
+    queue_state = entry.runtime_data.queue_state
+    running_item = queue_state.items[0]
+    assert calls == [{"entity_id": vacuum_entity_id, "segments": [7]}]
+    assert queue_state.run_state == "running"
+    assert queue_state.current_item_id == running_item.item_id
+    assert running_item.status == "running"
+    assert response == {
+        ATTR_COMPLETED_ITEMS: 0,
+        ATTR_PENDING_ITEMS: 0,
+        ATTR_QUEUE_ITEMS: [
+            {
+                ATTR_ITEM_ID: running_item.item_id,
+                ATTR_OVERRIDES: {},
+                ATTR_RESULT: None,
+                ATTR_STATUS: "running",
+                CONF_ROOM_ID: 7,
+                CONF_ROOM_NAME: "Room 7",
+            }
+        ],
+        ATTR_RUNNING_ITEMS: 1,
+        ATTR_TOTAL_ITEMS: 1,
+        CONF_CONFIG_ENTRY_ID: entry.entry_id,
+        "run_state": "running",
+    }
+
+
+async def test_start_queue_service_leaves_queue_idle_when_dispatch_fails(
+    hass: HomeAssistant,
+) -> None:
+    """Test dispatch failures do not mark the queue as running."""
+    calls: list[dict[str, object]] = []
+
+    async def _raise_clean_segment(call: ServiceCall) -> None:
+        calls.append(dict(call.data))
+        raise HomeAssistantError("dispatch failed")
+
+    hass.services.async_register(
+        DREAME_VACUUM_DOMAIN,
+        "vacuum_clean_segment",
+        _raise_clean_segment,
+    )
+    vacuum_entity_id = _register_entity(hass, "vacuum.dreame_robot")
+    entry = _mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    await _call_add_queue_room_service(
+        hass,
+        entry.entry_id,
+        room_id=7,
+        room_name="Room 7",
+    )
+
+    with pytest.raises(HomeAssistantError, match="dispatch failed"):
+        await _call_start_queue_service(hass, entry.entry_id)
+
+    assert calls == [{"entity_id": vacuum_entity_id, "segments": [7]}]
+    queue_state = entry.runtime_data.queue_state
+    assert queue_state.run_state == "idle"
+    assert queue_state.current_item_id is None
+    assert queue_state.items[0].status == "pending"
+
+
 async def test_runtime_status_service_returns_entry_runtime_data(
     hass: HomeAssistant,
 ) -> None:
@@ -831,6 +1020,7 @@ async def test_unload_last_entry_removes_runtime_status_service(
     assert hass.services.has_service(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
     assert hass.services.has_service(DOMAIN, SERVICE_MOVE_QUEUE_ITEM)
     assert hass.services.has_service(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM)
+    assert hass.services.has_service(DOMAIN, SERVICE_START_QUEUE)
     assert hass.services.has_service(DOMAIN, SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES)
 
     assert await hass.config_entries.async_unload(entry.entry_id)
@@ -841,6 +1031,7 @@ async def test_unload_last_entry_removes_runtime_status_service(
     assert not hass.services.has_service(DOMAIN, SERVICE_CLEAR_PENDING_QUEUE)
     assert not hass.services.has_service(DOMAIN, SERVICE_MOVE_QUEUE_ITEM)
     assert not hass.services.has_service(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM)
+    assert not hass.services.has_service(DOMAIN, SERVICE_START_QUEUE)
     assert not hass.services.has_service(DOMAIN, SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES)
 
 
