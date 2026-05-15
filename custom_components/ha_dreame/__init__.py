@@ -19,7 +19,7 @@ from .const import (
     VACUUM_DOMAIN,
 )
 from .queue_core import QueueState, new_state
-from .runtime import HaDreameRuntimeData
+from .runtime import HaDreameRuntimeData, QueueRunTracking
 from .services import async_register_services, async_remove_services
 
 _LOGGER = logging.getLogger(__name__)
@@ -91,6 +91,7 @@ def _build_runtime_data(hass: HomeAssistant, entry: ConfigEntry) -> HaDreameRunt
     return HaDreameRuntimeData(
         commands_enabled=entry.options.get(CONF_ALLOW_ROBOT_COMMANDS) is True,
         queue_coordinator=_build_queue_coordinator(hass, entry),
+        run_tracking_coordinator=_build_run_tracking_coordinator(hass, entry),
         vacuum_entity_id=vacuum_entity_id,
     )
 
@@ -106,4 +107,18 @@ def _build_queue_coordinator(
         name=f"{DOMAIN}_{entry.entry_id}_queue",
     )
     coordinator.async_set_updated_data(new_state())
+    return coordinator
+
+
+def _build_run_tracking_coordinator(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+) -> DataUpdateCoordinator[QueueRunTracking | None]:
+    """Build the runtime run tracking coordinator for a config entry."""
+    coordinator = DataUpdateCoordinator[QueueRunTracking | None](
+        hass,
+        _LOGGER,
+        name=f"{DOMAIN}_{entry.entry_id}_run_tracking",
+    )
+    coordinator.async_set_updated_data(None)
     return coordinator
