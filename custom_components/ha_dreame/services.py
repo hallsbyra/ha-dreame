@@ -421,7 +421,5 @@ def _run_tracking_response(run_tracking: QueueRunTracking | None) -> dict[str, A
         ATTR_DISPATCH_RETRY_COUNT: run_tracking.dispatch_retry_count,
         ATTR_LAST_COMMAND_AT: run_tracking.last_command_at,
         ATTR_RUN_ID: run_tracking.run_id,
-        ATTR_TASK_STATUS_CLEARED_SINCE_DISPATCH: (
-            run_tracking.task_status_cleared_since_dispatch
-        ),
+        ATTR_TASK_STATUS_CLEARED_SINCE_DISPATCH: (run_tracking.task_status_cleared_since_dispatch),
     }
