@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import voluptuous as vol
@@ -11,10 +12,17 @@ from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, Supp
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
+    ATTR_ACTIVE_ROOM_MISMATCH_STREAK,
     ATTR_COMPLETED_ITEMS,
+    ATTR_CURRENT_ITEM_ID,
+    ATTR_DISPATCH_RETRY_COUNT,
+    ATTR_LAST_COMMAND_AT,
     ATTR_PENDING_ITEMS,
     ATTR_QUEUE_ITEMS,
+    ATTR_RUN_ID,
+    ATTR_RUN_TRACKING,
     ATTR_RUNNING_ITEMS,
+    ATTR_TASK_STATUS_CLEARED_SINCE_DISPATCH,
     ATTR_TOTAL_ITEMS,
     CONF_ALLOW_ROBOT_COMMANDS,
     CONF_CONFIG_ENTRY_ID,
@@ -37,6 +45,7 @@ from .dispatch_executor import async_execute_dispatch_plan
 from .dispatch_plan import build_room_dispatch_plan
 from .queue_core import (
     QueueError,
+    QueueState,
     add_room,
     clear_pending,
     current_item,
@@ -46,6 +55,7 @@ from .queue_core import (
     update_item_overrides,
 )
 from .queue_snapshot import count_queue_items, queue_item_snapshots
+from .runtime import QueueRunTracking
 
 ADD_QUEUE_ROOM_SCHEMA = vol.Schema(
     {
@@ -357,6 +367,7 @@ async def _async_start_queue_response(
     )
 
     runtime_data.set_queue_state(queue_state)
+    runtime_data.set_run_tracking(_new_run_tracking(queue_state))
     return _queue_status_response(entry)
 
 
@@ -368,6 +379,7 @@ def _runtime_status_response(hass: HomeAssistant, config_entry_id: str) -> dict[
     return {
         CONF_ALLOW_ROBOT_COMMANDS: runtime_data.commands_enabled,
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
+        ATTR_RUN_TRACKING: _run_tracking_response(runtime_data.run_tracking),
         CONF_VACUUM_ENTITY_ID: runtime_data.vacuum_entity_id,
     }
 
@@ -383,4 +395,33 @@ def _queue_status_response(entry: ConfigEntry) -> dict[str, Any]:
         ATTR_TOTAL_ITEMS: len(queue_state.items),
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
         "run_state": queue_state.run_state,
+    }
+
+
+def _new_run_tracking(queue_state: QueueState) -> QueueRunTracking:
+    """Build run tracking for a queue state that has just been dispatched."""
+    if queue_state.run_id is None or queue_state.current_item_id is None:
+        raise HomeAssistantError("Queue run tracking requires an active run")
+
+    return QueueRunTracking(
+        run_id=queue_state.run_id,
+        current_item_id=queue_state.current_item_id,
+        last_command_at=datetime.now(UTC).isoformat(),
+    )
+
+
+def _run_tracking_response(run_tracking: QueueRunTracking | None) -> dict[str, Any] | None:
+    """Return a serializable runtime run tracking snapshot."""
+    if run_tracking is None:
+        return None
+
+    return {
+        ATTR_ACTIVE_ROOM_MISMATCH_STREAK: run_tracking.active_room_mismatch_streak,
+        ATTR_CURRENT_ITEM_ID: run_tracking.current_item_id,
+        ATTR_DISPATCH_RETRY_COUNT: run_tracking.dispatch_retry_count,
+        ATTR_LAST_COMMAND_AT: run_tracking.last_command_at,
+        ATTR_RUN_ID: run_tracking.run_id,
+        ATTR_TASK_STATUS_CLEARED_SINCE_DISPATCH: (
+            run_tracking.task_status_cleared_since_dispatch
+        ),
     }
