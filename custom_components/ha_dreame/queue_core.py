@@ -55,6 +55,10 @@ class ReconcileDecision:
 
 
 TERMINAL_ITEM_STATUSES = {"completed", "skipped"}
+MOP_MAINTENANCE_TASK_STATUSES = {
+    "returning_to_remove_mop",
+    "returning_to_install_mop",
+}
 
 
 def new_state() -> QueueState:
@@ -250,6 +254,7 @@ def evaluate_reconcile_tick(
     active_room_mismatch_min_progress: int = 1,
     active_room_mismatch_max_progress: int | None = None,
     dock_prep_resume_ready: bool = False,
+    is_mop_maintenance_state: bool = False,
 ) -> ReconcileDecision:
     """Evaluate one robot/queue reconciliation tick."""
     if not awaiting_completion_event:
@@ -319,6 +324,21 @@ def evaluate_reconcile_tick(
                 set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
                 event_reasons=tuple(event_reasons + ["task_status_completed"]),
             )
+
+    if normalized_task in MOP_MAINTENANCE_TASK_STATUSES or is_mop_maintenance_state:
+        if normalized_error not in {"", "unknown", "unavailable", "no_error"}:
+            return ReconcileDecision(
+                set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+                reset_dispatch_retry_count=True,
+                event_reasons=tuple(
+                    event_reasons
+                    + [_vacuum_error_wait_reason(normalized_error, normalized_non_fatal_errors)]
+                ),
+            )
+        return ReconcileDecision(
+            set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+            event_reasons=tuple(event_reasons + ["mop_maintenance_waiting"]),
+        )
 
     if is_dock_prep_state and is_dock_prep_paused and not normalized_task.endswith("_paused"):
         if normalized_error not in {"", "unknown", "unavailable", "no_error"}:
