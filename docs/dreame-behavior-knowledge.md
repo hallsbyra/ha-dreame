@@ -113,6 +113,20 @@ examples only.
 - Controller implication: classify post-run maintenance separately from queue execution failure.
 - Test implication: cover post-completion maintenance as completed-with-maintenance, not failed.
 
+### Mop Remove/Install Transitions Are In-Run Maintenance
+
+- Confidence: `Observed`
+- Behavior: during a room run, Dreame can report mop maintenance transitions such as
+  `task_status=returning_to_remove_mop`, `task_status=returning_to_install_mop`,
+  `state=returning_remove_mop`, and `state=returning_install_mop`. The high-level vacuum state can
+  briefly become `docked` or report a different current room while the robot is still expected to
+  resume and finish the same room flow.
+- Controller implication: treat mop remove/install return states as expected in-run maintenance.
+  Do not consume normal dispatch retry budget or trigger active-room mismatch redispatch while these
+  states are active unless a blocking error is present.
+- Test implication: cover mop remove/install transitions as wait states, not `out_of_sync` or retry
+  states.
+
 ### Runtime Tuning Entities May Become Unavailable During Active Runs
 
 - Confidence: `Observed`
@@ -152,6 +166,7 @@ examples only.
 6. Custom-cleaning commands should not be used as an unconditional dispatch prelude.
 7. New runtime behavior must default to read-only / command-disabled while old and new controllers run in parallel.
 8. Active robot command dispatch must require explicit operator enablement.
+9. Mop remove/install transitions can briefly look like dispatch failure but are normal in-run maintenance.
 
 ## Experiment Protocol
 

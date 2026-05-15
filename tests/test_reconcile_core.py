@@ -342,6 +342,60 @@ def test_reconcile_dock_prep_pause_waits_for_retry_interval() -> None:
     assert decision.event_reasons == ("dock_prep_paused_waiting_retry_interval",)
 
 
+def test_reconcile_mop_remove_transition_waits_without_retry_or_out_of_sync() -> None:
+    """Test mop removal maintenance does not consume dispatch retry budget."""
+    decision = _decision(
+        vacuum_state="docked",
+        task_status="returning_to_remove_mop",
+        vacuum_error_code="no_error",
+        seconds_since_last_command=300,
+        task_status_cleared_since_dispatch=True,
+        dispatch_retry_count=2,
+        expected_room_id=3,
+        observed_room_id=7,
+        expected_room_name="Dining room",
+        observed_room_name="Hall",
+        cleaning_progress=68,
+        is_dock_prep_state=False,
+        dispatch_retry_interval_sec=20,
+        dispatch_retry_max=2,
+    )
+
+    assert decision.complete_current_room is False
+    assert decision.retry_current_room is False
+    assert decision.mark_out_of_sync_reason is None
+    assert decision.reset_dispatch_retry_count is False
+    assert decision.event_reasons == ("mop_maintenance_waiting",)
+
+
+def test_reconcile_mop_install_robot_state_suppresses_active_room_mismatch_retry() -> None:
+    """Test mop install maintenance suppresses active-room mismatch retries."""
+    decision = _decision(
+        vacuum_state="cleaning",
+        task_status="room_cleaning",
+        vacuum_error_code="no_error",
+        seconds_since_last_command=300,
+        task_status_cleared_since_dispatch=True,
+        dispatch_retry_count=1,
+        expected_room_id=3,
+        observed_room_id=7,
+        expected_room_name="Dining room",
+        observed_room_name="Hall",
+        cleaning_progress=69,
+        active_room_mismatch_streak=1,
+        active_room_mismatch_required_streak=2,
+        is_dock_prep_state=False,
+        dispatch_retry_interval_sec=20,
+        dispatch_retry_max=2,
+        is_mop_maintenance_state=True,
+    )
+
+    assert decision.complete_current_room is False
+    assert decision.retry_current_room is False
+    assert decision.mark_out_of_sync_reason is None
+    assert decision.event_reasons == ("mop_maintenance_waiting",)
+
+
 def test_reconcile_dock_prep_pause_requests_resume_when_ready() -> None:
     """Test dock-prep pause asks runtime layer to resume once safe."""
     decision = _decision(
