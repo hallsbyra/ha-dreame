@@ -1,19 +1,28 @@
 """Tests for HA Dreame services."""
 
+from datetime import datetime
+
 import pytest
 
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.ha_dreame.const import (
+    ATTR_ACTIVE_ROOM_MISMATCH_STREAK,
     ATTR_COMPLETED_ITEMS,
+    ATTR_CURRENT_ITEM_ID,
+    ATTR_DISPATCH_RETRY_COUNT,
     ATTR_ITEM_ID,
+    ATTR_LAST_COMMAND_AT,
     ATTR_OVERRIDES,
     ATTR_PENDING_ITEMS,
     ATTR_QUEUE_ITEMS,
     ATTR_RESULT,
+    ATTR_RUN_ID,
+    ATTR_RUN_TRACKING,
     ATTR_RUNNING_ITEMS,
     ATTR_STATUS,
+    ATTR_TASK_STATUS_CLEARED_SINCE_DISPATCH,
     ATTR_TOTAL_ITEMS,
     CONF_ALLOW_ROBOT_COMMANDS,
     CONF_CONFIG_ENTRY_ID,
@@ -659,6 +668,7 @@ async def test_start_queue_service_rejects_disabled_command_gate_without_dispatc
 
     assert calls == []
     queue_state = entry.runtime_data.queue_state
+    assert entry.runtime_data.run_tracking is None
     assert queue_state.run_state == "idle"
     assert queue_state.items[0].status == "pending"
     assert queue_state.current_item_id is None
@@ -683,6 +693,7 @@ async def test_start_queue_service_rejects_empty_queue(
 
     assert entry.runtime_data.queue_state.run_state == "idle"
     assert entry.runtime_data.queue_state.items == ()
+    assert entry.runtime_data.run_tracking is None
 
 
 async def test_start_queue_service_dispatches_first_room_and_updates_runtime_state(
@@ -724,6 +735,14 @@ async def test_start_queue_service_dispatches_first_room_and_updates_runtime_sta
     assert queue_state.run_state == "running"
     assert queue_state.current_item_id == running_item.item_id
     assert running_item.status == "running"
+    run_tracking = entry.runtime_data.run_tracking
+    assert run_tracking is not None
+    assert run_tracking.run_id == queue_state.run_id
+    assert run_tracking.current_item_id == running_item.item_id
+    assert run_tracking.dispatch_retry_count == 0
+    assert run_tracking.task_status_cleared_since_dispatch is False
+    assert run_tracking.active_room_mismatch_streak == 0
+    datetime.fromisoformat(run_tracking.last_command_at)
     assert response == {
         ATTR_COMPLETED_ITEMS: 0,
         ATTR_PENDING_ITEMS: 0,
@@ -741,6 +760,16 @@ async def test_start_queue_service_dispatches_first_room_and_updates_runtime_sta
         ATTR_TOTAL_ITEMS: 1,
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
         "run_state": "running",
+    }
+
+    runtime_status = await _call_runtime_status_service(hass, entry.entry_id)
+    assert runtime_status[ATTR_RUN_TRACKING] == {
+        ATTR_ACTIVE_ROOM_MISMATCH_STREAK: 0,
+        ATTR_CURRENT_ITEM_ID: running_item.item_id,
+        ATTR_DISPATCH_RETRY_COUNT: 0,
+        ATTR_LAST_COMMAND_AT: run_tracking.last_command_at,
+        ATTR_RUN_ID: queue_state.run_id,
+        ATTR_TASK_STATUS_CLEARED_SINCE_DISPATCH: False,
     }
 
 
@@ -784,6 +813,7 @@ async def test_start_queue_service_leaves_queue_idle_when_dispatch_fails(
     assert queue_state.run_state == "idle"
     assert queue_state.current_item_id is None
     assert queue_state.items[0].status == "pending"
+    assert entry.runtime_data.run_tracking is None
 
 
 async def test_runtime_status_service_returns_entry_runtime_data(
@@ -803,6 +833,7 @@ async def test_runtime_status_service_returns_entry_runtime_data(
     assert await _call_runtime_status_service(hass, entry.entry_id) == {
         CONF_ALLOW_ROBOT_COMMANDS: True,
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
+        ATTR_RUN_TRACKING: None,
         CONF_VACUUM_ENTITY_ID: vacuum_entity_id,
     }
 
@@ -828,6 +859,7 @@ async def test_runtime_status_service_reflects_reloaded_command_gate(
     assert await _call_runtime_status_service(hass, entry.entry_id) == {
         CONF_ALLOW_ROBOT_COMMANDS: True,
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
+        ATTR_RUN_TRACKING: None,
         CONF_VACUUM_ENTITY_ID: vacuum_entity_id,
     }
 
