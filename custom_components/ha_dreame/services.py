@@ -55,7 +55,7 @@ from .queue_core import (
     update_item_overrides,
 )
 from .queue_snapshot import count_queue_items, queue_item_snapshots
-from .runtime import QueueRunTracking
+from .runtime_state import QueueRunTracking
 
 ADD_QUEUE_ROOM_SCHEMA = vol.Schema(
     {
