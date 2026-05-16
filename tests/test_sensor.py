@@ -28,6 +28,7 @@ from custom_components.ha_dreame.const import (
     DOMAIN,
     DREAME_VACUUM_DOMAIN,
     SERVICE_ADD_QUEUE_ROOM,
+    SERVICE_CANCEL_QUEUE,
     SERVICE_CLEAR_PENDING_QUEUE,
     SERVICE_MOVE_QUEUE_ITEM,
     SERVICE_REMOVE_QUEUE_ITEM,
@@ -455,6 +456,71 @@ async def test_queue_status_sensor_updates_when_start_queue_service_runs(
     assert state.attributes[ATTR_QUEUE_ITEMS][0][ATTR_STATUS] == "running"
     assert state.attributes[ATTR_QUEUE_ITEMS][0][CONF_ROOM_ID] == 7
     assert state.attributes[ATTR_QUEUE_ITEMS][0][CONF_ROOM_NAME] == "Room 7"
+
+
+async def test_queue_status_sensor_updates_when_cancel_queue_service_runs(
+    hass: HomeAssistant,
+) -> None:
+    """Test the queue status sensor reacts to the cancel queue service."""
+    vacuum_entity_id = _register_vacuum(hass)
+
+    async def _clean_segment(call: ServiceCall) -> None:
+        return None
+
+    async def _return_to_base(call: ServiceCall) -> None:
+        return None
+
+    hass.services.async_register(
+        DREAME_VACUUM_DOMAIN,
+        "vacuum_clean_segment",
+        _clean_segment,
+    )
+    hass.services.async_register("vacuum", "return_to_base", _return_to_base)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=TITLE,
+        data={CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_ADD_QUEUE_ROOM,
+        {
+            CONF_CONFIG_ENTRY_ID: entry.entry_id,
+            CONF_ROOM_ID: 7,
+            CONF_ROOM_NAME: "Room 7",
+        },
+        blocking=True,
+    )
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_START_QUEUE,
+        {CONF_CONFIG_ENTRY_ID: entry.entry_id},
+        blocking=True,
+    )
+
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_CANCEL_QUEUE,
+        {CONF_CONFIG_ENTRY_ID: entry.entry_id},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.ha_dreame_queue_status")
+
+    assert state.state == "canceled"
+    assert state.attributes[ATTR_PENDING_ITEMS] == 0
+    assert state.attributes[ATTR_RUNNING_ITEMS] == 0
+    assert state.attributes[ATTR_COMPLETED_ITEMS] == 0
+    assert state.attributes[ATTR_TOTAL_ITEMS] == 1
+    assert state.attributes[ATTR_QUEUE_ITEMS][0][ATTR_STATUS] == "canceled"
+    assert state.attributes[ATTR_QUEUE_ITEMS][0][ATTR_RESULT] == "canceled_by_user"
 
 
 async def test_unload_entry_marks_queue_status_sensor_unavailable(
