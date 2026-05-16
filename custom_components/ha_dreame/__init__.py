@@ -19,7 +19,8 @@ from .const import (
     VACUUM_DOMAIN,
 )
 from .queue_core import QueueState, new_state
-from .runtime import HaDreameRuntimeData, QueueRunTracking
+from .runtime import HaDreameRuntimeData
+from .runtime_state import QueueRunTracking
 from .services import async_register_services, async_remove_services
 
 _LOGGER = logging.getLogger(__name__)

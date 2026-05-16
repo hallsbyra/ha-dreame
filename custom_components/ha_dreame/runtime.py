@@ -7,18 +7,7 @@ from dataclasses import dataclass
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .queue_core import QueueState
-
-
-@dataclass(frozen=True, slots=True)
-class QueueRunTracking:
-    """Runtime reconciliation metadata for one dispatched queue item."""
-
-    run_id: str
-    current_item_id: str
-    last_command_at: str
-    dispatch_retry_count: int = 0
-    task_status_cleared_since_dispatch: bool = False
-    active_room_mismatch_streak: int = 0
+from .runtime_state import QueueRunTracking
 
 
 @dataclass(frozen=True, slots=True)
