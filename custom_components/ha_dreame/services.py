@@ -7,6 +7,7 @@ from typing import Any
 
 import voluptuous as vol
 
+from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
@@ -34,12 +35,14 @@ from .const import (
     CONF_VACUUM_ENTITY_ID,
     DOMAIN,
     SERVICE_ADD_QUEUE_ROOM,
+    SERVICE_CANCEL_QUEUE,
     SERVICE_CLEAR_PENDING_QUEUE,
     SERVICE_GET_RUNTIME_STATUS,
     SERVICE_MOVE_QUEUE_ITEM,
     SERVICE_REMOVE_QUEUE_ITEM,
     SERVICE_START_QUEUE,
     SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES,
+    VACUUM_DOMAIN,
 )
 from .dispatch_executor import async_execute_dispatch_plan
 from .dispatch_plan import build_room_dispatch_plan
@@ -47,6 +50,7 @@ from .queue_core import (
     QueueError,
     QueueState,
     add_room,
+    cancel_run,
     clear_pending,
     current_item,
     move_item,
@@ -64,6 +68,7 @@ ADD_QUEUE_ROOM_SCHEMA = vol.Schema(
         vol.Required(CONF_ROOM_NAME): vol.All(str, vol.Length(min=1)),
     }
 )
+CANCEL_QUEUE_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
 CLEAR_PENDING_QUEUE_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
 GET_RUNTIME_STATUS_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
 MOVE_QUEUE_ITEM_SCHEMA = vol.Schema(
@@ -106,6 +111,22 @@ def async_register_services(hass: HomeAssistant) -> None:
             SERVICE_ADD_QUEUE_ROOM,
             _async_add_queue_room,
             schema=ADD_QUEUE_ROOM_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+
+    if not hass.services.has_service(DOMAIN, SERVICE_CANCEL_QUEUE):
+
+        async def _async_cancel_queue(call: ServiceCall) -> ServiceResponse:
+            return await _async_cancel_queue_response(
+                hass,
+                call.data[CONF_CONFIG_ENTRY_ID],
+            )
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_CANCEL_QUEUE,
+            _async_cancel_queue,
+            schema=CANCEL_QUEUE_SCHEMA,
             supports_response=SupportsResponse.OPTIONAL,
         )
 
@@ -213,6 +234,7 @@ def async_register_services(hass: HomeAssistant) -> None:
 def async_remove_services(hass: HomeAssistant) -> None:
     """Remove all HA Dreame services."""
     hass.services.async_remove(DOMAIN, SERVICE_ADD_QUEUE_ROOM)
+    hass.services.async_remove(DOMAIN, SERVICE_CANCEL_QUEUE)
     hass.services.async_remove(DOMAIN, SERVICE_CLEAR_PENDING_QUEUE)
     hass.services.async_remove(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
     hass.services.async_remove(DOMAIN, SERVICE_MOVE_QUEUE_ITEM)
@@ -267,6 +289,34 @@ def _clear_pending_queue_response(
         raise HomeAssistantError(str(err)) from err
 
     runtime_data.set_queue_state(queue_state)
+    return _queue_status_response(entry)
+
+
+async def _async_cancel_queue_response(
+    hass: HomeAssistant,
+    config_entry_id: str,
+) -> dict[str, Any]:
+    """Cancel the runtime queue and send the robot back to base."""
+    entry = _runtime_entry(hass, config_entry_id)
+    runtime_data = entry.runtime_data
+
+    if not runtime_data.commands_enabled:
+        raise HomeAssistantError("HA Dreame robot commands are disabled")
+
+    await hass.services.async_call(
+        VACUUM_DOMAIN,
+        "return_to_base",
+        {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
+        blocking=True,
+    )
+
+    try:
+        queue_state = cancel_run(runtime_data.queue_state, reason="canceled_by_user")
+    except QueueError as err:
+        raise HomeAssistantError(str(err)) from err
+
+    runtime_data.set_queue_state(queue_state)
+    runtime_data.set_run_tracking(None)
     return _queue_status_response(entry)
 
 

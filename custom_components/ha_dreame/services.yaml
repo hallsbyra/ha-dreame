@@ -21,6 +21,13 @@ clear_pending_queue:
       selector:
         text:
 
+cancel_queue:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        text:
+
 remove_queue_item:
   fields:
     config_entry_id:
