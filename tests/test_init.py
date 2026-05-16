@@ -11,7 +11,8 @@ from custom_components.ha_dreame.const import (
     DREAME_VACUUM_DOMAIN,
 )
 from custom_components.ha_dreame.queue_core import QueueState, add_room
-from custom_components.ha_dreame.runtime import HaDreameRuntimeData, QueueRunTracking
+from custom_components.ha_dreame.runtime import HaDreameRuntimeData
+from custom_components.ha_dreame.runtime_state import QueueRunTracking
 
 from .helpers import mock_entry, register_entity
 
