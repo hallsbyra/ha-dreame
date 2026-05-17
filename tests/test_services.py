@@ -40,6 +40,7 @@ from custom_components.ha_dreame.const import (
     SERVICE_GET_RUNTIME_STATUS,
     SERVICE_MOVE_QUEUE_ITEM,
     SERVICE_REMOVE_QUEUE_ITEM,
+    SERVICE_SKIP_CURRENT_ROOM,
     SERVICE_START_QUEUE,
     SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES,
 )
@@ -148,6 +149,20 @@ async def _call_cancel_queue_service(
     return await hass.services.async_call(
         DOMAIN,
         SERVICE_CANCEL_QUEUE,
+        {CONF_CONFIG_ENTRY_ID: config_entry_id},
+        blocking=True,
+        return_response=True,
+    )
+
+
+async def _call_skip_current_room_service(
+    hass: HomeAssistant,
+    config_entry_id: str,
+) -> dict[str, object]:
+    """Call the skip current room service and return its response."""
+    return await hass.services.async_call(
+        DOMAIN,
+        SERVICE_SKIP_CURRENT_ROOM,
         {CONF_CONFIG_ENTRY_ID: config_entry_id},
         blocking=True,
         return_response=True,
@@ -271,6 +286,20 @@ async def test_setup_entry_registers_cancel_queue_service(
     await hass.async_block_till_done()
 
     assert hass.services.has_service(DOMAIN, SERVICE_CANCEL_QUEUE)
+
+
+async def test_setup_entry_registers_skip_current_room_service(
+    hass: HomeAssistant,
+) -> None:
+    """Test setup registers the command-gated skip current room service."""
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.services.has_service(DOMAIN, SERVICE_SKIP_CURRENT_ROOM)
 
 
 async def test_setup_entry_registers_update_queue_item_overrides_service(
@@ -1009,6 +1038,293 @@ async def test_cancel_queue_service_preserves_runtime_state_when_dock_command_fa
     assert entry.runtime_data.run_tracking == run_tracking
 
 
+async def test_skip_current_room_service_rejects_disabled_command_gate_without_dispatch(
+    hass: HomeAssistant,
+) -> None:
+    """Test disabled command gate prevents skip commands and state mutation."""
+    stop_calls: list[dict[str, object]] = []
+
+    async def _record_stop(call: ServiceCall) -> None:
+        stop_calls.append(dict(call.data))
+
+    hass.services.async_register("vacuum", "stop", _record_stop)
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    await _call_add_queue_room_service(hass, entry.entry_id)
+    await _call_add_queue_room_service(
+        hass,
+        entry.entry_id,
+        room_id=2,
+        room_name="Room 2",
+    )
+    queue_state = start_run(entry.runtime_data.queue_state)
+    entry.runtime_data.set_queue_state(queue_state)
+    run_tracking = QueueRunTracking(
+        run_id=queue_state.run_id,
+        current_item_id=queue_state.current_item_id,
+        last_command_at="2026-01-01T00:00:00+00:00",
+    )
+    entry.runtime_data.set_run_tracking(run_tracking)
+
+    with pytest.raises(HomeAssistantError, match="robot commands are disabled"):
+        await _call_skip_current_room_service(hass, entry.entry_id)
+
+    assert stop_calls == []
+    assert entry.runtime_data.queue_state == queue_state
+    assert entry.runtime_data.run_tracking == run_tracking
+
+
+async def test_skip_current_room_service_rejects_non_running_queue_without_dispatch(
+    hass: HomeAssistant,
+) -> None:
+    """Test skip current room rejects idle queues before robot commands."""
+    stop_calls: list[dict[str, object]] = []
+
+    async def _record_stop(call: ServiceCall) -> None:
+        stop_calls.append(dict(call.data))
+
+    hass.services.async_register("vacuum", "stop", _record_stop)
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    await _call_add_queue_room_service(hass, entry.entry_id)
+
+    with pytest.raises(HomeAssistantError, match="Queue is not running"):
+        await _call_skip_current_room_service(hass, entry.entry_id)
+
+    assert stop_calls == []
+    assert entry.runtime_data.queue_state.run_state == "idle"
+    assert entry.runtime_data.run_tracking is None
+
+
+async def test_skip_current_room_service_advances_and_dispatches_next_room(
+    hass: HomeAssistant,
+) -> None:
+    """Test skipping with pending work dispatches the next queue room."""
+    clean_calls: list[dict[str, object]] = []
+    stop_calls: list[dict[str, object]] = []
+    dock_calls: list[dict[str, object]] = []
+
+    async def _record_clean_segment(call: ServiceCall) -> None:
+        clean_calls.append(dict(call.data))
+
+    async def _record_stop(call: ServiceCall) -> None:
+        stop_calls.append(dict(call.data))
+
+    async def _record_return_to_base(call: ServiceCall) -> None:
+        dock_calls.append(dict(call.data))
+
+    hass.services.async_register(
+        DREAME_VACUUM_DOMAIN,
+        "vacuum_clean_segment",
+        _record_clean_segment,
+    )
+    hass.services.async_register("vacuum", "stop", _record_stop)
+    hass.services.async_register("vacuum", "return_to_base", _record_return_to_base)
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    await _call_add_queue_room_service(
+        hass,
+        entry.entry_id,
+        room_id=7,
+        room_name="Room 7",
+    )
+    await _call_add_queue_room_service(
+        hass,
+        entry.entry_id,
+        room_id=8,
+        room_name="Room 8",
+    )
+    await _call_start_queue_service(hass, entry.entry_id)
+    first_item_id = entry.runtime_data.queue_state.items[0].item_id
+
+    response = await _call_skip_current_room_service(hass, entry.entry_id)
+
+    queue_state = entry.runtime_data.queue_state
+    next_item = queue_state.items[1]
+    assert clean_calls == [
+        {"entity_id": vacuum_entity_id, "segments": [7]},
+        {"entity_id": vacuum_entity_id, "segments": [8]},
+    ]
+    assert stop_calls == [{"entity_id": vacuum_entity_id}]
+    assert dock_calls == []
+    assert queue_state.run_state == "running"
+    assert queue_state.current_item_id == next_item.item_id
+    assert [item.status for item in queue_state.items] == ["skipped", "running"]
+    assert queue_state.items[0].result == "skip_pressed"
+    run_tracking = entry.runtime_data.run_tracking
+    assert run_tracking is not None
+    assert run_tracking.run_id == queue_state.run_id
+    assert run_tracking.current_item_id == next_item.item_id
+    assert run_tracking.dispatch_retry_count == 0
+    assert run_tracking.task_status_cleared_since_dispatch is False
+    datetime.fromisoformat(run_tracking.last_command_at)
+    assert response == {
+        ATTR_COMPLETED_ITEMS: 0,
+        ATTR_PENDING_ITEMS: 0,
+        ATTR_QUEUE_ITEMS: [
+            {
+                ATTR_ITEM_ID: first_item_id,
+                ATTR_OVERRIDES: {},
+                ATTR_RESULT: "skip_pressed",
+                ATTR_STATUS: "skipped",
+                CONF_ROOM_ID: 7,
+                CONF_ROOM_NAME: "Room 7",
+            },
+            {
+                ATTR_ITEM_ID: next_item.item_id,
+                ATTR_OVERRIDES: {},
+                ATTR_RESULT: None,
+                ATTR_STATUS: "running",
+                CONF_ROOM_ID: 8,
+                CONF_ROOM_NAME: "Room 8",
+            },
+        ],
+        ATTR_RUNNING_ITEMS: 1,
+        ATTR_TOTAL_ITEMS: 2,
+        CONF_CONFIG_ENTRY_ID: entry.entry_id,
+        "run_state": "running",
+    }
+
+
+async def test_skip_current_room_service_sends_final_skipped_room_home(
+    hass: HomeAssistant,
+) -> None:
+    """Test skipping the final running room sends the robot home."""
+    clean_calls: list[dict[str, object]] = []
+    dock_calls: list[dict[str, object]] = []
+
+    async def _record_clean_segment(call: ServiceCall) -> None:
+        clean_calls.append(dict(call.data))
+
+    async def _record_return_to_base(call: ServiceCall) -> None:
+        dock_calls.append(dict(call.data))
+
+    hass.services.async_register(
+        DREAME_VACUUM_DOMAIN,
+        "vacuum_clean_segment",
+        _record_clean_segment,
+    )
+    hass.services.async_register("vacuum", "return_to_base", _record_return_to_base)
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    await _call_add_queue_room_service(
+        hass,
+        entry.entry_id,
+        room_id=7,
+        room_name="Room 7",
+    )
+    await _call_start_queue_service(hass, entry.entry_id)
+
+    response = await _call_skip_current_room_service(hass, entry.entry_id)
+
+    queue_state = entry.runtime_data.queue_state
+    skipped_item = queue_state.items[0]
+    assert clean_calls == [{"entity_id": vacuum_entity_id, "segments": [7]}]
+    assert dock_calls == [{"entity_id": vacuum_entity_id}]
+    assert queue_state.run_state == "completed"
+    assert queue_state.current_item_id is None
+    assert skipped_item.status == "skipped"
+    assert skipped_item.result == "skip_pressed"
+    assert entry.runtime_data.run_tracking is None
+    assert response == {
+        ATTR_COMPLETED_ITEMS: 0,
+        ATTR_PENDING_ITEMS: 0,
+        ATTR_QUEUE_ITEMS: [
+            {
+                ATTR_ITEM_ID: skipped_item.item_id,
+                ATTR_OVERRIDES: {},
+                ATTR_RESULT: "skip_pressed",
+                ATTR_STATUS: "skipped",
+                CONF_ROOM_ID: 7,
+                CONF_ROOM_NAME: "Room 7",
+            }
+        ],
+        ATTR_RUNNING_ITEMS: 0,
+        ATTR_TOTAL_ITEMS: 1,
+        CONF_CONFIG_ENTRY_ID: entry.entry_id,
+        "run_state": "completed",
+    }
+
+
+async def test_skip_current_room_service_preserves_runtime_state_when_stop_fails(
+    hass: HomeAssistant,
+) -> None:
+    """Test stop failures leave runtime state unchanged while skipping."""
+    clean_calls: list[dict[str, object]] = []
+    stop_calls: list[dict[str, object]] = []
+
+    async def _record_clean_segment(call: ServiceCall) -> None:
+        clean_calls.append(dict(call.data))
+
+    async def _raise_stop(call: ServiceCall) -> None:
+        stop_calls.append(dict(call.data))
+        raise HomeAssistantError("stop failed")
+
+    hass.services.async_register(
+        DREAME_VACUUM_DOMAIN,
+        "vacuum_clean_segment",
+        _record_clean_segment,
+    )
+    hass.services.async_register("vacuum", "stop", _raise_stop)
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    await _call_add_queue_room_service(hass, entry.entry_id)
+    await _call_add_queue_room_service(
+        hass,
+        entry.entry_id,
+        room_id=2,
+        room_name="Room 2",
+    )
+    await _call_start_queue_service(hass, entry.entry_id)
+    queue_state = entry.runtime_data.queue_state
+    run_tracking = entry.runtime_data.run_tracking
+
+    with pytest.raises(HomeAssistantError, match="stop failed"):
+        await _call_skip_current_room_service(hass, entry.entry_id)
+
+    assert clean_calls == [{"entity_id": vacuum_entity_id, "segments": [1]}]
+    assert stop_calls == [{"entity_id": vacuum_entity_id}]
+    assert entry.runtime_data.queue_state == queue_state
+    assert entry.runtime_data.run_tracking == run_tracking
+
+
 async def test_runtime_status_service_returns_entry_runtime_data(
     hass: HomeAssistant,
 ) -> None:
@@ -1087,6 +1403,7 @@ async def test_unload_last_entry_removes_runtime_status_service(
     assert hass.services.has_service(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
     assert hass.services.has_service(DOMAIN, SERVICE_MOVE_QUEUE_ITEM)
     assert hass.services.has_service(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM)
+    assert hass.services.has_service(DOMAIN, SERVICE_SKIP_CURRENT_ROOM)
     assert hass.services.has_service(DOMAIN, SERVICE_START_QUEUE)
     assert hass.services.has_service(DOMAIN, SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES)
 
@@ -1099,5 +1416,6 @@ async def test_unload_last_entry_removes_runtime_status_service(
     assert not hass.services.has_service(DOMAIN, SERVICE_CLEAR_PENDING_QUEUE)
     assert not hass.services.has_service(DOMAIN, SERVICE_MOVE_QUEUE_ITEM)
     assert not hass.services.has_service(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM)
+    assert not hass.services.has_service(DOMAIN, SERVICE_SKIP_CURRENT_ROOM)
     assert not hass.services.has_service(DOMAIN, SERVICE_START_QUEUE)
     assert not hass.services.has_service(DOMAIN, SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES)
