@@ -13,6 +13,7 @@ from homeassistant.helpers import entity_registry as er, selector
 
 from .const import (
     CONF_ALLOW_ROBOT_COMMANDS,
+    CONF_AUTO_RECONCILE_ENABLED,
     CONF_CLEAN_WATER_TANK_STATUS_ENTITY_ID,
     CONF_CLEANING_PROGRESS_ENTITY_ID,
     CONF_CURRENT_ROOM_ENTITY_ID,
@@ -129,7 +130,11 @@ class HaDreameOptionsFlow(config_entries.OptionsFlow):
             vol.Optional(
                 CONF_ALLOW_ROBOT_COMMANDS,
                 default=self._config_entry.options.get(CONF_ALLOW_ROBOT_COMMANDS, False),
-            ): bool
+            ): bool,
+            vol.Optional(
+                CONF_AUTO_RECONCILE_ENABLED,
+                default=self._config_entry.options.get(CONF_AUTO_RECONCILE_ENABLED, False),
+            ): bool,
         }
         for option in OBSERVATION_ENTITY_ID_OPTIONS:
             current_value = self._config_entry.options.get(option)
@@ -153,6 +158,8 @@ class HaDreameOptionsFlow(config_entries.OptionsFlow):
     def _options_data(self, user_input: dict[str, Any]) -> dict[str, Any]:
         """Return persisted public-safe options data."""
         data: dict[str, Any] = {CONF_ALLOW_ROBOT_COMMANDS: user_input[CONF_ALLOW_ROBOT_COMMANDS]}
+        if user_input.get(CONF_AUTO_RECONCILE_ENABLED) is True:
+            data[CONF_AUTO_RECONCILE_ENABLED] = True
         for option in OBSERVATION_ENTITY_ID_OPTIONS:
             entity_id = _optional_entity_id(user_input.get(option))
             if entity_id:

@@ -25,6 +25,7 @@
         "description": "Robot command dispatch is disabled by default while testing HA Dreame beside another controller.",
         "data": {
           "allow_robot_commands": "Allow HA Dreame to send robot commands",
+          "auto_reconcile_enabled": "Automatically reconcile queue state",
           "clean_water_tank_status_entity_id": "Clean water tank status sensor",
           "cleaning_progress_entity_id": "Cleaning progress sensor",
           "current_room_entity_id": "Current room sensor",

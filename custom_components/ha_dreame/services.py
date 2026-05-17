@@ -63,13 +63,14 @@ from .queue_core import (
     update_item_overrides,
 )
 from .queue_snapshot import count_queue_items, queue_item_snapshots
-from .runtime_observation import build_runtime_reconcile_observation
-from .runtime_reconcile import RuntimeReconcileResult, apply_reconcile_decision
-from .runtime_reconcile_executor import async_apply_runtime_reconcile_result
+from .runtime_reconcile import RuntimeReconcileResult
 from .runtime_reconcile_observation import (
     RuntimeReconcileEvaluation,
     RuntimeReconcileObservation,
-    evaluate_runtime_reconcile_observation,
+)
+from .runtime_reconcile_runner import (
+    async_evaluate_and_apply_runtime_reconcile,
+    evaluate_runtime_reconcile,
 )
 from .runtime_state import QueueRunTracking
 
@@ -369,27 +370,16 @@ async def _async_apply_reconcile_response(
     if not runtime_data.commands_enabled:
         raise HomeAssistantError("HA Dreame robot commands are disabled")
 
-    observation, evaluation = _runtime_reconcile_evaluation(hass, runtime_data)
-    try:
-        result = apply_reconcile_decision(
-            runtime_data.queue_state,
-            runtime_data.run_tracking,
-            evaluation.decision,
-        )
-    except QueueError as err:
-        raise HomeAssistantError(str(err)) from err
-
-    applied_result = await async_apply_runtime_reconcile_result(
+    outcome = await async_evaluate_and_apply_runtime_reconcile(
         hass,
         runtime_data,
-        result,
     )
     return {
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
-        "applied": _reconcile_result_response(applied_result),
-        "decision": _reconcile_decision_response(evaluation),
-        "evaluation": _reconcile_evaluation_response(evaluation),
-        "observation": _reconcile_observation_response(observation),
+        "applied": _reconcile_result_response(outcome.applied_result),
+        "decision": _reconcile_decision_response(outcome.evaluation),
+        "evaluation": _reconcile_evaluation_response(outcome.evaluation),
+        "observation": _reconcile_observation_response(outcome.observation),
         "queue": _queue_status_response(entry),
     }
 
@@ -593,7 +583,7 @@ def _runtime_status_response(hass: HomeAssistant, config_entry_id: str) -> dict[
 def _evaluate_reconcile_response(hass: HomeAssistant, config_entry_id: str) -> dict[str, Any]:
     """Return a read-only runtime reconcile observation and decision."""
     entry = _runtime_entry(hass, config_entry_id)
-    observation, evaluation = _runtime_reconcile_evaluation(hass, entry.runtime_data)
+    observation, evaluation = evaluate_runtime_reconcile(hass, entry.runtime_data)
 
     return {
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
@@ -601,26 +591,6 @@ def _evaluate_reconcile_response(hass: HomeAssistant, config_entry_id: str) -> d
         "evaluation": _reconcile_evaluation_response(evaluation),
         "observation": _reconcile_observation_response(observation),
     }
-
-
-def _runtime_reconcile_evaluation(
-    hass: HomeAssistant,
-    runtime_data: Any,
-) -> tuple[RuntimeReconcileObservation, RuntimeReconcileEvaluation]:
-    """Build and evaluate one runtime reconcile observation."""
-    observation = build_runtime_reconcile_observation(
-        hass,
-        vacuum_entity_id=runtime_data.vacuum_entity_id,
-        entity_ids=runtime_data.observation_entity_ids,
-    )
-    evaluation = evaluate_runtime_reconcile_observation(
-        runtime_data.queue_state,
-        runtime_data.run_tracking,
-        observation,
-        now=datetime.now(UTC),
-    )
-
-    return observation, evaluation
 
 
 def _reconcile_observation_response(

@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 import logging
 
-from homeassistant.const import Platform
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.const import Platform
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
     CONF_ALLOW_ROBOT_COMMANDS,
+    CONF_AUTO_RECONCILE_ENABLED,
     CONF_CLEAN_WATER_TANK_STATUS_ENTITY_ID,
     CONF_CLEANING_PROGRESS_ENTITY_ID,
     CONF_CURRENT_ROOM_ENTITY_ID,
@@ -28,11 +31,13 @@ from .const import (
 from .queue_core import QueueState, new_state
 from .runtime import HaDreameRuntimeData
 from .runtime_observation import RuntimeObservationEntityIds
+from .runtime_reconcile_runner import async_evaluate_and_apply_runtime_reconcile
 from .runtime_state import QueueRunTracking
 from .services import async_register_services, async_remove_services
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.SENSOR]
+AUTO_RECONCILE_INTERVAL = timedelta(seconds=20)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -50,6 +55,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.runtime_data = runtime_data
     hass.data[DOMAIN][entry.entry_id] = entry
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+    _register_auto_reconcile_interval(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _LOGGER.info(
         "Loaded %s config entry %s for %s",
@@ -98,12 +104,51 @@ def _build_runtime_data(hass: HomeAssistant, entry: ConfigEntry) -> HaDreameRunt
         raise ConfigEntryError(f"Configured vacuum is not from Dreame: {vacuum_entity_id}")
 
     return HaDreameRuntimeData(
+        auto_reconcile_enabled=entry.options.get(CONF_AUTO_RECONCILE_ENABLED) is True,
         commands_enabled=entry.options.get(CONF_ALLOW_ROBOT_COMMANDS) is True,
         observation_entity_ids=_build_observation_entity_ids(entry),
         queue_coordinator=_build_queue_coordinator(hass, entry),
         run_tracking_coordinator=_build_run_tracking_coordinator(hass, entry),
         vacuum_entity_id=vacuum_entity_id,
     )
+
+
+def _register_auto_reconcile_interval(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Register automatic runtime reconciliation for explicitly enabled entries."""
+    runtime_data = entry.runtime_data
+    if not runtime_data.commands_enabled or not runtime_data.auto_reconcile_enabled:
+        return
+
+    @callback
+    def _schedule_auto_reconcile(_now: datetime) -> None:
+        hass.async_create_task(_async_auto_reconcile_tick(hass, entry))
+
+    entry.async_on_unload(
+        async_track_time_interval(
+            hass,
+            _schedule_auto_reconcile,
+            AUTO_RECONCILE_INTERVAL,
+        )
+    )
+
+
+async def _async_auto_reconcile_tick(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Run one automatic runtime reconcile pass."""
+    if hass.data.get(DOMAIN, {}).get(entry.entry_id) is not entry:
+        return
+
+    runtime_data = entry.runtime_data
+    if not runtime_data.commands_enabled or not runtime_data.auto_reconcile_enabled:
+        return
+
+    try:
+        await async_evaluate_and_apply_runtime_reconcile(hass, runtime_data)
+    except Exception:
+        _LOGGER.exception(
+            "Automatic %s reconcile failed for config entry %s",
+            DOMAIN,
+            entry.entry_id,
+        )
 
 
 def _build_observation_entity_ids(entry: ConfigEntry) -> RuntimeObservationEntityIds:
