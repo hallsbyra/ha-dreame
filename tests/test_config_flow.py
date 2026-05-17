@@ -10,6 +10,13 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ha_dreame.const import (
     CONF_ALLOW_ROBOT_COMMANDS,
+    CONF_CLEAN_WATER_TANK_STATUS_ENTITY_ID,
+    CONF_CLEANING_PROGRESS_ENTITY_ID,
+    CONF_CURRENT_ROOM_ENTITY_ID,
+    CONF_ERROR_ENTITY_ID,
+    CONF_ROBOT_STATE_ENTITY_ID,
+    CONF_SELF_WASH_BASE_STATUS_ENTITY_ID,
+    CONF_TASK_STATUS_ENTITY_ID,
     CONF_VACUUM_ENTITY_ID,
     DOMAIN,
     DREAME_VACUUM_DOMAIN,
@@ -42,6 +49,17 @@ def _register_vacuum(
 
 def _options_defaults(schema: object) -> dict[str, object]:
     return schema({})
+
+
+OBSERVATION_ENTITY_OPTIONS = {
+    CONF_CLEAN_WATER_TANK_STATUS_ENTITY_ID,
+    CONF_CLEANING_PROGRESS_ENTITY_ID,
+    CONF_CURRENT_ROOM_ENTITY_ID,
+    CONF_ERROR_ENTITY_ID,
+    CONF_ROBOT_STATE_ENTITY_ID,
+    CONF_SELF_WASH_BASE_STATUS_ENTITY_ID,
+    CONF_TASK_STATUS_ENTITY_ID,
+}
 
 
 async def test_user_flow_creates_entry(hass: HomeAssistant) -> None:
@@ -165,6 +183,24 @@ async def test_options_flow_defaults_robot_commands_disabled(
     assert _options_defaults(result["data_schema"]) == {CONF_ALLOW_ROBOT_COMMANDS: False}
 
 
+async def test_options_flow_exposes_observation_entity_options(
+    hass: HomeAssistant,
+) -> None:
+    """Test the options flow exposes explicit observation entity selectors."""
+    vacuum_entity_id = _register_vacuum(hass)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Dreame Robot",
+        data={CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["type"] is FlowResultType.FORM
+    assert OBSERVATION_ENTITY_OPTIONS.issubset(_schema_keys(result["data_schema"]))
+
+
 async def test_options_flow_can_enable_robot_commands(hass: HomeAssistant) -> None:
     """Test the command gate can be explicitly enabled."""
     vacuum_entity_id = _register_vacuum(hass)
@@ -204,3 +240,61 @@ async def test_options_flow_can_disable_robot_commands(hass: HomeAssistant) -> N
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"] == {CONF_ALLOW_ROBOT_COMMANDS: False}
+
+
+async def test_options_flow_can_store_observation_entities(
+    hass: HomeAssistant,
+) -> None:
+    """Test configured observation entity ids are stored with command options."""
+    vacuum_entity_id = _register_vacuum(hass)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Dreame Robot",
+        data={CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+    )
+    entry.add_to_hass(hass)
+    observation_options = {
+        CONF_CLEAN_WATER_TANK_STATUS_ENTITY_ID: "sensor.robot_clean_water_tank",
+        CONF_CLEANING_PROGRESS_ENTITY_ID: "sensor.robot_cleaning_progress",
+        CONF_CURRENT_ROOM_ENTITY_ID: "sensor.robot_current_room",
+        CONF_ERROR_ENTITY_ID: "sensor.robot_error",
+        CONF_ROBOT_STATE_ENTITY_ID: "sensor.robot_state",
+        CONF_SELF_WASH_BASE_STATUS_ENTITY_ID: "sensor.robot_self_wash_base",
+        CONF_TASK_STATUS_ENTITY_ID: "sensor.robot_task_status",
+    }
+    for entity_id in observation_options.values():
+        hass.states.async_set(entity_id, "ready")
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_ALLOW_ROBOT_COMMANDS: True, **observation_options},
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"] == {CONF_ALLOW_ROBOT_COMMANDS: True, **observation_options}
+
+
+async def test_options_flow_rejects_missing_observation_entity(
+    hass: HomeAssistant,
+) -> None:
+    """Test explicit observation entity ids must exist."""
+    vacuum_entity_id = _register_vacuum(hass)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Dreame Robot",
+        data={CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_ALLOW_ROBOT_COMMANDS: False,
+            CONF_TASK_STATUS_ENTITY_ID: "sensor.missing_task_status",
+        },
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_TASK_STATUS_ENTITY_ID: "entity_not_found"}

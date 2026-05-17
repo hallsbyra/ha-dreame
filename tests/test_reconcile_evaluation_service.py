@@ -5,8 +5,10 @@ from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.ha_dreame.const import (
     CONF_CONFIG_ENTRY_ID,
+    CONF_CURRENT_ROOM_ENTITY_ID,
     CONF_ROOM_ID,
     CONF_ROOM_NAME,
+    CONF_TASK_STATUS_ENTITY_ID,
     CONF_VACUUM_ENTITY_ID,
     DOMAIN,
     SERVICE_EVALUATE_RECONCILE,
@@ -20,6 +22,20 @@ from .helpers import mock_entry, register_entity
 async def _setup_loaded_entry(hass: HomeAssistant) -> tuple[str, object]:
     vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
     entry = mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    return vacuum_entity_id, entry
+
+
+async def _setup_loaded_entry_with_options(
+    hass: HomeAssistant,
+    options: dict[str, object],
+) -> tuple[str, object]:
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id}, options=options)
     entry.add_to_hass(hass)
 
     assert await hass.config_entries.async_setup(entry.entry_id)
@@ -151,6 +167,46 @@ async def test_evaluate_reconcile_returns_decision_for_running_queue(
     assert response["evaluation"]["awaiting_completion_event"] is True
     assert response["evaluation"]["expected_room_id"] == 1
     assert response["evaluation"]["expected_room_name"] == "Kitchen"
+    assert response["decision"]["complete_current_room"] is True
+    assert response["decision"]["event_reasons"] == ["task_status_completed"]
+    assert entry.runtime_data.queue_state == queue_state
+    assert entry.runtime_data.run_tracking == run_tracking
+
+
+async def test_evaluate_reconcile_uses_configured_observation_entities(
+    hass: HomeAssistant,
+    mock_dreame_vacuum_dependency: None,
+) -> None:
+    """Test explicit observation entity ids override conventional sensor names."""
+    vacuum_entity_id, entry = await _setup_loaded_entry_with_options(
+        hass,
+        {
+            CONF_TASK_STATUS_ENTITY_ID: "sensor.robot_custom_task_status",
+            CONF_CURRENT_ROOM_ENTITY_ID: "sensor.robot_custom_current_room",
+        },
+    )
+    queue_state = _running_state()
+    run_tracking = _tracking(queue_state)
+    entry.runtime_data.set_queue_state(queue_state)
+    entry.runtime_data.set_run_tracking(run_tracking)
+    hass.states.async_set(vacuum_entity_id, "idle")
+    hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning")
+    hass.states.async_set(
+        "sensor.dreame_robot_current_room",
+        "Wrong room",
+        {CONF_ROOM_ID: "99", CONF_ROOM_NAME: "Wrong room"},
+    )
+    hass.states.async_set("sensor.robot_custom_task_status", "completed")
+    hass.states.async_set(
+        "sensor.robot_custom_current_room",
+        "Kitchen",
+        {CONF_ROOM_ID: "1", CONF_ROOM_NAME: "Kitchen"},
+    )
+
+    response = await _call_evaluate_reconcile_service(hass, entry.entry_id)
+
+    assert response["observation"]["task_status"] == "completed"
+    assert response["observation"]["observed_room_id"] == 1
     assert response["decision"]["complete_current_room"] is True
     assert response["decision"]["event_reasons"] == ["task_status_completed"]
     assert entry.runtime_data.queue_state == queue_state

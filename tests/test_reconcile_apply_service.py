@@ -11,8 +11,10 @@ from custom_components.ha_dreame.const import (
     ATTR_RUNNING_ITEMS,
     CONF_ALLOW_ROBOT_COMMANDS,
     CONF_CONFIG_ENTRY_ID,
+    CONF_CURRENT_ROOM_ENTITY_ID,
     CONF_ROOM_ID,
     CONF_ROOM_NAME,
+    CONF_TASK_STATUS_ENTITY_ID,
     CONF_VACUUM_ENTITY_ID,
     DOMAIN,
     DREAME_VACUUM_DOMAIN,
@@ -30,11 +32,12 @@ async def _setup_loaded_entry(
     hass: HomeAssistant,
     *,
     commands_enabled: bool = True,
+    options: dict[str, object] | None = None,
 ) -> tuple[str, object]:
     vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
     entry = mock_entry(
         {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
-        options={CONF_ALLOW_ROBOT_COMMANDS: commands_enabled},
+        options={CONF_ALLOW_ROBOT_COMMANDS: commands_enabled, **(options or {})},
     )
     entry.add_to_hass(hass)
 
@@ -242,6 +245,54 @@ async def test_apply_reconcile_completion_dispatches_next_room(
     assert entry.runtime_data.queue_state.current_item_id == next_item.item_id
     assert entry.runtime_data.run_tracking is not None
     assert entry.runtime_data.run_tracking.current_item_id == next_item.item_id
+
+
+async def test_apply_reconcile_uses_configured_observation_entities(
+    hass: HomeAssistant,
+) -> None:
+    """Test apply reconcile observes configured companion entities."""
+    calls: list[dict[str, object]] = []
+
+    async def _record_clean_segment(call: ServiceCall) -> None:
+        calls.append(dict(call.data))
+
+    hass.services.async_register(
+        DREAME_VACUUM_DOMAIN,
+        "vacuum_clean_segment",
+        _record_clean_segment,
+    )
+    vacuum_entity_id, entry = await _setup_loaded_entry(
+        hass,
+        commands_enabled=True,
+        options={
+            CONF_TASK_STATUS_ENTITY_ID: "sensor.robot_custom_task_status",
+            CONF_CURRENT_ROOM_ENTITY_ID: "sensor.robot_custom_current_room",
+        },
+    )
+    queue_state = _running_state()
+    entry.runtime_data.set_queue_state(queue_state)
+    entry.runtime_data.set_run_tracking(
+        _tracking(queue_state, task_status_cleared_since_dispatch=True)
+    )
+    hass.states.async_set(vacuum_entity_id, "idle")
+    hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning")
+    _set_current_room(hass, 99, "Wrong room")
+    hass.states.async_set("sensor.robot_custom_task_status", "completed")
+    hass.states.async_set(
+        "sensor.robot_custom_current_room",
+        "Kitchen",
+        {CONF_ROOM_ID: "1", CONF_ROOM_NAME: "Kitchen"},
+    )
+
+    response = await _call_apply_reconcile_service(hass, entry.entry_id)
+
+    next_item = entry.runtime_data.queue_state.items[1]
+    assert calls == [{"entity_id": vacuum_entity_id, "segments": [2]}]
+    assert response["observation"]["task_status"] == "completed"
+    assert response["observation"]["observed_room_id"] == 1
+    assert response["decision"]["complete_current_room"] is True
+    assert response["applied"]["command_item_id"] == next_item.item_id
+    assert entry.runtime_data.queue_state.current_item_id == next_item.item_id
 
 
 async def test_apply_reconcile_dispatch_failure_preserves_runtime_state(
