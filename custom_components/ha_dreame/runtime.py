@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .queue_core import QueueState
+from .runtime_observation import RuntimeObservationEntityIds
 from .runtime_state import QueueRunTracking
 
 
@@ -15,6 +16,7 @@ class HaDreameRuntimeData:
     """Runtime data attached to a configured HA Dreame entry."""
 
     commands_enabled: bool
+    observation_entity_ids: RuntimeObservationEntityIds
     queue_coordinator: DataUpdateCoordinator[QueueState]
     run_tracking_coordinator: DataUpdateCoordinator[QueueRunTracking | None]
     vacuum_entity_id: str

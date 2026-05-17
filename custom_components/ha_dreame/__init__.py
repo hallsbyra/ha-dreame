@@ -13,6 +13,13 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
     CONF_ALLOW_ROBOT_COMMANDS,
+    CONF_CLEAN_WATER_TANK_STATUS_ENTITY_ID,
+    CONF_CLEANING_PROGRESS_ENTITY_ID,
+    CONF_CURRENT_ROOM_ENTITY_ID,
+    CONF_ERROR_ENTITY_ID,
+    CONF_ROBOT_STATE_ENTITY_ID,
+    CONF_SELF_WASH_BASE_STATUS_ENTITY_ID,
+    CONF_TASK_STATUS_ENTITY_ID,
     CONF_VACUUM_ENTITY_ID,
     DOMAIN,
     DREAME_VACUUM_DOMAIN,
@@ -20,6 +27,7 @@ from .const import (
 )
 from .queue_core import QueueState, new_state
 from .runtime import HaDreameRuntimeData
+from .runtime_observation import RuntimeObservationEntityIds
 from .runtime_state import QueueRunTracking
 from .services import async_register_services, async_remove_services
 
@@ -91,10 +99,38 @@ def _build_runtime_data(hass: HomeAssistant, entry: ConfigEntry) -> HaDreameRunt
 
     return HaDreameRuntimeData(
         commands_enabled=entry.options.get(CONF_ALLOW_ROBOT_COMMANDS) is True,
+        observation_entity_ids=_build_observation_entity_ids(entry),
         queue_coordinator=_build_queue_coordinator(hass, entry),
         run_tracking_coordinator=_build_run_tracking_coordinator(hass, entry),
         vacuum_entity_id=vacuum_entity_id,
     )
+
+
+def _build_observation_entity_ids(entry: ConfigEntry) -> RuntimeObservationEntityIds:
+    """Build explicit observation entity ids from config entry options."""
+    return RuntimeObservationEntityIds(
+        task_status_entity_id=_optional_entity_id(entry.options.get(CONF_TASK_STATUS_ENTITY_ID)),
+        robot_state_entity_id=_optional_entity_id(entry.options.get(CONF_ROBOT_STATE_ENTITY_ID)),
+        current_room_entity_id=_optional_entity_id(entry.options.get(CONF_CURRENT_ROOM_ENTITY_ID)),
+        error_entity_id=_optional_entity_id(entry.options.get(CONF_ERROR_ENTITY_ID)),
+        cleaning_progress_entity_id=_optional_entity_id(
+            entry.options.get(CONF_CLEANING_PROGRESS_ENTITY_ID)
+        ),
+        self_wash_base_status_entity_id=_optional_entity_id(
+            entry.options.get(CONF_SELF_WASH_BASE_STATUS_ENTITY_ID)
+        ),
+        clean_water_tank_status_entity_id=_optional_entity_id(
+            entry.options.get(CONF_CLEAN_WATER_TANK_STATUS_ENTITY_ID)
+        ),
+    )
+
+
+def _optional_entity_id(value: object) -> str | None:
+    """Return a stripped entity id option or None."""
+    if not isinstance(value, str):
+        return None
+    entity_id = value.strip()
+    return entity_id or None
 
 
 def _build_queue_coordinator(

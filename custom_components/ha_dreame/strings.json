@@ -24,9 +24,19 @@
         "title": "HA Dreame options",
         "description": "Robot command dispatch is disabled by default while testing HA Dreame beside another controller.",
         "data": {
-          "allow_robot_commands": "Allow HA Dreame to send robot commands"
+          "allow_robot_commands": "Allow HA Dreame to send robot commands",
+          "clean_water_tank_status_entity_id": "Clean water tank status sensor",
+          "cleaning_progress_entity_id": "Cleaning progress sensor",
+          "current_room_entity_id": "Current room sensor",
+          "error_entity_id": "Error sensor",
+          "robot_state_entity_id": "Robot state sensor",
+          "self_wash_base_status_entity_id": "Self-wash base status sensor",
+          "task_status_entity_id": "Task status sensor"
         }
       }
+    },
+    "error": {
+      "entity_not_found": "The selected entity does not exist."
     }
   }
 }

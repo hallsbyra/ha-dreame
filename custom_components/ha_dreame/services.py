@@ -611,6 +611,7 @@ def _runtime_reconcile_evaluation(
     observation = build_runtime_reconcile_observation(
         hass,
         vacuum_entity_id=runtime_data.vacuum_entity_id,
+        entity_ids=runtime_data.observation_entity_ids,
     )
     evaluation = evaluate_runtime_reconcile_observation(
         runtime_data.queue_state,
