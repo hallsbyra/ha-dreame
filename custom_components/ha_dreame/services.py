@@ -40,6 +40,7 @@ from .const import (
     SERVICE_GET_RUNTIME_STATUS,
     SERVICE_MOVE_QUEUE_ITEM,
     SERVICE_REMOVE_QUEUE_ITEM,
+    SERVICE_SKIP_CURRENT_ROOM,
     SERVICE_START_QUEUE,
     SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES,
     VACUUM_DOMAIN,
@@ -55,6 +56,7 @@ from .queue_core import (
     current_item,
     move_item,
     remove_item,
+    skip_current_room,
     start_run,
     update_item_overrides,
 )
@@ -84,6 +86,7 @@ REMOVE_QUEUE_ITEM_SCHEMA = vol.Schema(
         vol.Required(CONF_ITEM_ID): vol.All(str, vol.Length(min=1)),
     }
 )
+SKIP_CURRENT_ROOM_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
 START_QUEUE_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
 UPDATE_QUEUE_ITEM_OVERRIDES_SCHEMA = vol.Schema(
     {
@@ -194,6 +197,22 @@ def async_register_services(hass: HomeAssistant) -> None:
             supports_response=SupportsResponse.OPTIONAL,
         )
 
+    if not hass.services.has_service(DOMAIN, SERVICE_SKIP_CURRENT_ROOM):
+
+        async def _async_skip_current_room(call: ServiceCall) -> ServiceResponse:
+            return await _async_skip_current_room_response(
+                hass,
+                call.data[CONF_CONFIG_ENTRY_ID],
+            )
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_SKIP_CURRENT_ROOM,
+            _async_skip_current_room,
+            schema=SKIP_CURRENT_ROOM_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+
     if not hass.services.has_service(DOMAIN, SERVICE_START_QUEUE):
 
         async def _async_start_queue(call: ServiceCall) -> ServiceResponse:
@@ -239,6 +258,7 @@ def async_remove_services(hass: HomeAssistant) -> None:
     hass.services.async_remove(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
     hass.services.async_remove(DOMAIN, SERVICE_MOVE_QUEUE_ITEM)
     hass.services.async_remove(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM)
+    hass.services.async_remove(DOMAIN, SERVICE_SKIP_CURRENT_ROOM)
     hass.services.async_remove(DOMAIN, SERVICE_START_QUEUE)
     hass.services.async_remove(DOMAIN, SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES)
 
@@ -315,6 +335,60 @@ async def _async_cancel_queue_response(
     except QueueError as err:
         raise HomeAssistantError(str(err)) from err
 
+    runtime_data.set_queue_state(queue_state)
+    runtime_data.set_run_tracking(None)
+    return _queue_status_response(entry)
+
+
+async def _async_skip_current_room_response(
+    hass: HomeAssistant,
+    config_entry_id: str,
+) -> dict[str, Any]:
+    """Skip the current room and continue or finish the runtime queue."""
+    entry = _runtime_entry(hass, config_entry_id)
+    runtime_data = entry.runtime_data
+
+    if not runtime_data.commands_enabled:
+        raise HomeAssistantError("HA Dreame robot commands are disabled")
+
+    try:
+        queue_state = skip_current_room(runtime_data.queue_state, reason="skip_pressed")
+        item = current_item(queue_state)
+        plan = (
+            build_room_dispatch_plan(
+                item,
+                vacuum_entity_id=runtime_data.vacuum_entity_id,
+            )
+            if item is not None
+            else None
+        )
+    except QueueError as err:
+        raise HomeAssistantError(str(err)) from err
+
+    if queue_state.run_state == "running":
+        await hass.services.async_call(
+            VACUUM_DOMAIN,
+            "stop",
+            {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
+            blocking=True,
+        )
+        if plan is None:
+            raise HomeAssistantError("No next room to dispatch")
+        await async_execute_dispatch_plan(
+            hass,
+            plan,
+            commands_enabled=runtime_data.commands_enabled,
+        )
+        runtime_data.set_queue_state(queue_state)
+        runtime_data.set_run_tracking(_new_run_tracking(queue_state))
+        return _queue_status_response(entry)
+
+    await hass.services.async_call(
+        VACUUM_DOMAIN,
+        "return_to_base",
+        {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
+        blocking=True,
+    )
     runtime_data.set_queue_state(queue_state)
     runtime_data.set_run_tracking(None)
     return _queue_status_response(entry)
