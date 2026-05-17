@@ -10,6 +10,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ha_dreame.const import (
     CONF_ALLOW_ROBOT_COMMANDS,
+    CONF_AUTO_RECONCILE_ENABLED,
     CONF_CLEAN_WATER_TANK_STATUS_ENTITY_ID,
     CONF_CLEANING_PROGRESS_ENTITY_ID,
     CONF_CURRENT_ROOM_ENTITY_ID,
@@ -180,7 +181,11 @@ async def test_options_flow_defaults_robot_commands_disabled(
 
     assert result["type"] is FlowResultType.FORM
     assert CONF_ALLOW_ROBOT_COMMANDS in _schema_keys(result["data_schema"])
-    assert _options_defaults(result["data_schema"]) == {CONF_ALLOW_ROBOT_COMMANDS: False}
+    assert CONF_AUTO_RECONCILE_ENABLED in _schema_keys(result["data_schema"])
+    assert _options_defaults(result["data_schema"]) == {
+        CONF_ALLOW_ROBOT_COMMANDS: False,
+        CONF_AUTO_RECONCILE_ENABLED: False,
+    }
 
 
 async def test_options_flow_exposes_observation_entity_options(
@@ -219,6 +224,34 @@ async def test_options_flow_can_enable_robot_commands(hass: HomeAssistant) -> No
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"] == {CONF_ALLOW_ROBOT_COMMANDS: True}
+
+
+async def test_options_flow_can_enable_auto_reconcile(
+    hass: HomeAssistant,
+) -> None:
+    """Test automatic reconcile can be explicitly enabled."""
+    vacuum_entity_id = _register_vacuum(hass)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Dreame Robot",
+        data={CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_ALLOW_ROBOT_COMMANDS: True,
+            CONF_AUTO_RECONCILE_ENABLED: True,
+        },
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"] == {
+        CONF_ALLOW_ROBOT_COMMANDS: True,
+        CONF_AUTO_RECONCILE_ENABLED: True,
+    }
 
 
 async def test_options_flow_can_disable_robot_commands(hass: HomeAssistant) -> None:
