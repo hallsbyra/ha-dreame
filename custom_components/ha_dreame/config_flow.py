@@ -13,10 +13,27 @@ from homeassistant.helpers import entity_registry as er, selector
 
 from .const import (
     CONF_ALLOW_ROBOT_COMMANDS,
+    CONF_CLEAN_WATER_TANK_STATUS_ENTITY_ID,
+    CONF_CLEANING_PROGRESS_ENTITY_ID,
+    CONF_CURRENT_ROOM_ENTITY_ID,
+    CONF_ERROR_ENTITY_ID,
+    CONF_ROBOT_STATE_ENTITY_ID,
+    CONF_SELF_WASH_BASE_STATUS_ENTITY_ID,
+    CONF_TASK_STATUS_ENTITY_ID,
     CONF_VACUUM_ENTITY_ID,
     DOMAIN,
     DREAME_VACUUM_DOMAIN,
     VACUUM_DOMAIN,
+)
+
+OBSERVATION_ENTITY_ID_OPTIONS = (
+    CONF_TASK_STATUS_ENTITY_ID,
+    CONF_ROBOT_STATE_ENTITY_ID,
+    CONF_CURRENT_ROOM_ENTITY_ID,
+    CONF_ERROR_ENTITY_ID,
+    CONF_CLEANING_PROGRESS_ENTITY_ID,
+    CONF_SELF_WASH_BASE_STATUS_ENTITY_ID,
+    CONF_CLEAN_WATER_TANK_STATUS_ENTITY_ID,
 )
 
 
@@ -88,19 +105,66 @@ class HaDreameOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Handle options."""
         if user_input is not None:
-            return self.async_create_entry(
-                title="",
-                data={CONF_ALLOW_ROBOT_COMMANDS: user_input[CONF_ALLOW_ROBOT_COMMANDS]},
+            errors = self._validate_observation_entities(user_input)
+            if not errors:
+                return self.async_create_entry(
+                    title="",
+                    data=self._options_data(user_input),
+                )
+
+            return self.async_show_form(
+                step_id="init",
+                data_schema=self._options_schema(),
+                errors=errors,
             )
 
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional(
-                        CONF_ALLOW_ROBOT_COMMANDS,
-                        default=self._config_entry.options.get(CONF_ALLOW_ROBOT_COMMANDS, False),
-                    ): bool
-                }
-            ),
+            data_schema=self._options_schema(),
         )
+
+    def _options_schema(self) -> vol.Schema:
+        """Return the options schema with current defaults."""
+        fields: dict[vol.Marker, Any] = {
+            vol.Optional(
+                CONF_ALLOW_ROBOT_COMMANDS,
+                default=self._config_entry.options.get(CONF_ALLOW_ROBOT_COMMANDS, False),
+            ): bool
+        }
+        for option in OBSERVATION_ENTITY_ID_OPTIONS:
+            current_value = self._config_entry.options.get(option)
+            marker = (
+                vol.Optional(option, default=current_value)
+                if current_value
+                else vol.Optional(option)
+            )
+            fields[marker] = selector.EntitySelector()
+        return vol.Schema(fields)
+
+    def _validate_observation_entities(self, user_input: dict[str, Any]) -> dict[str, str]:
+        """Validate optional companion observation entity ids."""
+        errors: dict[str, str] = {}
+        for option in OBSERVATION_ENTITY_ID_OPTIONS:
+            entity_id = _optional_entity_id(user_input.get(option))
+            if entity_id and self.hass.states.get(entity_id) is None:
+                errors[option] = "entity_not_found"
+        return errors
+
+    def _options_data(self, user_input: dict[str, Any]) -> dict[str, Any]:
+        """Return persisted public-safe options data."""
+        data: dict[str, Any] = {
+            CONF_ALLOW_ROBOT_COMMANDS: user_input[CONF_ALLOW_ROBOT_COMMANDS]
+        }
+        for option in OBSERVATION_ENTITY_ID_OPTIONS:
+            entity_id = _optional_entity_id(user_input.get(option))
+            if entity_id:
+                data[option] = entity_id
+        return data
+
+
+def _optional_entity_id(value: object) -> str | None:
+    """Return a stripped entity id option or None."""
+    if not isinstance(value, str):
+        return None
+    entity_id = value.strip()
+    return entity_id or None
