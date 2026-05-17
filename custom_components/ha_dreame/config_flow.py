@@ -152,9 +152,7 @@ class HaDreameOptionsFlow(config_entries.OptionsFlow):
 
     def _options_data(self, user_input: dict[str, Any]) -> dict[str, Any]:
         """Return persisted public-safe options data."""
-        data: dict[str, Any] = {
-            CONF_ALLOW_ROBOT_COMMANDS: user_input[CONF_ALLOW_ROBOT_COMMANDS]
-        }
+        data: dict[str, Any] = {CONF_ALLOW_ROBOT_COMMANDS: user_input[CONF_ALLOW_ROBOT_COMMANDS]}
         for option in OBSERVATION_ENTITY_ID_OPTIONS:
             entity_id = _optional_entity_id(user_input.get(option))
             if entity_id:
