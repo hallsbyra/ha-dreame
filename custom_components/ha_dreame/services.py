@@ -35,6 +35,7 @@ from .const import (
     CONF_VACUUM_ENTITY_ID,
     DOMAIN,
     SERVICE_ADD_QUEUE_ROOM,
+    SERVICE_APPLY_RECONCILE,
     SERVICE_CANCEL_QUEUE,
     SERVICE_CLEAR_PENDING_QUEUE,
     SERVICE_EVALUATE_RECONCILE,
@@ -63,6 +64,8 @@ from .queue_core import (
 )
 from .queue_snapshot import count_queue_items, queue_item_snapshots
 from .runtime_observation import build_runtime_reconcile_observation
+from .runtime_reconcile import RuntimeReconcileResult, apply_reconcile_decision
+from .runtime_reconcile_executor import async_apply_runtime_reconcile_result
 from .runtime_reconcile_observation import (
     RuntimeReconcileEvaluation,
     RuntimeReconcileObservation,
@@ -77,6 +80,7 @@ ADD_QUEUE_ROOM_SCHEMA = vol.Schema(
         vol.Required(CONF_ROOM_NAME): vol.All(str, vol.Length(min=1)),
     }
 )
+APPLY_RECONCILE_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
 CANCEL_QUEUE_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
 CLEAR_PENDING_QUEUE_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
 EVALUATE_RECONCILE_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
@@ -122,6 +126,22 @@ def async_register_services(hass: HomeAssistant) -> None:
             SERVICE_ADD_QUEUE_ROOM,
             _async_add_queue_room,
             schema=ADD_QUEUE_ROOM_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+
+    if not hass.services.has_service(DOMAIN, SERVICE_APPLY_RECONCILE):
+
+        async def _async_apply_reconcile(call: ServiceCall) -> ServiceResponse:
+            return await _async_apply_reconcile_response(
+                hass,
+                call.data[CONF_CONFIG_ENTRY_ID],
+            )
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_APPLY_RECONCILE,
+            _async_apply_reconcile,
+            schema=APPLY_RECONCILE_SCHEMA,
             supports_response=SupportsResponse.OPTIONAL,
         )
 
@@ -277,6 +297,7 @@ def async_register_services(hass: HomeAssistant) -> None:
 def async_remove_services(hass: HomeAssistant) -> None:
     """Remove all HA Dreame services."""
     hass.services.async_remove(DOMAIN, SERVICE_ADD_QUEUE_ROOM)
+    hass.services.async_remove(DOMAIN, SERVICE_APPLY_RECONCILE)
     hass.services.async_remove(DOMAIN, SERVICE_CANCEL_QUEUE)
     hass.services.async_remove(DOMAIN, SERVICE_CLEAR_PENDING_QUEUE)
     hass.services.async_remove(DOMAIN, SERVICE_EVALUATE_RECONCILE)
@@ -335,6 +356,42 @@ def _clear_pending_queue_response(
 
     runtime_data.set_queue_state(queue_state)
     return _queue_status_response(entry)
+
+
+async def _async_apply_reconcile_response(
+    hass: HomeAssistant,
+    config_entry_id: str,
+) -> dict[str, Any]:
+    """Evaluate and apply one manual runtime reconcile decision."""
+    entry = _runtime_entry(hass, config_entry_id)
+    runtime_data = entry.runtime_data
+
+    if not runtime_data.commands_enabled:
+        raise HomeAssistantError("HA Dreame robot commands are disabled")
+
+    observation, evaluation = _runtime_reconcile_evaluation(hass, runtime_data)
+    try:
+        result = apply_reconcile_decision(
+            runtime_data.queue_state,
+            runtime_data.run_tracking,
+            evaluation.decision,
+        )
+    except QueueError as err:
+        raise HomeAssistantError(str(err)) from err
+
+    applied_result = await async_apply_runtime_reconcile_result(
+        hass,
+        runtime_data,
+        result,
+    )
+    return {
+        CONF_CONFIG_ENTRY_ID: entry.entry_id,
+        "applied": _reconcile_result_response(applied_result),
+        "decision": _reconcile_decision_response(evaluation),
+        "evaluation": _reconcile_evaluation_response(evaluation),
+        "observation": _reconcile_observation_response(observation),
+        "queue": _queue_status_response(entry),
+    }
 
 
 async def _async_cancel_queue_response(
@@ -536,7 +593,21 @@ def _runtime_status_response(hass: HomeAssistant, config_entry_id: str) -> dict[
 def _evaluate_reconcile_response(hass: HomeAssistant, config_entry_id: str) -> dict[str, Any]:
     """Return a read-only runtime reconcile observation and decision."""
     entry = _runtime_entry(hass, config_entry_id)
-    runtime_data = entry.runtime_data
+    observation, evaluation = _runtime_reconcile_evaluation(hass, entry.runtime_data)
+
+    return {
+        CONF_CONFIG_ENTRY_ID: entry.entry_id,
+        "decision": _reconcile_decision_response(evaluation),
+        "evaluation": _reconcile_evaluation_response(evaluation),
+        "observation": _reconcile_observation_response(observation),
+    }
+
+
+def _runtime_reconcile_evaluation(
+    hass: HomeAssistant,
+    runtime_data: Any,
+) -> tuple[RuntimeReconcileObservation, RuntimeReconcileEvaluation]:
+    """Build and evaluate one runtime reconcile observation."""
     observation = build_runtime_reconcile_observation(
         hass,
         vacuum_entity_id=runtime_data.vacuum_entity_id,
@@ -548,12 +619,7 @@ def _evaluate_reconcile_response(hass: HomeAssistant, config_entry_id: str) -> d
         now=datetime.now(UTC),
     )
 
-    return {
-        CONF_CONFIG_ENTRY_ID: entry.entry_id,
-        "decision": _reconcile_decision_response(evaluation),
-        "evaluation": _reconcile_evaluation_response(evaluation),
-        "observation": _reconcile_observation_response(observation),
-    }
+    return observation, evaluation
 
 
 def _reconcile_observation_response(
@@ -604,6 +670,15 @@ def _reconcile_decision_response(
         "resume_current_room": decision.resume_current_room,
         "retry_current_room": decision.retry_current_room,
         "set_task_status_cleared_since_dispatch": decision.set_task_status_cleared_since_dispatch,
+    }
+
+
+def _reconcile_result_response(result: RuntimeReconcileResult) -> dict[str, Any]:
+    """Return a serializable applied reconcile result snapshot."""
+    return {
+        "command_intent": result.command_intent,
+        "command_item_id": result.command_item_id,
+        "event_reasons": list(result.event_reasons),
     }
 
 
