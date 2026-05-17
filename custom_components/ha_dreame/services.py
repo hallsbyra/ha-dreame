@@ -603,9 +603,7 @@ def _reconcile_decision_response(
         "reset_dispatch_retry_count": decision.reset_dispatch_retry_count,
         "resume_current_room": decision.resume_current_room,
         "retry_current_room": decision.retry_current_room,
-        "set_task_status_cleared_since_dispatch": (
-            decision.set_task_status_cleared_since_dispatch
-        ),
+        "set_task_status_cleared_since_dispatch": decision.set_task_status_cleared_since_dispatch,
     }
 
 
