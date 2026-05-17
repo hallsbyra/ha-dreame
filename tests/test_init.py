@@ -6,6 +6,7 @@ from homeassistant.core import HomeAssistant
 
 from custom_components.ha_dreame.const import (
     CONF_ALLOW_ROBOT_COMMANDS,
+    CONF_AUTO_RECONCILE_ENABLED,
     CONF_CURRENT_ROOM_ENTITY_ID,
     CONF_TASK_STATUS_ENTITY_ID,
     CONF_VACUUM_ENTITY_ID,
@@ -104,6 +105,23 @@ async def test_setup_entry_reads_enabled_command_gate_from_options(
     await hass.async_block_till_done()
 
     assert entry.runtime_data.commands_enabled is True
+
+
+async def test_setup_entry_reads_auto_reconcile_option(
+    hass: HomeAssistant,
+) -> None:
+    """Test that runtime data reflects explicit automatic reconcile enablement."""
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_AUTO_RECONCILE_ENABLED: True},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.runtime_data.auto_reconcile_enabled is True
 
 
 async def test_setup_entry_reads_observation_entity_options(
