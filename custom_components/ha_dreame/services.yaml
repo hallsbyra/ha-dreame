@@ -28,6 +28,13 @@ cancel_queue:
       selector:
         text:
 
+evaluate_reconcile:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        text:
+
 remove_queue_item:
   fields:
     config_entry_id:
