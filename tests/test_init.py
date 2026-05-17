@@ -6,6 +6,8 @@ from homeassistant.core import HomeAssistant
 
 from custom_components.ha_dreame.const import (
     CONF_ALLOW_ROBOT_COMMANDS,
+    CONF_CURRENT_ROOM_ENTITY_ID,
+    CONF_TASK_STATUS_ENTITY_ID,
     CONF_VACUUM_ENTITY_ID,
     DOMAIN,
     DREAME_VACUUM_DOMAIN,
@@ -102,6 +104,33 @@ async def test_setup_entry_reads_enabled_command_gate_from_options(
     await hass.async_block_till_done()
 
     assert entry.runtime_data.commands_enabled is True
+
+
+async def test_setup_entry_reads_observation_entity_options(
+    hass: HomeAssistant,
+) -> None:
+    """Test runtime data exposes configured observation entity ids."""
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={
+            CONF_TASK_STATUS_ENTITY_ID: "sensor.robot_task_status",
+            CONF_CURRENT_ROOM_ENTITY_ID: "sensor.robot_current_room",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert (
+        entry.runtime_data.observation_entity_ids.task_status_entity_id
+        == "sensor.robot_task_status"
+    )
+    assert (
+        entry.runtime_data.observation_entity_ids.current_room_entity_id
+        == "sensor.robot_current_room"
+    )
 
 
 async def test_options_update_reloads_runtime_data_when_enabling_commands(
