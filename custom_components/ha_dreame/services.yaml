@@ -56,6 +56,13 @@ move_queue_item:
           min: 0
           mode: box
 
+skip_current_room:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        text:
+
 update_queue_item_overrides:
   fields:
     config_entry_id:
