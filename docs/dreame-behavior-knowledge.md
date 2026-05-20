@@ -69,6 +69,7 @@ examples only.
 - Behavior: the high-level vacuum state can still report active cleaning while dock wash is paused.
 - Controller implication: include detailed robot state and self-wash-base status in reconciliation.
   Resume attempts should wait until blocking refill or tank conditions are cleared.
+  When resume is requested, call Home Assistant's `vacuum.start` service for the configured vacuum.
 - Test implication: cover paused dock wash with high-level `cleaning` as a recoverable hold.
 
 ### Current Room Is Noisy During Transitions
