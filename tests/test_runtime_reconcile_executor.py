@@ -269,11 +269,54 @@ async def test_runtime_reconcile_executor_commits_terminal_result(
     assert entry.runtime_data.run_tracking is None
 
 
-async def test_runtime_reconcile_executor_rejects_resume_intent_without_mutating(
+async def test_runtime_reconcile_executor_executes_resume_intent_and_commits_tracking(
     hass: HomeAssistant,
 ) -> None:
-    """Test resume intents stay explicit until a Dreame resume command is chosen."""
-    entry, _vacuum_entity_id = await _setup_entry(hass)
+    """Test resume intents call vacuum.start before committing runtime state."""
+    calls: list[dict[str, object]] = []
+
+    async def _record_start(call: ServiceCall) -> None:
+        calls.append(dict(call.data))
+
+    hass.services.async_register("vacuum", "start", _record_start)
+    entry, vacuum_entity_id = await _setup_entry(hass)
+    state = _running_two_room_state()
+    tracking = _tracking(state)
+    result_tracking = _tracking(state, task_status_cleared_since_dispatch=True)
+    entry.runtime_data.set_queue_state(state)
+    entry.runtime_data.set_run_tracking(tracking)
+    result = RuntimeReconcileResult(
+        queue_state=state,
+        run_tracking=result_tracking,
+        command_intent=COMMAND_INTENT_RESUME_CURRENT_ROOM,
+        command_item_id=state.current_item_id,
+    )
+
+    applied = await async_apply_runtime_reconcile_result(hass, entry.runtime_data, result)
+
+    assert calls == [{"entity_id": vacuum_entity_id}]
+    assert applied.queue_state == state
+    assert applied.run_tracking == entry.runtime_data.run_tracking
+    assert entry.runtime_data.queue_state == state
+    assert entry.runtime_data.run_tracking is not None
+    assert entry.runtime_data.run_tracking.current_item_id == state.current_item_id
+    assert entry.runtime_data.run_tracking.task_status_cleared_since_dispatch is True
+    assert entry.runtime_data.run_tracking.last_command_at != tracking.last_command_at
+    assert datetime.fromisoformat(entry.runtime_data.run_tracking.last_command_at)
+
+
+async def test_runtime_reconcile_executor_resume_failure_preserves_runtime_state(
+    hass: HomeAssistant,
+) -> None:
+    """Test failed resume commands leave runtime state unchanged."""
+    calls: list[dict[str, object]] = []
+
+    async def _raise_start(call: ServiceCall) -> None:
+        calls.append(dict(call.data))
+        raise HomeAssistantError("resume failed")
+
+    hass.services.async_register("vacuum", "start", _raise_start)
+    entry, vacuum_entity_id = await _setup_entry(hass)
     state = _running_two_room_state()
     tracking = _tracking(state)
     entry.runtime_data.set_queue_state(state)
@@ -285,8 +328,39 @@ async def test_runtime_reconcile_executor_rejects_resume_intent_without_mutating
         command_item_id=state.current_item_id,
     )
 
-    with pytest.raises(HomeAssistantError, match="Resume reconcile intent is not wired"):
+    with pytest.raises(HomeAssistantError, match="resume failed"):
         await async_apply_runtime_reconcile_result(hass, entry.runtime_data, result)
 
+    assert calls == [{"entity_id": vacuum_entity_id}]
+    assert entry.runtime_data.queue_state == state
+    assert entry.runtime_data.run_tracking == tracking
+
+
+async def test_runtime_reconcile_executor_resume_honors_disabled_command_gate(
+    hass: HomeAssistant,
+) -> None:
+    """Test disabled robot commands block resume intents."""
+    calls: list[dict[str, object]] = []
+
+    async def _record_start(call: ServiceCall) -> None:
+        calls.append(dict(call.data))
+
+    hass.services.async_register("vacuum", "start", _record_start)
+    entry, _vacuum_entity_id = await _setup_entry(hass, commands_enabled=False)
+    state = _running_two_room_state()
+    tracking = _tracking(state)
+    entry.runtime_data.set_queue_state(state)
+    entry.runtime_data.set_run_tracking(tracking)
+    result = RuntimeReconcileResult(
+        queue_state=state,
+        run_tracking=tracking,
+        command_intent=COMMAND_INTENT_RESUME_CURRENT_ROOM,
+        command_item_id=state.current_item_id,
+    )
+
+    with pytest.raises(HomeAssistantError, match="robot commands are disabled"):
+        await async_apply_runtime_reconcile_result(hass, entry.runtime_data, result)
+
+    assert calls == []
     assert entry.runtime_data.queue_state == state
     assert entry.runtime_data.run_tracking == tracking

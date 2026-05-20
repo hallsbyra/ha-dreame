@@ -327,10 +327,16 @@ async def test_apply_reconcile_dispatch_failure_preserves_runtime_state(
     assert entry.runtime_data.run_tracking == run_tracking
 
 
-async def test_apply_reconcile_resume_intent_errors_without_mutating(
+async def test_apply_reconcile_resume_intent_calls_vacuum_start(
     hass: HomeAssistant,
 ) -> None:
-    """Test unsupported resume intents surface an error and preserve state."""
+    """Test resume observations call vacuum.start and update run tracking."""
+    calls: list[dict[str, object]] = []
+
+    async def _record_start(call: ServiceCall) -> None:
+        calls.append(dict(call.data))
+
+    hass.services.async_register("vacuum", "start", _record_start)
     vacuum_entity_id, entry = await _setup_loaded_entry(hass)
     queue_state = _running_state()
     run_tracking = _tracking(queue_state)
@@ -342,8 +348,20 @@ async def test_apply_reconcile_resume_intent_errors_without_mutating(
     hass.states.async_set("sensor.dreame_robot_clean_water_tank_status", "installed")
     _set_current_room(hass, 1, "Kitchen")
 
-    with pytest.raises(HomeAssistantError, match="Resume reconcile intent is not wired"):
-        await _call_apply_reconcile_service(hass, entry.entry_id)
+    response = await _call_apply_reconcile_service(hass, entry.entry_id)
 
+    assert calls == [{"entity_id": vacuum_entity_id}]
+    assert response["decision"]["resume_current_room"] is True
+    assert response["applied"] == {
+        "command_intent": "resume_current_room",
+        "command_item_id": queue_state.current_item_id,
+        "event_reasons": [
+            "task_status_cleared_after_dispatch",
+            "dock_prep_paused_resume_requested",
+        ],
+    }
     assert entry.runtime_data.queue_state == queue_state
-    assert entry.runtime_data.run_tracking == run_tracking
+    assert entry.runtime_data.run_tracking is not None
+    assert entry.runtime_data.run_tracking.current_item_id == queue_state.current_item_id
+    assert entry.runtime_data.run_tracking.task_status_cleared_since_dispatch is True
+    assert entry.runtime_data.run_tracking.last_command_at != run_tracking.last_command_at
