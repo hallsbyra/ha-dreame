@@ -25,6 +25,7 @@ The current production Dreame implementation still lives in the sibling repo `..
 - `docs/` - migration guardrails and product notes
 - `docs/dreame-behavior-knowledge.md` - public-safe observed Dreame behavior and regression knowledge
 - `docs/merge-policy.md` - merge strategy for preserving TDD commit chains
+- `docs/parallel-install.md` - public-safe local and HAOS parallel-install workflow
 - `docs/release-checklist.md` - release readiness gates
 
 ## Validation
@@ -55,6 +56,7 @@ The current production Dreame implementation still lives in the sibling repo `..
 - This repo is not the production deploy path yet.
 - Do not deploy this scaffold to HAOS as a replacement for the running Dreame solution without explicit user approval.
 - During migration, local development deploys may install `ha_dreame` beside the old implementation. New runtime behavior must be namespaced, and robot command dispatch must stay disabled until explicit operator enablement is implemented and turned on.
+- For local or HAOS parallel-install work, follow `docs/parallel-install.md` and keep examples public-safe.
 
 ## Working Rules
 - If the task is to fix the currently running Dreame setup, work in `../ha-config`.
