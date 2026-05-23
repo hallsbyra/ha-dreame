@@ -11,6 +11,7 @@ The package starts with pure helpers and tests before runtime UI wiring. The pro
 - Map running override display values while keeping active changes behind a future `ha_dreame` service gate.
 - Derive queue activity labels from public robot, task-status, and error signals.
 - Build a first read-only `ha-dreame-queue-card` custom element.
+- Extract Dreame room maps and show available rooms read-only.
 - Keep service/entity assumptions under the `ha_dreame` namespace.
 - Use public-safe examples such as `vacuum.robot` and generic room names.
 - Keep legacy card behavior as a reference, not as copied private dashboard config.
