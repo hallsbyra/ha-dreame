@@ -16,6 +16,7 @@ from .const import (
     ATTR_QUEUE_ITEMS,
     ATTR_RUNNING_ITEMS,
     ATTR_TOTAL_ITEMS,
+    CONF_CONFIG_ENTRY_ID,
     CONF_VACUUM_ENTITY_ID,
     SENSOR_QUEUE_STATUS,
     TITLE,
@@ -42,10 +43,11 @@ class HaDreameQueueStatusSensor(CoordinatorEntity, SensorEntity):
 
     def __init__(self, entry: ConfigEntry) -> None:
         """Initialize the queue status sensor."""
+        self._entry_id = entry.entry_id
         self._runtime_data: HaDreameRuntimeData
         self._runtime_data = entry.runtime_data
         super().__init__(self._runtime_data.queue_coordinator)
-        self._attr_unique_id = f"{entry.entry_id}_{SENSOR_QUEUE_STATUS}"
+        self._attr_unique_id = f"{self._entry_id}_{SENSOR_QUEUE_STATUS}"
 
     @property
     def native_value(self) -> str:
@@ -57,6 +59,7 @@ class HaDreameQueueStatusSensor(CoordinatorEntity, SensorEntity):
         """Return public-safe queue status attributes."""
         queue_state = self._queue_state
         return {
+            CONF_CONFIG_ENTRY_ID: self._entry_id,
             CONF_VACUUM_ENTITY_ID: self._runtime_data.vacuum_entity_id,
             ATTR_PENDING_ITEMS: count_queue_items(queue_state, "pending"),
             ATTR_RUNNING_ITEMS: count_queue_items(queue_state, "running"),

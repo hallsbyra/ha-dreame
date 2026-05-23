@@ -17,6 +17,11 @@ export type HomeAssistantState = {
 
 export type HomeAssistantLike = {
   states: Record<string, HomeAssistantState | undefined>;
+  callService?: (
+    domain: string,
+    service: string,
+    data?: Record<string, unknown>,
+  ) => Promise<unknown> | unknown;
 };
 
 export type CardViewStatus = "not_configured" | "missing" | "ready";

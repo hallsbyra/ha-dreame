@@ -9,6 +9,7 @@ export type QueueItem = {
 
 export type QueueSnapshot = {
   runState: string;
+  configEntryId: string | null;
   vacuumEntityId: string | null;
   pendingItems: number;
   runningItems: number;
@@ -126,6 +127,8 @@ export function parseQueueSnapshot(stateObject: HomeAssistantState | undefined):
 
   return {
     runState: normalizedRunState(stateObject?.state) || "unknown",
+    configEntryId:
+      typeof attrs["config_entry_id"] === "string" ? attrs["config_entry_id"] : null,
     vacuumEntityId:
       typeof attrs["vacuum_entity_id"] === "string" ? attrs["vacuum_entity_id"] : null,
     pendingItems: nonNegativeInt(attrs["pending_items"]) ?? countByStatus(items, "pending"),
