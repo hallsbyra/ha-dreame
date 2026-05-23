@@ -32,7 +32,12 @@ const hass = {
     },
     "vacuum.robot": {
       state: "cleaning",
-      attributes: {},
+      attributes: {
+        rooms: {
+          "1": "Kitchen",
+          "2": "Hallway",
+        },
+      },
     },
     "sensor.robot_state": {
       state: "sweeping_and_mopping",
@@ -111,6 +116,16 @@ describe("card view model", () => {
         phase: "cleaning",
         label: "Vacuuming + mopping",
       },
+      rooms: [
+        {
+          roomId: 1,
+          roomName: "Kitchen",
+        },
+        {
+          roomId: 2,
+          roomName: "Hallway",
+        },
+      ],
       rows: [
         {
           itemId: "item-1",
