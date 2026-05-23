@@ -154,7 +154,7 @@ class HaDreameQueueCard extends LitElement {
       border-radius: 8px;
       display: grid;
       gap: 8px;
-      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-columns: minmax(0, 1fr) auto auto;
       min-height: 34px;
       padding: 7px 9px;
     }
@@ -174,6 +174,24 @@ class HaDreameQueueCard extends LitElement {
       font-size: 0.78rem;
       line-height: 1.25;
       white-space: nowrap;
+    }
+
+    .row-action {
+      background: transparent;
+      border: 1px solid var(--divider-color);
+      border-radius: 999px;
+      color: var(--primary-text-color);
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 0.74rem;
+      line-height: 1.2;
+      padding: 3px 8px;
+      white-space: nowrap;
+    }
+
+    .row-action:disabled {
+      color: var(--disabled-text-color, var(--secondary-text-color));
+      cursor: default;
     }
   `;
 
@@ -225,6 +243,20 @@ class HaDreameQueueCard extends LitElement {
                         <div class="queue-row">
                           <span class="room-name">${row.roomName}</span>
                           <span class="row-status">${row.statusLabel}</span>
+                          ${row.canRemove
+                            ? html`
+                                <button
+                                  aria-label=${`Remove ${row.roomName}`}
+                                  class="row-action"
+                                  type="button"
+                                  ?disabled=${!snapshot?.configEntryId}
+                                  @click=${() =>
+                                    this._removeItem(snapshot?.configEntryId, row.itemId)}
+                                >
+                                  Remove
+                                </button>
+                              `
+                            : nothing}
                         </div>
                       `,
                     )
@@ -289,6 +321,17 @@ class HaDreameQueueCard extends LitElement {
       config_entry_id: configEntryId,
       room_id: roomId,
       room_name: roomName,
+    });
+  }
+
+  private _removeItem(configEntryId: string | null | undefined, itemId: string): void {
+    if (!configEntryId || !this.hass?.callService) {
+      return;
+    }
+
+    void this.hass.callService("ha_dreame", "remove_queue_item", {
+      config_entry_id: configEntryId,
+      item_id: itemId,
     });
   }
 }

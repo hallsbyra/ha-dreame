@@ -31,6 +31,7 @@ export type CardQueueRow = {
   roomName: string;
   status: string;
   statusLabel: string;
+  canRemove: boolean;
 };
 
 export type CardViewModel = {
@@ -133,6 +134,7 @@ function cardQueueRow(item: QueueItem): CardQueueRow {
     roomName: item.roomName,
     status: item.status,
     statusLabel: queueRunStateLabel(item.status),
+    canRemove: item.status === "pending",
   };
 }
 
