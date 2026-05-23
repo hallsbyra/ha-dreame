@@ -26,6 +26,7 @@ Build a standalone Dreame solution that can eventually replace the current mix o
 - `custom_components/ha_dreame/` - minimal integration scaffold
 - `frontend/dreame-queue-card/` - future frontend package home
 - `docs/current-state.md` - migration status and guardrails
+- `docs/parallel-install.md` - public-safe local and HAOS parallel-install workflow
 
 ## Validation
 
