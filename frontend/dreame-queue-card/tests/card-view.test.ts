@@ -63,6 +63,7 @@ describe("card view model", () => {
       message: "Configure a HA Dreame queue status entity.",
       snapshot: null,
       activity: null,
+      rooms: [],
       rows: [],
     });
   });
