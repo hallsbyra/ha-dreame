@@ -38,6 +38,7 @@ describe("HA Dreame queue helpers", () => {
     running_items: 1,
     completed_items: 0,
     total_items: 2,
+    config_entry_id: "config-entry-1",
     vacuum_entity_id: "vacuum.robot",
   };
 
@@ -80,6 +81,7 @@ describe("HA Dreame queue helpers", () => {
   it("derives a full queue snapshot from a Home Assistant state object", () => {
     expect(parseQueueSnapshot({ state: "running", attributes })).toEqual({
       runState: "running",
+      configEntryId: "config-entry-1",
       vacuumEntityId: "vacuum.robot",
       pendingItems: 1,
       runningItems: 1,
