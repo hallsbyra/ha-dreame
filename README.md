@@ -24,7 +24,7 @@ Build a standalone Dreame solution that can eventually replace the current mix o
 ## Layout
 
 - `custom_components/ha_dreame/` - minimal integration scaffold
-- `frontend/dreame-queue-card/` - future frontend package home
+- `frontend/dreame-queue-card/` - frontend package home for the future queue card
 - `docs/current-state.md` - migration status and guardrails
 - `docs/parallel-install.md` - public-safe local and HAOS parallel-install workflow
 
@@ -35,9 +35,12 @@ python -m ruff check .
 python -m ruff format --check .
 python -m compileall custom_components/ha_dreame
 python -m pytest
+cd frontend/dreame-queue-card
+npm ci
+npm run check
 ```
 
-GitHub Actions also runs HACS validation and Hassfest.
+GitHub Actions also runs frontend validation, HACS validation, and Hassfest.
 
 ## GitHub
 

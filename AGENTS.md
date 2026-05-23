@@ -36,7 +36,10 @@ The current production Dreame implementation still lives in the sibling repo `..
 - Lint and format:
   - `python -m ruff check .`
   - `python -m ruff format --check .`
-- GitHub Actions also runs HACS validation and Hassfest.
+- Frontend card package:
+  - `cd frontend/dreame-queue-card && npm ci`
+  - `cd frontend/dreame-queue-card && npm run check`
+- GitHub Actions also runs frontend validation, HACS validation, and Hassfest.
 
 ## Development Model
 - Use TDD for all functional changes and bug fixes.
