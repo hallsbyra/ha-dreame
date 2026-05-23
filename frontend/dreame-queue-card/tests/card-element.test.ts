@@ -17,11 +17,17 @@ const hass = {
             room_name: "Kitchen",
             status: "running",
           },
+          {
+            item_id: "item-2",
+            room_id: 2,
+            room_name: "Hallway",
+            status: "pending",
+          },
         ],
-        pending_items: 0,
+        pending_items: 1,
         running_items: 1,
         completed_items: 0,
-        total_items: 1,
+        total_items: 2,
         config_entry_id: "config-entry-1",
         vacuum_entity_id: "vacuum.robot",
       },
@@ -99,6 +105,36 @@ describe("ha-dreame-queue-card", () => {
       config_entry_id: "config-entry-1",
       room_id: 2,
       room_name: "Hallway",
+    });
+  });
+
+  it("removes a pending queue item through the ha_dreame queue service", async () => {
+    const callService = vi.fn();
+    const element = document.createElement(CARD_ELEMENT_TAG) as any;
+    element.setConfig({
+      entity: "sensor.robot_queue_status",
+      title: "Robot queue",
+    });
+    element.hass = { ...hass, callService };
+    document.body.append(element);
+
+    await element.updateComplete;
+
+    const shadowRoot = element.shadowRoot as ShadowRoot | null;
+    const runningRemove = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Remove Kitchen"]',
+    );
+    const pendingRemove = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Remove Hallway"]',
+    );
+
+    expect(runningRemove).toBeNull();
+    expect(pendingRemove).toBeDefined();
+    pendingRemove?.click();
+
+    expect(callService).toHaveBeenCalledWith("ha_dreame", "remove_queue_item", {
+      config_entry_id: "config-entry-1",
+      item_id: "item-2",
     });
   });
 });

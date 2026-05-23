@@ -135,12 +135,14 @@ describe("card view model", () => {
           roomName: "Kitchen",
           status: "running",
           statusLabel: "Running",
+          canRemove: false,
         },
         {
           itemId: "item-2",
           roomName: "Hallway",
           status: "pending",
           statusLabel: "Pending",
+          canRemove: true,
         },
       ],
     });
