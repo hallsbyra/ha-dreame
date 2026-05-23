@@ -76,6 +76,7 @@ async def test_queue_status_sensor_exposes_initial_queue_state(
     assert state is not None
     assert state.state == "idle"
     assert state.attributes[ATTR_FRIENDLY_NAME] == "HA Dreame Queue Status"
+    assert state.attributes[CONF_CONFIG_ENTRY_ID] == entry.entry_id
     assert state.attributes[CONF_VACUUM_ENTITY_ID] == vacuum_entity_id
     assert state.attributes[ATTR_PENDING_ITEMS] == 0
     assert state.attributes[ATTR_RUNNING_ITEMS] == 0
