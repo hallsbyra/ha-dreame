@@ -113,6 +113,34 @@ class HaDreameQueueCard extends LitElement {
       gap: 6px;
     }
 
+    .section-title {
+      color: var(--secondary-text-color);
+      font-size: 0.74rem;
+      font-weight: 600;
+      line-height: 1.2;
+      margin: 12px 0 6px;
+      text-transform: uppercase;
+    }
+
+    .room-catalog {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .room-chip {
+      border: 1px solid var(--divider-color);
+      border-radius: 999px;
+      color: var(--primary-text-color);
+      font-size: 0.78rem;
+      line-height: 1.2;
+      max-width: 100%;
+      overflow: hidden;
+      padding: 5px 9px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     .queue-row {
       border: 1px solid var(--divider-color);
       border-radius: 8px;
@@ -194,6 +222,16 @@ class HaDreameQueueCard extends LitElement {
                     )
                   : html`<div class="message">Queue is empty.</div>`}
               </div>
+              ${view.rooms.length
+                ? html`
+                    <div class="section-title">Available rooms</div>
+                    <div class="room-catalog">
+                      ${view.rooms.map(
+                        (room) => html`<span class="room-chip">${room.roomName}</span>`,
+                      )}
+                    </div>
+                  `
+                : nothing}
             `}
       </ha-card>
     `;

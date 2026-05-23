@@ -1,5 +1,6 @@
 import { deriveRunActivity, sensorEntityIdForVacuum, type RunActivity } from "./activity";
 import { parseQueueSnapshot, queueRunStateLabel, type QueueItem, type QueueSnapshot } from "./queue";
+import { extractDreameRooms, type DreameRoom } from "./rooms";
 
 export const CARD_ELEMENT_TAG = "ha-dreame-queue-card";
 export const DEFAULT_CARD_TITLE = "HA Dreame Queue";
@@ -34,6 +35,7 @@ export type CardViewModel = {
   message: string | null;
   snapshot: QueueSnapshot | null;
   activity: RunActivity | null;
+  rooms: DreameRoom[];
   rows: CardQueueRow[];
 };
 
@@ -65,6 +67,7 @@ export function buildCardViewModel(
 
   const snapshot = parseQueueSnapshot(queueState);
   const activity = buildActivity(hass, snapshot);
+  const rooms = buildRooms(hass, snapshot);
 
   return {
     title,
@@ -73,6 +76,7 @@ export function buildCardViewModel(
     message: null,
     snapshot,
     activity,
+    rooms,
     rows: snapshot.items.map(cardQueueRow),
   };
 }
@@ -95,6 +99,7 @@ function emptyViewModel({
     message,
     snapshot: null,
     activity: null,
+    rooms: [],
     rows: [],
   };
 }
@@ -126,6 +131,18 @@ function cardQueueRow(item: QueueItem): CardQueueRow {
   };
 }
 
+function buildRooms(
+  hass: HomeAssistantLike | undefined,
+  snapshot: QueueSnapshot,
+): DreameRoom[] {
+  const vacuumEntityId = snapshot.vacuumEntityId;
+  if (!hass || !vacuumEntityId) {
+    return [];
+  }
+  const attrs = hass.states[vacuumEntityId]?.attributes;
+  return extractDreameRooms(isRecord(attrs) ? attrs["rooms"] : undefined);
+}
+
 function stateValue(
   hass: HomeAssistantLike,
   entityId: string | null,
@@ -135,4 +152,8 @@ function stateValue(
 
 function normalizedString(value: unknown): string {
   return String(value ?? "").trim();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
