@@ -37,3 +37,47 @@ def test_quality_scale_tracks_home_assistant_readiness() -> None:
     assert quality_scale["rules"]["config-flow"] == "done"
     assert quality_scale["rules"]["config-flow-test-coverage"] == "done"
     assert quality_scale["rules"]["brands"] == "todo"
+
+
+def test_parallel_install_guide_is_public_safe_and_linked() -> None:
+    """Test migration install guidance stays visible and public-safe."""
+    guide_path = Path("docs", "parallel-install.md")
+    guide = guide_path.read_text()
+    readme = Path("README.md").read_text()
+    agents = Path("AGENTS.md").read_text()
+
+    assert "docs/parallel-install.md" in readme
+    assert "docs/parallel-install.md" in agents
+
+    required_sections = (
+        "## Safety Model",
+        "## HACS Custom Repository Install",
+        "## Local Development Deploy",
+        "## First Setup",
+        "## Read-Only Validation",
+        "## Controlled Command Testing",
+        "## Rollback",
+        "## Runtime Observations",
+    )
+    for section in required_sections:
+        assert section in guide
+
+    required_phrases = (
+        "command-disabled by default",
+        "auto reconcile is disabled by default",
+        "Do not let two controllers send robot commands",
+        "docs/dreame-behavior-knowledge.md",
+    )
+    for phrase in required_phrases:
+        assert phrase in guide
+
+    private_markers = (
+        "haos.lan",
+        "/home/fredrik",
+        "musse",
+        "hallsbyra.se",
+        "root@",
+    )
+    normalized_guide = guide.lower()
+    for marker in private_markers:
+        assert marker not in normalized_guide
