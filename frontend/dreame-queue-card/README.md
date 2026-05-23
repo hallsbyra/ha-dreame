@@ -8,6 +8,7 @@ The package starts with pure helpers and tests before runtime UI wiring. The pro
 
 - Parse the public `ha_dreame` queue status sensor attribute shape.
 - Resolve and cycle queue item cleaning overrides for future controls.
+- Map running override display values while keeping active changes behind a future `ha_dreame` service gate.
 - Keep service/entity assumptions under the `ha_dreame` namespace.
 - Use public-safe examples such as `vacuum.robot` and generic room names.
 - Keep legacy card behavior as a reference, not as copied private dashboard config.
