@@ -129,9 +129,12 @@ class HaDreameQueueCard extends LitElement {
     }
 
     .room-chip {
+      background: transparent;
       border: 1px solid var(--divider-color);
       border-radius: 999px;
       color: var(--primary-text-color);
+      cursor: pointer;
+      font-family: inherit;
       font-size: 0.78rem;
       line-height: 1.2;
       max-width: 100%;
@@ -139,6 +142,11 @@ class HaDreameQueueCard extends LitElement {
       padding: 5px 9px;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+
+    .room-chip:disabled {
+      color: var(--disabled-text-color, var(--secondary-text-color));
+      cursor: default;
     }
 
     .queue-row {
@@ -227,7 +235,21 @@ class HaDreameQueueCard extends LitElement {
                     <div class="section-title">Available rooms</div>
                     <div class="room-catalog">
                       ${view.rooms.map(
-                        (room) => html`<span class="room-chip">${room.roomName}</span>`,
+                        (room) => html`
+                          <button
+                            class="room-chip"
+                            type="button"
+                            ?disabled=${!snapshot?.configEntryId}
+                            @click=${() =>
+                              this._addRoom(
+                                snapshot?.configEntryId,
+                                room.roomId,
+                                room.roomName,
+                              )}
+                          >
+                            ${room.roomName}
+                          </button>
+                        `,
                       )}
                     </div>
                   `
@@ -252,6 +274,22 @@ class HaDreameQueueCard extends LitElement {
       .filter((part) => part.length > 0)
       .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
       .join(" ");
+  }
+
+  private _addRoom(
+    configEntryId: string | null | undefined,
+    roomId: number,
+    roomName: string,
+  ): void {
+    if (!configEntryId || !this.hass?.callService) {
+      return;
+    }
+
+    void this.hass.callService("ha_dreame", "add_queue_room", {
+      config_entry_id: configEntryId,
+      room_id: roomId,
+      room_name: roomName,
+    });
   }
 }
 
