@@ -12,6 +12,7 @@ The package starts with pure helpers and tests before runtime UI wiring. The pro
 - Derive queue activity labels from public robot, task-status, and error signals.
 - Build a first read-only `ha-dreame-queue-card` custom element.
 - Extract Dreame room maps and show available rooms read-only.
+- Add available rooms through the `ha_dreame.add_queue_room` queue service without dispatching robot commands.
 - Keep service/entity assumptions under the `ha_dreame` namespace.
 - Use public-safe examples such as `vacuum.robot` and generic room names.
 - Keep legacy card behavior as a reference, not as copied private dashboard config.
