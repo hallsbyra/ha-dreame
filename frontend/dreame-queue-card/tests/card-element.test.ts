@@ -27,7 +27,12 @@ const hass = {
     },
     "vacuum.robot": {
       state: "cleaning",
-      attributes: {},
+      attributes: {
+        rooms: {
+          "1": "Kitchen",
+          "2": "Hallway",
+        },
+      },
     },
     "sensor.robot_state": {
       state: "sweeping_and_mopping",
@@ -64,5 +69,7 @@ describe("ha-dreame-queue-card", () => {
     expect(element.shadowRoot?.textContent).toContain("Running");
     expect(element.shadowRoot?.textContent).toContain("Vacuuming + mopping");
     expect(element.shadowRoot?.textContent).toContain("Kitchen");
+    expect(element.shadowRoot?.textContent).toContain("Available rooms");
+    expect(element.shadowRoot?.textContent).toContain("Hallway");
   });
 });
