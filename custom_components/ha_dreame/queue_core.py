@@ -55,6 +55,7 @@ class ReconcileDecision:
 
 
 TERMINAL_ITEM_STATUSES = {"completed", "skipped"}
+TERMINAL_RUN_STATES = {"completed", "canceled", "out_of_sync", "blocked"}
 MOP_MAINTENANCE_TASK_STATUSES = {
     "returning_to_remove_mop",
     "returning_to_install_mop",
@@ -82,6 +83,9 @@ def add_room(
     overrides: dict[str, Any] | None = None,
 ) -> QueueState:
     """Append one pending room to the queue."""
+    if state.run_state in TERMINAL_RUN_STATES:
+        state = QueueState()
+
     item = QueueItem(
         item_id=uuid4().hex,
         room_id=room_id,
