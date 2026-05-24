@@ -3,6 +3,7 @@ import { LitElement, css, html, nothing } from "lit";
 import {
   buildCardViewModel,
   CARD_ELEMENT_TAG,
+  type ActiveQueueService,
   type HaDreameQueueCardConfig,
   type HomeAssistantLike,
 } from "./card-view";
@@ -252,18 +253,39 @@ class HaDreameQueueCard extends LitElement {
                 ${this._count("Done", snapshot?.completedItems ?? 0)}
                 ${this._count("Total", snapshot?.totalItems ?? 0)}
               </div>
-              ${view.canClearPending
+              ${view.activeControls.length || view.canClearPending
                 ? html`
                     <div class="queue-actions">
-                      <button
-                        aria-label="Clear pending queue"
-                        class="row-action"
-                        type="button"
-                        ?disabled=${!snapshot?.configEntryId}
-                        @click=${() => this._clearPending(snapshot?.configEntryId)}
-                      >
-                        Clear pending
-                      </button>
+                      ${view.activeControls.map(
+                        (control) => html`
+                          <button
+                            aria-label=${control.ariaLabel}
+                            class="row-action"
+                            type="button"
+                            ?disabled=${!snapshot?.configEntryId}
+                            @click=${() =>
+                              this._callQueueService(
+                                snapshot?.configEntryId,
+                                control.service,
+                              )}
+                          >
+                            ${control.label}
+                          </button>
+                        `,
+                      )}
+                      ${view.canClearPending
+                        ? html`
+                            <button
+                              aria-label="Clear pending queue"
+                              class="row-action"
+                              type="button"
+                              ?disabled=${!snapshot?.configEntryId}
+                              @click=${() => this._clearPending(snapshot?.configEntryId)}
+                            >
+                              Clear pending
+                            </button>
+                          `
+                        : nothing}
                     </div>
                   `
                 : nothing}
@@ -447,6 +469,19 @@ class HaDreameQueueCard extends LitElement {
     }
 
     void this.hass.callService("ha_dreame", "clear_pending_queue", {
+      config_entry_id: configEntryId,
+    });
+  }
+
+  private _callQueueService(
+    configEntryId: string | null | undefined,
+    service: ActiveQueueService,
+  ): void {
+    if (!configEntryId || !this.hass?.callService) {
+      return;
+    }
+
+    void this.hass.callService("ha_dreame", service, {
       config_entry_id: configEntryId,
     });
   }
