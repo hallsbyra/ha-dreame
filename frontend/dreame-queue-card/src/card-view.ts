@@ -28,10 +28,13 @@ export type CardViewStatus = "not_configured" | "missing" | "ready";
 
 export type CardQueueRow = {
   itemId: string;
+  queuePosition: number;
   roomName: string;
   status: string;
   statusLabel: string;
   canRemove: boolean;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
 };
 
 export type CardViewModel = {
@@ -41,6 +44,7 @@ export type CardViewModel = {
   message: string | null;
   snapshot: QueueSnapshot | null;
   activity: RunActivity | null;
+  canClearPending: boolean;
   rooms: DreameRoom[];
   rows: CardQueueRow[];
 };
@@ -82,8 +86,9 @@ export function buildCardViewModel(
     message: null,
     snapshot,
     activity,
+    canClearPending: snapshot.pendingItems > 0,
     rooms,
-    rows: snapshot.items.map(cardQueueRow),
+    rows: cardQueueRows(snapshot.items),
   };
 }
 
@@ -105,6 +110,7 @@ function emptyViewModel({
     message,
     snapshot: null,
     activity: null,
+    canClearPending: false,
     rooms: [],
     rows: [],
   };
@@ -128,14 +134,21 @@ function buildActivity(
   });
 }
 
-function cardQueueRow(item: QueueItem): CardQueueRow {
-  return {
+function cardQueueRows(items: QueueItem[]): CardQueueRow[] {
+  const pendingIndexes = items.flatMap((item, index) => (item.status === "pending" ? [index] : []));
+  const firstPendingIndex = pendingIndexes[0] ?? null;
+  const lastPendingIndex = pendingIndexes[pendingIndexes.length - 1] ?? null;
+
+  return items.map((item, index) => ({
     itemId: item.itemId,
+    queuePosition: index,
     roomName: item.roomName,
     status: item.status,
     statusLabel: queueRunStateLabel(item.status),
     canRemove: item.status === "pending",
-  };
+    canMoveUp: item.status === "pending" && index !== firstPendingIndex,
+    canMoveDown: item.status === "pending" && index !== lastPendingIndex,
+  }));
 }
 
 function buildRooms(
