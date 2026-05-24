@@ -1,5 +1,6 @@
 import { deriveRunActivity, sensorEntityIdForVacuum, type RunActivity } from "./activity";
 import { parseQueueSnapshot, queueRunStateLabel, type QueueItem, type QueueSnapshot } from "./queue";
+import { overrideLabel, type OverrideField } from "./queue-overrides";
 import { extractDreameRooms, type DreameRoom } from "./rooms";
 
 export const CARD_ELEMENT_TAG = "ha-dreame-queue-card";
@@ -26,16 +27,30 @@ export type HomeAssistantLike = {
 
 export type CardViewStatus = "not_configured" | "missing" | "ready";
 
+export type CardOverrideControl = {
+  field: OverrideField;
+  label: string;
+  valueLabel: string;
+};
+
 export type CardQueueRow = {
   itemId: string;
   queuePosition: number;
   roomName: string;
   status: string;
   statusLabel: string;
+  overrides: Record<string, unknown>;
   canRemove: boolean;
   canMoveUp: boolean;
   canMoveDown: boolean;
+  overrideControls: CardOverrideControl[];
 };
+
+const OVERRIDE_CONTROLS: Array<{ field: OverrideField; label: string }> = [
+  { field: "water_volume", label: "Water" },
+  { field: "suction_level", label: "Suction" },
+  { field: "repeats", label: "Repeats" },
+];
 
 export type CardViewModel = {
   title: string;
@@ -145,9 +160,19 @@ function cardQueueRows(items: QueueItem[]): CardQueueRow[] {
     roomName: item.roomName,
     status: item.status,
     statusLabel: queueRunStateLabel(item.status),
+    overrides: { ...item.overrides },
     canRemove: item.status === "pending",
     canMoveUp: item.status === "pending" && index !== firstPendingIndex,
     canMoveDown: item.status === "pending" && index !== lastPendingIndex,
+    overrideControls: item.status === "pending" ? buildOverrideControls(item.overrides) : [],
+  }));
+}
+
+function buildOverrideControls(overrides: Record<string, unknown>): CardOverrideControl[] {
+  return OVERRIDE_CONTROLS.map((control) => ({
+    field: control.field,
+    label: control.label,
+    valueLabel: overrideLabel(control.field, overrides, {}),
   }));
 }
 

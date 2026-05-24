@@ -6,6 +6,7 @@ import {
   type HaDreameQueueCardConfig,
   type HomeAssistantLike,
 } from "./card-view";
+import { cycledOverrides, type OverrideField } from "./queue-overrides";
 
 class HaDreameQueueCard extends LitElement {
   static properties = {
@@ -274,6 +275,27 @@ class HaDreameQueueCard extends LitElement {
                           <span class="room-name">${row.roomName}</span>
                           <div class="row-actions">
                             <span class="row-status">${row.statusLabel}</span>
+                            ${row.overrideControls.map(
+                              (control) => html`
+                                <button
+                                  aria-label=${`Cycle ${row.roomName} ${this._overrideAriaField(
+                                    control.field,
+                                  )}`}
+                                  class="row-action"
+                                  type="button"
+                                  ?disabled=${!snapshot?.configEntryId}
+                                  @click=${() =>
+                                    this._updateOverrides(
+                                      snapshot?.configEntryId,
+                                      row.itemId,
+                                      control.field,
+                                      row.overrides,
+                                    )}
+                                >
+                                  ${control.label} ${control.valueLabel}
+                                </button>
+                              `,
+                            )}
                             ${row.canMoveUp
                               ? html`
                                   <button
@@ -427,6 +449,33 @@ class HaDreameQueueCard extends LitElement {
     void this.hass.callService("ha_dreame", "clear_pending_queue", {
       config_entry_id: configEntryId,
     });
+  }
+
+  private _updateOverrides(
+    configEntryId: string | null | undefined,
+    itemId: string,
+    field: OverrideField,
+    overrides: Record<string, unknown>,
+  ): void {
+    if (!configEntryId || !this.hass?.callService) {
+      return;
+    }
+
+    void this.hass.callService("ha_dreame", "update_queue_item_overrides", {
+      config_entry_id: configEntryId,
+      item_id: itemId,
+      overrides: cycledOverrides(field, overrides, {}),
+    });
+  }
+
+  private _overrideAriaField(field: OverrideField): string {
+    if (field === "water_volume") {
+      return "water volume";
+    }
+    if (field === "suction_level") {
+      return "suction level";
+    }
+    return "repeats";
   }
 }
 
