@@ -73,6 +73,35 @@ def test_add_room_appends_pending_item_and_copies_overrides() -> None:
     assert state.items[0].overrides == {"suction_level": "turbo"}
 
 
+@pytest.mark.parametrize("terminal_state", ["completed", "canceled", "out_of_sync", "blocked"])
+def test_add_room_after_terminal_run_starts_fresh_pending_queue(
+    terminal_state: str,
+) -> None:
+    """Test adding a room after a terminal run resets stale queue contents."""
+    state = QueueState(
+        run_state=terminal_state,
+        run_id="run-1",
+        current_item_id="item-1",
+        items=(
+            QueueItem(
+                item_id="item-1",
+                room_id=1,
+                room_name="Kitchen",
+                status="completed",
+            ),
+        ),
+    )
+
+    state = add_room(state, room_id=7, room_name="Hall")
+
+    assert state.run_state == "idle"
+    assert state.run_id is None
+    assert state.current_item_id is None
+    assert [(item.room_id, item.room_name, item.status) for item in state.items] == [
+        (7, "Hall", "pending")
+    ]
+
+
 def test_start_run_sets_run_state_and_first_room_running() -> None:
     """Test starting a run marks the first pending room as running."""
     state = start_run(_seed_three_rooms())
