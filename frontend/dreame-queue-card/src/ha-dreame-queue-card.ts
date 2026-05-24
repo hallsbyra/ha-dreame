@@ -82,7 +82,7 @@ class HaDreameQueueCard extends LitElement {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 6px;
-      margin-bottom: 12px;
+      margin-bottom: 8px;
     }
 
     .count {
@@ -111,6 +111,12 @@ class HaDreameQueueCard extends LitElement {
     .queue-list {
       display: grid;
       gap: 6px;
+    }
+
+    .queue-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin: 0 0 12px;
     }
 
     .section-title {
@@ -154,7 +160,8 @@ class HaDreameQueueCard extends LitElement {
       border-radius: 8px;
       display: grid;
       gap: 8px;
-      grid-template-columns: minmax(0, 1fr) auto auto;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
       min-height: 34px;
       padding: 7px 9px;
     }
@@ -174,6 +181,14 @@ class HaDreameQueueCard extends LitElement {
       font-size: 0.78rem;
       line-height: 1.25;
       white-space: nowrap;
+    }
+
+    .row-actions {
+      align-items: center;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      justify-content: flex-end;
     }
 
     .row-action {
@@ -236,27 +251,80 @@ class HaDreameQueueCard extends LitElement {
                 ${this._count("Done", snapshot?.completedItems ?? 0)}
                 ${this._count("Total", snapshot?.totalItems ?? 0)}
               </div>
+              ${view.canClearPending
+                ? html`
+                    <div class="queue-actions">
+                      <button
+                        aria-label="Clear pending queue"
+                        class="row-action"
+                        type="button"
+                        ?disabled=${!snapshot?.configEntryId}
+                        @click=${() => this._clearPending(snapshot?.configEntryId)}
+                      >
+                        Clear pending
+                      </button>
+                    </div>
+                  `
+                : nothing}
               <div class="queue-list">
                 ${view.rows.length
                   ? view.rows.map(
                       (row) => html`
                         <div class="queue-row">
                           <span class="room-name">${row.roomName}</span>
-                          <span class="row-status">${row.statusLabel}</span>
-                          ${row.canRemove
-                            ? html`
-                                <button
-                                  aria-label=${`Remove ${row.roomName}`}
-                                  class="row-action"
-                                  type="button"
-                                  ?disabled=${!snapshot?.configEntryId}
-                                  @click=${() =>
-                                    this._removeItem(snapshot?.configEntryId, row.itemId)}
-                                >
-                                  Remove
-                                </button>
-                              `
-                            : nothing}
+                          <div class="row-actions">
+                            <span class="row-status">${row.statusLabel}</span>
+                            ${row.canMoveUp
+                              ? html`
+                                  <button
+                                    aria-label=${`Move ${row.roomName} up`}
+                                    class="row-action"
+                                    type="button"
+                                    ?disabled=${!snapshot?.configEntryId}
+                                    @click=${() =>
+                                      this._moveItem(
+                                        snapshot?.configEntryId,
+                                        row.itemId,
+                                        row.queuePosition - 1,
+                                      )}
+                                  >
+                                    Up
+                                  </button>
+                                `
+                              : nothing}
+                            ${row.canMoveDown
+                              ? html`
+                                  <button
+                                    aria-label=${`Move ${row.roomName} down`}
+                                    class="row-action"
+                                    type="button"
+                                    ?disabled=${!snapshot?.configEntryId}
+                                    @click=${() =>
+                                      this._moveItem(
+                                        snapshot?.configEntryId,
+                                        row.itemId,
+                                        row.queuePosition + 1,
+                                      )}
+                                  >
+                                    Down
+                                  </button>
+                                `
+                              : nothing}
+                            ${row.canRemove
+                              ? html`
+                                  <button
+                                    aria-label=${`Remove ${row.roomName}`}
+                                    class="row-action"
+                                    type="button"
+                                    ?disabled=${!snapshot?.configEntryId}
+                                    @click=${() =>
+                                      this._removeItem(snapshot?.configEntryId, row.itemId)}
+                                  >
+                                    Remove
+                                  </button>
+                                `
+                              : nothing}
+                          </div>
                         </div>
                       `,
                     )
@@ -332,6 +400,32 @@ class HaDreameQueueCard extends LitElement {
     void this.hass.callService("ha_dreame", "remove_queue_item", {
       config_entry_id: configEntryId,
       item_id: itemId,
+    });
+  }
+
+  private _moveItem(
+    configEntryId: string | null | undefined,
+    itemId: string,
+    newPosition: number,
+  ): void {
+    if (!configEntryId || !this.hass?.callService) {
+      return;
+    }
+
+    void this.hass.callService("ha_dreame", "move_queue_item", {
+      config_entry_id: configEntryId,
+      item_id: itemId,
+      new_position: newPosition,
+    });
+  }
+
+  private _clearPending(configEntryId: string | null | undefined): void {
+    if (!configEntryId || !this.hass?.callService) {
+      return;
+    }
+
+    void this.hass.callService("ha_dreame", "clear_pending_queue", {
+      config_entry_id: configEntryId,
     });
   }
 }
