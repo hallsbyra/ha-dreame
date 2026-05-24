@@ -27,6 +27,14 @@ export type HomeAssistantLike = {
 
 export type CardViewStatus = "not_configured" | "missing" | "ready";
 
+export type ActiveQueueService = "start_queue" | "cancel_queue" | "skip_current_room";
+
+export type CardActiveControl = {
+  ariaLabel: string;
+  label: string;
+  service: ActiveQueueService;
+};
+
 export type CardOverrideControl = {
   field: OverrideField;
   label: string;
@@ -59,6 +67,7 @@ export type CardViewModel = {
   message: string | null;
   snapshot: QueueSnapshot | null;
   activity: RunActivity | null;
+  activeControls: CardActiveControl[];
   canClearPending: boolean;
   rooms: DreameRoom[];
   rows: CardQueueRow[];
@@ -101,6 +110,7 @@ export function buildCardViewModel(
     message: null,
     snapshot,
     activity,
+    activeControls: buildActiveControls(snapshot),
     canClearPending: snapshot.pendingItems > 0,
     rooms,
     rows: cardQueueRows(snapshot.items),
@@ -125,6 +135,7 @@ function emptyViewModel({
     message,
     snapshot: null,
     activity: null,
+    activeControls: [],
     canClearPending: false,
     rooms: [],
     rows: [],
@@ -166,6 +177,35 @@ function cardQueueRows(items: QueueItem[]): CardQueueRow[] {
     canMoveDown: item.status === "pending" && index !== lastPendingIndex,
     overrideControls: item.status === "pending" ? buildOverrideControls(item.overrides) : [],
   }));
+}
+
+function buildActiveControls(snapshot: QueueSnapshot): CardActiveControl[] {
+  if (snapshot.runState === "running") {
+    return [
+      {
+        ariaLabel: "Cancel queue",
+        label: "Cancel",
+        service: "cancel_queue",
+      },
+      {
+        ariaLabel: "Skip current room",
+        label: "Skip",
+        service: "skip_current_room",
+      },
+    ];
+  }
+
+  if (snapshot.pendingItems > 0) {
+    return [
+      {
+        ariaLabel: "Start queue",
+        label: "Start",
+        service: "start_queue",
+      },
+    ];
+  }
+
+  return [];
 }
 
 function buildOverrideControls(overrides: Record<string, unknown>): CardOverrideControl[] {
