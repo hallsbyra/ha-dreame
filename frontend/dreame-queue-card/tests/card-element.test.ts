@@ -23,11 +23,17 @@ const hass = {
             room_name: "Hallway",
             status: "pending",
           },
+          {
+            item_id: "item-3",
+            room_id: 3,
+            room_name: "Office",
+            status: "pending",
+          },
         ],
-        pending_items: 1,
+        pending_items: 2,
         running_items: 1,
         completed_items: 0,
-        total_items: 2,
+        total_items: 3,
         config_entry_id: "config-entry-1",
         vacuum_entity_id: "vacuum.robot",
       },
@@ -38,6 +44,7 @@ const hass = {
         rooms: {
           "1": "Kitchen",
           "2": "Hallway",
+          "3": "Office",
         },
       },
     },
@@ -135,6 +142,81 @@ describe("ha-dreame-queue-card", () => {
     expect(callService).toHaveBeenCalledWith("ha_dreame", "remove_queue_item", {
       config_entry_id: "config-entry-1",
       item_id: "item-2",
+    });
+  });
+
+  it("moves pending queue items through the ha_dreame queue service", async () => {
+    const callService = vi.fn();
+    const element = document.createElement(CARD_ELEMENT_TAG) as any;
+    element.setConfig({
+      entity: "sensor.robot_queue_status",
+      title: "Robot queue",
+    });
+    element.hass = { ...hass, callService };
+    document.body.append(element);
+
+    await element.updateComplete;
+
+    const shadowRoot = element.shadowRoot as ShadowRoot | null;
+    const runningMoveUp = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Move Kitchen up"]',
+    );
+    const hallwayMoveUp = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Move Hallway up"]',
+    );
+    const hallwayMoveDown = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Move Hallway down"]',
+    );
+    const officeMoveUp = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Move Office up"]',
+    );
+    const officeMoveDown = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Move Office down"]',
+    );
+
+    expect(runningMoveUp).toBeNull();
+    expect(hallwayMoveUp).toBeNull();
+    expect(hallwayMoveDown).toBeDefined();
+    expect(officeMoveUp).toBeDefined();
+    expect(officeMoveDown).toBeNull();
+
+    officeMoveUp?.click();
+    hallwayMoveDown?.click();
+
+    expect(callService).toHaveBeenNthCalledWith(1, "ha_dreame", "move_queue_item", {
+      config_entry_id: "config-entry-1",
+      item_id: "item-3",
+      new_position: 1,
+    });
+    expect(callService).toHaveBeenNthCalledWith(2, "ha_dreame", "move_queue_item", {
+      config_entry_id: "config-entry-1",
+      item_id: "item-2",
+      new_position: 2,
+    });
+  });
+
+  it("clears pending queue items through the ha_dreame queue service", async () => {
+    const callService = vi.fn();
+    const element = document.createElement(CARD_ELEMENT_TAG) as any;
+    element.setConfig({
+      entity: "sensor.robot_queue_status",
+      title: "Robot queue",
+    });
+    element.hass = { ...hass, callService };
+    document.body.append(element);
+
+    await element.updateComplete;
+
+    const shadowRoot = element.shadowRoot as ShadowRoot | null;
+    const clearPending = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Clear pending queue"]',
+    );
+
+    expect(clearPending).toBeDefined();
+    clearPending?.click();
+
+    expect(callService).toHaveBeenCalledWith("ha_dreame", "clear_pending_queue", {
+      config_entry_id: "config-entry-1",
     });
   });
 });
