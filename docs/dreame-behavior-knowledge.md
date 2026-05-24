@@ -114,6 +114,16 @@ examples only.
 - Controller implication: classify post-run maintenance separately from queue execution failure.
 - Test implication: cover post-completion maintenance as completed-with-maintenance, not failed.
 
+### Adding After A Terminal Queue Starts Fresh
+
+- Confidence: `Observed`
+- Behavior: after a queue reaches a terminal state such as `completed`, `canceled`, `out_of_sync`,
+  or `blocked`, adding a new room is intended to begin a fresh pending queue rather than append to
+  stale terminal items.
+- Controller implication: reset queue run metadata and stale items before accepting the new pending
+  room.
+- Test implication: cover add-room behavior after each terminal run state.
+
 ### Mop Remove/Install Transitions Are In-Run Maintenance
 
 - Confidence: `Observed`
