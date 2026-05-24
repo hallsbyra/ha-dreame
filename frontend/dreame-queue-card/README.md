@@ -16,6 +16,7 @@ The package starts with pure helpers and tests before runtime UI wiring. The pro
 - Remove pending queue items through the `ha_dreame.remove_queue_item` queue service.
 - Move pending queue items and clear pending items through namespaced `ha_dreame` queue services.
 - Cycle pending queue item overrides through the `ha_dreame.update_queue_item_overrides` queue service.
+- Start, cancel, and skip queues through existing command-gated `ha_dreame` services.
 - Keep service/entity assumptions under the `ha_dreame` namespace.
 - Use public-safe examples such as `vacuum.robot` and generic room names.
 - Keep legacy card behavior as a reference, not as copied private dashboard config.
