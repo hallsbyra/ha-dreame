@@ -16,11 +16,17 @@ const queueAttributes = {
       room_name: "Hallway",
       status: "pending",
     },
+    {
+      item_id: "item-3",
+      room_id: 3,
+      room_name: "Office",
+      status: "pending",
+    },
   ],
-  pending_items: 1,
+  pending_items: 2,
   running_items: 1,
   completed_items: 0,
-  total_items: 2,
+  total_items: 3,
   config_entry_id: "config-entry-1",
   vacuum_entity_id: "vacuum.robot",
 };
@@ -37,6 +43,7 @@ const hass = {
         rooms: {
           "1": "Kitchen",
           "2": "Hallway",
+          "3": "Office",
         },
       },
     },
@@ -64,6 +71,7 @@ describe("card view model", () => {
       message: "Configure a HA Dreame queue status entity.",
       snapshot: null,
       activity: null,
+      canClearPending: false,
       rooms: [],
       rows: [],
     });
@@ -92,10 +100,10 @@ describe("card view model", () => {
         runState: "running",
         configEntryId: "config-entry-1",
         vacuumEntityId: "vacuum.robot",
-        pendingItems: 1,
+        pendingItems: 2,
         runningItems: 1,
         completedItems: 0,
-        totalItems: 2,
+        totalItems: 3,
         items: [
           {
             itemId: "item-1",
@@ -113,12 +121,21 @@ describe("card view model", () => {
             overrides: {},
             result: null,
           },
+          {
+            itemId: "item-3",
+            roomId: 3,
+            roomName: "Office",
+            status: "pending",
+            overrides: {},
+            result: null,
+          },
         ],
       },
       activity: {
         phase: "cleaning",
         label: "Vacuuming + mopping",
       },
+      canClearPending: true,
       rooms: [
         {
           roomId: 1,
@@ -128,21 +145,41 @@ describe("card view model", () => {
           roomId: 2,
           roomName: "Hallway",
         },
+        {
+          roomId: 3,
+          roomName: "Office",
+        },
       ],
       rows: [
         {
           itemId: "item-1",
+          queuePosition: 0,
           roomName: "Kitchen",
           status: "running",
           statusLabel: "Running",
           canRemove: false,
+          canMoveUp: false,
+          canMoveDown: false,
         },
         {
           itemId: "item-2",
+          queuePosition: 1,
           roomName: "Hallway",
           status: "pending",
           statusLabel: "Pending",
           canRemove: true,
+          canMoveUp: false,
+          canMoveDown: true,
+        },
+        {
+          itemId: "item-3",
+          queuePosition: 2,
+          roomName: "Office",
+          status: "pending",
+          statusLabel: "Pending",
+          canRemove: true,
+          canMoveUp: true,
+          canMoveDown: false,
         },
       ],
     });
