@@ -76,6 +76,7 @@ describe("card view model", () => {
       message: "Configure a HA Dreame queue status entity.",
       snapshot: null,
       activity: null,
+      activeControls: [],
       canClearPending: false,
       rooms: [],
       rows: [],
@@ -144,6 +145,18 @@ describe("card view model", () => {
         phase: "cleaning",
         label: "Vacuuming + mopping",
       },
+      activeControls: [
+        {
+          ariaLabel: "Cancel queue",
+          label: "Cancel",
+          service: "cancel_queue",
+        },
+        {
+          ariaLabel: "Skip current room",
+          label: "Skip",
+          service: "skip_current_room",
+        },
+      ],
       canClearPending: true,
       rooms: [
         {
@@ -234,5 +247,38 @@ describe("card view model", () => {
         },
       ],
     });
+  });
+
+  it("offers a command-gated start control for idle queues with pending rooms", () => {
+    expect(
+      buildCardViewModel(
+        {
+          ...hass,
+          states: {
+            ...hass.states,
+            "sensor.robot_queue_status": {
+              state: "idle",
+              attributes: {
+                ...queueAttributes,
+                queue_items: [queueAttributes.queue_items[1]],
+                pending_items: 1,
+                running_items: 0,
+                total_items: 1,
+              },
+            },
+          },
+        },
+        {
+          entity: "sensor.robot_queue_status",
+          title: "Robot queue",
+        },
+      ).activeControls,
+    ).toEqual([
+      {
+        ariaLabel: "Start queue",
+        label: "Start",
+        service: "start_queue",
+      },
+    ]);
   });
 });
