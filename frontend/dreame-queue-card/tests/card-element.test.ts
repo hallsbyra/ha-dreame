@@ -68,6 +68,31 @@ const hass = {
   },
 };
 
+const idleHass = {
+  ...hass,
+  states: {
+    ...hass.states,
+    "sensor.robot_queue_status": {
+      state: "idle",
+      attributes: {
+        ...hass.states["sensor.robot_queue_status"].attributes,
+        queue_items: [
+          {
+            item_id: "item-2",
+            room_id: 2,
+            room_name: "Hallway",
+            status: "pending",
+          },
+        ],
+        pending_items: 1,
+        running_items: 0,
+        completed_items: 0,
+        total_items: 1,
+      },
+    },
+  },
+};
+
 describe("ha-dreame-queue-card", () => {
   it("registers the standalone HA Dreame card element", () => {
     expect(customElements.get(CARD_ELEMENT_TAG)).toBeDefined();
@@ -289,6 +314,78 @@ describe("ha-dreame-queue-card", () => {
         suction_level: 1,
         water_volume: 2,
       },
+    });
+  });
+
+  it("starts an idle queue through the command-gated ha_dreame queue service", async () => {
+    const callService = vi.fn();
+    const element = document.createElement(CARD_ELEMENT_TAG) as any;
+    element.setConfig({
+      entity: "sensor.robot_queue_status",
+      title: "Robot queue",
+    });
+    element.hass = { ...idleHass, callService };
+    document.body.append(element);
+
+    await element.updateComplete;
+
+    const shadowRoot = element.shadowRoot as ShadowRoot | null;
+    const startQueue = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Start queue"]',
+    );
+    const cancelQueue = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Cancel queue"]',
+    );
+    const skipCurrentRoom = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Skip current room"]',
+    );
+
+    expect(startQueue).not.toBeNull();
+    expect(cancelQueue).toBeNull();
+    expect(skipCurrentRoom).toBeNull();
+
+    startQueue!.click();
+
+    expect(callService).toHaveBeenCalledWith("ha_dreame", "start_queue", {
+      config_entry_id: "config-entry-1",
+    });
+  });
+
+  it("cancels and skips a running queue through command-gated ha_dreame services", async () => {
+    const callService = vi.fn();
+    const element = document.createElement(CARD_ELEMENT_TAG) as any;
+    element.setConfig({
+      entity: "sensor.robot_queue_status",
+      title: "Robot queue",
+    });
+    element.hass = { ...hass, callService };
+    document.body.append(element);
+
+    await element.updateComplete;
+
+    const shadowRoot = element.shadowRoot as ShadowRoot | null;
+    const startQueue = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Start queue"]',
+    );
+    const cancelQueue = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Cancel queue"]',
+    );
+    const skipCurrentRoom = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Skip current room"]',
+    );
+
+    expect(startQueue).toBeNull();
+    expect(cancelQueue).not.toBeNull();
+    expect(skipCurrentRoom).not.toBeNull();
+
+    cancelQueue!.click();
+    skipCurrentRoom!.click();
+
+    expect(callService).toHaveBeenNthCalledWith(1, "ha_dreame", "cancel_queue", {
+      config_entry_id: "config-entry-1",
+    });
+    expect(callService).toHaveBeenNthCalledWith(2, "ha_dreame", "skip_current_room", {
+      config_entry_id: "config-entry-1",
     });
   });
 });
