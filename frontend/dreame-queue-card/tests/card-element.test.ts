@@ -22,6 +22,11 @@ const hass = {
             room_id: 2,
             room_name: "Hallway",
             status: "pending",
+            overrides: {
+              repeats: 2,
+              suction_level: 1,
+              water_volume: 2,
+            },
           },
           {
             item_id: "item-3",
@@ -217,6 +222,73 @@ describe("ha-dreame-queue-card", () => {
 
     expect(callService).toHaveBeenCalledWith("ha_dreame", "clear_pending_queue", {
       config_entry_id: "config-entry-1",
+    });
+  });
+
+  it("cycles pending queue item overrides through the ha_dreame queue service", async () => {
+    const callService = vi.fn();
+    const element = document.createElement(CARD_ELEMENT_TAG) as any;
+    element.setConfig({
+      entity: "sensor.robot_queue_status",
+      title: "Robot queue",
+    });
+    element.hass = { ...hass, callService };
+    document.body.append(element);
+
+    await element.updateComplete;
+
+    const shadowRoot = element.shadowRoot as ShadowRoot | null;
+    const runningWater = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Cycle Kitchen water volume"]',
+    );
+    const hallwayWater = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Cycle Hallway water volume"]',
+    );
+    const hallwaySuction = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Cycle Hallway suction level"]',
+    );
+    const hallwayRepeats = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Cycle Hallway repeats"]',
+    );
+
+    expect(runningWater).toBeNull();
+    expect(hallwayWater).not.toBeNull();
+    expect(hallwaySuction).not.toBeNull();
+    expect(hallwayRepeats).not.toBeNull();
+    expect(hallwayWater!.textContent).toContain("Water Med");
+    expect(hallwaySuction!.textContent).toContain("Suction Med");
+    expect(hallwayRepeats!.textContent).toContain("Repeats x2");
+
+    hallwayWater!.click();
+    hallwaySuction!.click();
+    hallwayRepeats!.click();
+
+    expect(callService).toHaveBeenNthCalledWith(1, "ha_dreame", "update_queue_item_overrides", {
+      config_entry_id: "config-entry-1",
+      item_id: "item-2",
+      overrides: {
+        repeats: 2,
+        suction_level: 1,
+        water_volume: 3,
+      },
+    });
+    expect(callService).toHaveBeenNthCalledWith(2, "ha_dreame", "update_queue_item_overrides", {
+      config_entry_id: "config-entry-1",
+      item_id: "item-2",
+      overrides: {
+        repeats: 2,
+        suction_level: 2,
+        water_volume: 2,
+      },
+    });
+    expect(callService).toHaveBeenNthCalledWith(3, "ha_dreame", "update_queue_item_overrides", {
+      config_entry_id: "config-entry-1",
+      item_id: "item-2",
+      overrides: {
+        repeats: 3,
+        suction_level: 1,
+        water_volume: 2,
+      },
     });
   });
 });

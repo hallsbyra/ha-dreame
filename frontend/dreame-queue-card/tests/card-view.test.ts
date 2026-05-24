@@ -15,6 +15,11 @@ const queueAttributes = {
       room_id: 2,
       room_name: "Hallway",
       status: "pending",
+      overrides: {
+        repeats: 2,
+        suction_level: 1,
+        water_volume: 2,
+      },
     },
     {
       item_id: "item-3",
@@ -118,7 +123,11 @@ describe("card view model", () => {
             roomId: 2,
             roomName: "Hallway",
             status: "pending",
-            overrides: {},
+            overrides: {
+              repeats: 2,
+              suction_level: 1,
+              water_volume: 2,
+            },
             result: null,
           },
           {
@@ -157,9 +166,11 @@ describe("card view model", () => {
           roomName: "Kitchen",
           status: "running",
           statusLabel: "Running",
+          overrides: {},
           canRemove: false,
           canMoveUp: false,
           canMoveDown: false,
+          overrideControls: [],
         },
         {
           itemId: "item-2",
@@ -167,9 +178,31 @@ describe("card view model", () => {
           roomName: "Hallway",
           status: "pending",
           statusLabel: "Pending",
+          overrides: {
+            repeats: 2,
+            suction_level: 1,
+            water_volume: 2,
+          },
           canRemove: true,
           canMoveUp: false,
           canMoveDown: true,
+          overrideControls: [
+            {
+              field: "water_volume",
+              label: "Water",
+              valueLabel: "Med",
+            },
+            {
+              field: "suction_level",
+              label: "Suction",
+              valueLabel: "Med",
+            },
+            {
+              field: "repeats",
+              label: "Repeats",
+              valueLabel: "x2",
+            },
+          ],
         },
         {
           itemId: "item-3",
@@ -177,9 +210,27 @@ describe("card view model", () => {
           roomName: "Office",
           status: "pending",
           statusLabel: "Pending",
+          overrides: {},
           canRemove: true,
           canMoveUp: true,
           canMoveDown: false,
+          overrideControls: [
+            {
+              field: "water_volume",
+              label: "Water",
+              valueLabel: "Med",
+            },
+            {
+              field: "suction_level",
+              label: "Suction",
+              valueLabel: "Med",
+            },
+            {
+              field: "repeats",
+              label: "Repeats",
+              valueLabel: "x1",
+            },
+          ],
         },
       ],
     });
