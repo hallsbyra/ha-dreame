@@ -14,6 +14,7 @@ The package starts with pure helpers and tests before runtime UI wiring. The pro
 - Extract Dreame room maps and show available rooms read-only.
 - Add available rooms through the `ha_dreame.add_queue_room` queue service without dispatching robot commands.
 - Remove pending queue items through the `ha_dreame.remove_queue_item` queue service.
+- Move pending queue items and clear pending items through namespaced `ha_dreame` queue services.
 - Keep service/entity assumptions under the `ha_dreame` namespace.
 - Use public-safe examples such as `vacuum.robot` and generic room names.
 - Keep legacy card behavior as a reference, not as copied private dashboard config.
