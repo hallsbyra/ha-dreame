@@ -2,7 +2,9 @@ import { LitElement, css, html, nothing } from "lit";
 
 import {
   buildCardViewModel,
+  CARD_EDITOR_TAG,
   CARD_ELEMENT_TAG,
+  defaultCardConfig,
   type ActiveQueueService,
   type HaDreameQueueCardConfig,
   type HomeAssistantLike,
@@ -214,6 +216,15 @@ class HaDreameQueueCard extends LitElement {
 
   hass?: HomeAssistantLike;
   private _config: HaDreameQueueCardConfig = {};
+
+  static async getConfigElement(): Promise<HTMLElement> {
+    await import("./ha-dreame-queue-card-editor");
+    return document.createElement(CARD_EDITOR_TAG);
+  }
+
+  static getStubConfig(hass?: HomeAssistantLike): HaDreameQueueCardConfig {
+    return defaultCardConfig(hass);
+  }
 
   setConfig(config: HaDreameQueueCardConfig): void {
     if (!config || typeof config !== "object") {
