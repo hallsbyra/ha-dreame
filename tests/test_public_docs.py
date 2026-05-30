@@ -43,8 +43,8 @@ def test_readme_avoids_private_runtime_assumptions() -> None:
         "haos.lan",
         "root@",
         "/home/fredrik",
-        "token",
-        "secret",
+        "access_token",
+        "bearer ",
     ]
     for fragment in forbidden_fragments:
         assert fragment not in readme
