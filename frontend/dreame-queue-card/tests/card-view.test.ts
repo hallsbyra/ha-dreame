@@ -250,30 +250,21 @@ describe("card view model", () => {
   });
 
   it("offers a command-gated start control for idle queues with pending rooms", () => {
-    expect(
-      buildCardViewModel(
-        {
-          ...hass,
-          states: {
-            ...hass.states,
-            "sensor.robot_queue_status": {
-              state: "idle",
-              attributes: {
-                ...queueAttributes,
-                queue_items: [queueAttributes.queue_items[1]],
-                pending_items: 1,
-                running_items: 0,
-                total_items: 1,
-              },
-            },
-          },
-        },
-        {
-          entity: "sensor.robot_queue_status",
-          title: "Robot queue",
-        },
-      ).activeControls,
-    ).toEqual([
+    const view = buildCardViewModel(
+      hassWithQueueState("idle", {
+        queue_items: [queueAttributes.queue_items[1]],
+        pending_items: 1,
+        running_items: 0,
+        total_items: 1,
+      }),
+      {
+        entity: "sensor.robot_queue_status",
+        title: "Robot queue",
+      },
+    );
+
+    expect(view.summary).toBe("Ready to start 1 room.");
+    expect(view.activeControls).toEqual([
       {
         ariaLabel: "Start queue",
         label: "Start",
@@ -281,4 +272,78 @@ describe("card view model", () => {
       },
     ]);
   });
+
+  it("summarizes completed queues without active controls", () => {
+    const view = buildCardViewModel(
+      hassWithQueueState("completed", {
+        queue_items: [
+          {
+            item_id: "item-1",
+            room_id: 1,
+            room_name: "Kitchen",
+            status: "completed",
+          },
+        ],
+        pending_items: 0,
+        running_items: 0,
+        completed_items: 1,
+        total_items: 1,
+      }),
+      {
+        entity: "sensor.robot_queue_status",
+      },
+    );
+
+    expect(view.summary).toBe("Queue completed.");
+    expect(view.activeControls).toEqual([]);
+  });
+
+  it("surfaces failure states without offering unsafe active controls", () => {
+    const outOfSync = buildCardViewModel(
+      hassWithQueueState("out_of_sync", {
+        queue_items: [queueAttributes.queue_items[1]],
+        pending_items: 1,
+        running_items: 0,
+        total_items: 1,
+      }),
+      {
+        entity: "sensor.robot_queue_status",
+      },
+    );
+    const blocked = buildCardViewModel(
+      hassWithQueueState("blocked", {
+        queue_items: [queueAttributes.queue_items[1]],
+        pending_items: 1,
+        running_items: 0,
+        total_items: 1,
+      }),
+      {
+        entity: "sensor.robot_queue_status",
+      },
+    );
+
+    expect(outOfSync.summary).toBe("Queue out of sync. Review robot state before restarting.");
+    expect(outOfSync.activeControls).toEqual([]);
+    expect(blocked.summary).toBe("Route blocked. Review room access before restarting.");
+    expect(blocked.activeControls).toEqual([]);
+  });
 });
+
+function hassWithQueueState(
+  state: string,
+  attributes: Record<string, unknown>,
+): typeof hass {
+  return {
+    ...hass,
+    states: {
+      ...hass.states,
+      "sensor.robot_queue_status": {
+        state,
+        attributes: {
+          ...queueAttributes,
+          ...attributes,
+        },
+      },
+    },
+  };
+}

@@ -117,6 +117,38 @@ describe("ha-dreame-queue-card", () => {
     expect(element.shadowRoot?.textContent).toContain("Hallway");
   });
 
+  it("renders terminal queue state guidance without start controls", async () => {
+    const element = document.createElement(CARD_ELEMENT_TAG) as any;
+    element.setConfig({
+      entity: "sensor.robot_queue_status",
+      title: "Robot queue",
+    });
+    element.hass = {
+      ...hass,
+      states: {
+        ...hass.states,
+        "sensor.robot_queue_status": {
+          state: "out_of_sync",
+          attributes: {
+            ...hass.states["sensor.robot_queue_status"].attributes,
+            pending_items: 1,
+            running_items: 0,
+          },
+        },
+      },
+    };
+    document.body.append(element);
+
+    await element.updateComplete;
+
+    expect(element.shadowRoot?.textContent).toContain(
+      "Queue out of sync. Review robot state before restarting.",
+    );
+    expect(
+      element.shadowRoot?.querySelector<HTMLButtonElement>('button[aria-label="Start queue"]'),
+    ).toBeNull();
+  });
+
   it("adds an available room through the ha_dreame queue service", async () => {
     const callService = vi.fn();
     const element = document.createElement(CARD_ELEMENT_TAG) as any;
