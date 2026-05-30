@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "tsc --noEmit",
     "test": "vitest run",
-    "check": "npm run lint && npm run test && npm run build"
+    "verify:packaged": "node scripts/verify-packaged-card.mjs",
+    "check": "npm run lint && npm run test && npm run build && npm run verify:packaged"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
