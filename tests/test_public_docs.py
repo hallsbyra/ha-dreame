@@ -4,6 +4,7 @@ from pathlib import Path
 
 
 README = Path("README.md")
+QUALITY_SCALE = Path("custom_components/ha_dreame/quality_scale.yaml")
 
 
 def test_readme_documents_alpha_install_remove_limitations() -> None:
@@ -48,3 +49,18 @@ def test_readme_avoids_private_runtime_assumptions() -> None:
     ]
     for fragment in forbidden_fragments:
         assert fragment not in readme
+
+
+def test_quality_scale_tracks_public_readme_documentation_gates() -> None:
+    """Test quality-scale documentation gates reflect the public README."""
+    quality_scale = QUALITY_SCALE.read_text(encoding="utf-8")
+
+    documented_rules = [
+        "docs-high-level-description: done",
+        "docs-installation-instructions: done",
+        "docs-removal-instructions: done",
+        "docs-known-limitations: done",
+        "docs-examples: done",
+    ]
+    for rule in documented_rules:
+        assert rule in quality_scale
