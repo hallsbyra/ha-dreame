@@ -2,7 +2,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { CARD_ELEMENT_TAG } from "../src/card-view";
+import { CARD_EDITOR_TAG, CARD_ELEMENT_TAG } from "../src/card-view";
 import "../src/ha-dreame-queue-card";
 
 const hass = {
@@ -96,6 +96,36 @@ const idleHass = {
 describe("ha-dreame-queue-card", () => {
   it("registers the standalone HA Dreame card element", () => {
     expect(customElements.get(CARD_ELEMENT_TAG)).toBeDefined();
+  });
+
+  it("provides a Lovelace stub config from the public queue sensor shape", () => {
+    const cardClass = customElements.get(CARD_ELEMENT_TAG) as {
+      getStubConfig: (hass: typeof hass) => Record<string, string>;
+    };
+
+    expect(cardClass.getStubConfig(hass)).toEqual({
+      entity: "sensor.robot_queue_status",
+    });
+  });
+
+  it("falls back to a generic public-safe stub config", () => {
+    const cardClass = customElements.get(CARD_ELEMENT_TAG) as {
+      getStubConfig: (hass: { states: Record<string, unknown> }) => Record<string, string>;
+    };
+
+    expect(cardClass.getStubConfig({ states: {} })).toEqual({
+      entity: "sensor.ha_dreame_queue_status",
+    });
+  });
+
+  it("creates a Lovelace config editor element", async () => {
+    const cardClass = customElements.get(CARD_ELEMENT_TAG) as {
+      getConfigElement: () => Promise<HTMLElement>;
+    };
+
+    const editor = await cardClass.getConfigElement();
+
+    expect(editor.tagName.toLowerCase()).toBe(CARD_EDITOR_TAG);
   });
 
   it("renders a read-only queue summary", async () => {
