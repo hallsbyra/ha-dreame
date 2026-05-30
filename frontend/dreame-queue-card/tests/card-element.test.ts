@@ -2,8 +2,18 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { CARD_EDITOR_TAG, CARD_ELEMENT_TAG } from "../src/card-view";
+import {
+  CARD_EDITOR_TAG,
+  CARD_ELEMENT_TAG,
+  type HaDreameQueueCardConfig,
+  type HomeAssistantLike,
+} from "../src/card-view";
 import "../src/ha-dreame-queue-card";
+
+type QueueCardConstructor = CustomElementConstructor & {
+  getConfigElement: () => Promise<HTMLElement>;
+  getStubConfig: (hass?: HomeAssistantLike) => HaDreameQueueCardConfig;
+};
 
 const hass = {
   states: {
@@ -93,15 +103,17 @@ const idleHass = {
   },
 };
 
+function queueCardConstructor(): QueueCardConstructor {
+  return customElements.get(CARD_ELEMENT_TAG) as unknown as QueueCardConstructor;
+}
+
 describe("ha-dreame-queue-card", () => {
   it("registers the standalone HA Dreame card element", () => {
     expect(customElements.get(CARD_ELEMENT_TAG)).toBeDefined();
   });
 
   it("provides a Lovelace stub config from the public queue sensor shape", () => {
-    const cardClass = customElements.get(CARD_ELEMENT_TAG) as {
-      getStubConfig: (hass: typeof hass) => Record<string, string>;
-    };
+    const cardClass = queueCardConstructor();
 
     expect(cardClass.getStubConfig(hass)).toEqual({
       entity: "sensor.robot_queue_status",
@@ -109,9 +121,7 @@ describe("ha-dreame-queue-card", () => {
   });
 
   it("falls back to a generic public-safe stub config", () => {
-    const cardClass = customElements.get(CARD_ELEMENT_TAG) as {
-      getStubConfig: (hass: { states: Record<string, unknown> }) => Record<string, string>;
-    };
+    const cardClass = queueCardConstructor();
 
     expect(cardClass.getStubConfig({ states: {} })).toEqual({
       entity: "sensor.ha_dreame_queue_status",
@@ -119,9 +129,7 @@ describe("ha-dreame-queue-card", () => {
   });
 
   it("creates a Lovelace config editor element", async () => {
-    const cardClass = customElements.get(CARD_ELEMENT_TAG) as {
-      getConfigElement: () => Promise<HTMLElement>;
-    };
+    const cardClass = queueCardConstructor();
 
     const editor = await cardClass.getConfigElement();
 
