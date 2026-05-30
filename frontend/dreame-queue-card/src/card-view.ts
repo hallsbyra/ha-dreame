@@ -4,9 +4,12 @@ import { overrideLabel, type OverrideField } from "./queue-overrides";
 import { extractDreameRooms, type DreameRoom } from "./rooms";
 
 export const CARD_ELEMENT_TAG = "ha-dreame-queue-card";
+export const CARD_EDITOR_TAG = "ha-dreame-queue-card-editor";
 export const DEFAULT_CARD_TITLE = "HA Dreame Queue";
+export const DEFAULT_QUEUE_ENTITY_ID = "sensor.ha_dreame_queue_status";
 
 export type HaDreameQueueCardConfig = {
+  type?: string;
   entity?: string;
   title?: string;
 };
@@ -73,6 +76,21 @@ export type CardViewModel = {
   rooms: DreameRoom[];
   rows: CardQueueRow[];
 };
+
+export function queueStatusEntityIds(hass: HomeAssistantLike | undefined): string[] {
+  return Object.entries(hass?.states ?? {})
+    .filter(([entityId, state]) => entityId.startsWith("sensor.") && isQueueStatusState(state))
+    .map(([entityId]) => entityId)
+    .sort();
+}
+
+export function defaultCardConfig(
+  hass: HomeAssistantLike | undefined,
+): HaDreameQueueCardConfig {
+  return {
+    entity: queueStatusEntityIds(hass)[0] ?? DEFAULT_QUEUE_ENTITY_ID,
+  };
+}
 
 export function buildCardViewModel(
   hass: HomeAssistantLike | undefined,
@@ -275,4 +293,13 @@ function normalizedString(value: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isQueueStatusState(state: HomeAssistantState | undefined): boolean {
+  const attrs = state?.attributes;
+  return (
+    isRecord(attrs) &&
+    Array.isArray(attrs["queue_items"]) &&
+    typeof attrs["config_entry_id"] === "string"
+  );
 }
