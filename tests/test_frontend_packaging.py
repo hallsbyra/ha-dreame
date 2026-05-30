@@ -22,7 +22,7 @@ def test_frontend_card_asset_is_packaged_inside_integration() -> None:
 async def test_async_setup_registers_frontend_static_path(
     hass: HomeAssistant,
     monkeypatch,
-    ) -> None:
+) -> None:
     """Test setup serves the packaged card bundle from a namespaced static URL."""
     register_static_paths = AsyncMock()
     monkeypatch.setattr(
