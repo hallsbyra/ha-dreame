@@ -11,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryError
+import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -40,6 +41,7 @@ from .services import async_register_services, async_remove_services
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 AUTO_RECONCILE_INTERVAL = timedelta(seconds=20)
+CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 FRONTEND_CARD_FILENAME = "ha-dreame-queue-card.js"
 FRONTEND_STATIC_PATH = Path(__file__).parent / "frontend"
 FRONTEND_STATIC_URL_PATH = f"/{DOMAIN}/frontend"

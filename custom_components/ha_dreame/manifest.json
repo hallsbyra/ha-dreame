@@ -6,7 +6,8 @@
   ],
   "config_flow": true,
   "dependencies": [
-    "dreame_vacuum"
+    "dreame_vacuum",
+    "http"
   ],
   "documentation": "https://github.com/hallsbyra/ha-dreame",
   "integration_type": "service",
