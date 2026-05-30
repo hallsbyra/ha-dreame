@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import logging
+from pathlib import Path
 
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
@@ -38,11 +40,16 @@ from .services import async_register_services, async_remove_services
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 AUTO_RECONCILE_INTERVAL = timedelta(seconds=20)
+FRONTEND_CARD_FILENAME = "ha-dreame-queue-card.js"
+FRONTEND_STATIC_PATH = Path(__file__).parent / "frontend"
+FRONTEND_STATIC_URL_PATH = f"/{DOMAIN}/frontend"
+_FRONTEND_STATIC_REGISTERED = f"{DOMAIN}_frontend_static_registered"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the integration from YAML."""
     hass.data.setdefault(DOMAIN, {})
+    await _async_register_frontend_static_path(hass)
     return True
 
 
@@ -51,6 +58,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     runtime_data = _build_runtime_data(hass, entry)
 
     hass.data.setdefault(DOMAIN, {})
+    await _async_register_frontend_static_path(hass)
     async_register_services(hass)
     entry.runtime_data = runtime_data
     hass.data[DOMAIN][entry.entry_id] = entry
@@ -64,6 +72,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         runtime_data.vacuum_entity_id,
     )
     return True
+
+
+async def _async_register_frontend_static_path(hass: HomeAssistant) -> None:
+    """Serve packaged frontend assets from a namespaced integration URL."""
+    if hass.data.get(_FRONTEND_STATIC_REGISTERED):
+        return
+
+    await hass.http.async_register_static_paths(
+        [
+            StaticPathConfig(
+                FRONTEND_STATIC_URL_PATH,
+                str(FRONTEND_STATIC_PATH),
+                False,
+            )
+        ]
+    )
+    hass.data[_FRONTEND_STATIC_REGISTERED] = True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

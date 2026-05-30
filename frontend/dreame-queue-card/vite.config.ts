@@ -4,8 +4,8 @@ import { defineConfig } from "vite";
 export default defineConfig({
   build: {
     target: "es2020",
-    sourcemap: true,
-    outDir: "dist",
+    sourcemap: false,
+    outDir: "../../custom_components/ha_dreame/frontend",
     emptyOutDir: true,
     rollupOptions: {
       input: {
