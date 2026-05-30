@@ -74,6 +74,11 @@ type: custom:ha-dreame-queue-card
 entity: sensor.ha_dreame_queue_status
 ```
 
+The card also exposes a Lovelace editor. After the resource is loaded, adding
+`HA Dreame Queue` from the dashboard card picker should suggest a detected
+`ha_dreame` queue status sensor when one exists. If the suggestion is not
+available yet, set the queue entity manually with the generic shape above.
+
 Keep dashboard examples generic. Do not commit private dashboard files, local entity ids, room names, or host-specific resource paths.
 
 ## Read-Only Validation
