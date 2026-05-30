@@ -6,7 +6,7 @@
 - [ ] Hassfest passes.
 - [ ] Python tests pass with the configured coverage gate.
 - [ ] Config flow works in a clean Home Assistant test environment.
-- [ ] README documents installation, removal, and current limitations.
+- [x] README documents installation, removal, and current limitations.
 - [ ] No secrets, private entity ids, private paths, or local hostnames are present.
 - [ ] Release notes clearly mark the release as experimental.
 
