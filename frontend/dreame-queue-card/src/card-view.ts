@@ -65,6 +65,7 @@ export type CardViewModel = {
   status: CardViewStatus;
   entityId: string | null;
   message: string | null;
+  summary: string | null;
   snapshot: QueueSnapshot | null;
   activity: RunActivity | null;
   activeControls: CardActiveControl[];
@@ -108,6 +109,7 @@ export function buildCardViewModel(
     status: "ready",
     entityId,
     message: null,
+    summary: buildSummary(snapshot, activity),
     snapshot,
     activity,
     activeControls: buildActiveControls(snapshot),
@@ -133,6 +135,7 @@ function emptyViewModel({
     status,
     entityId,
     message,
+    summary: null,
     snapshot: null,
     activity: null,
     activeControls: [],
@@ -195,7 +198,7 @@ function buildActiveControls(snapshot: QueueSnapshot): CardActiveControl[] {
     ];
   }
 
-  if (snapshot.pendingItems > 0) {
+  if (snapshot.runState === "idle" && snapshot.pendingItems > 0) {
     return [
       {
         ariaLabel: "Start queue",
@@ -206,6 +209,37 @@ function buildActiveControls(snapshot: QueueSnapshot): CardActiveControl[] {
   }
 
   return [];
+}
+
+function buildSummary(snapshot: QueueSnapshot, activity: RunActivity | null): string {
+  if (activity) {
+    return activity.label;
+  }
+
+  switch (snapshot.runState) {
+    case "idle":
+      if (snapshot.pendingItems === 1) {
+        return "Ready to start 1 room.";
+      }
+      if (snapshot.pendingItems > 1) {
+        return `Ready to start ${snapshot.pendingItems} rooms.`;
+      }
+      return "Queue is empty.";
+    case "running":
+      return "Queue is running.";
+    case "completed":
+      return "Queue completed.";
+    case "canceled":
+      return "Queue canceled.";
+    case "blocked":
+      return "Route blocked. Review room access before restarting.";
+    case "out_of_sync":
+      return "Queue out of sync. Review robot state before restarting.";
+    case "manual_control":
+      return "Manual control active.";
+    default:
+      return `Queue state: ${queueRunStateLabel(snapshot.runState)}.`;
+  }
 }
 
 function buildOverrideControls(overrides: Record<string, unknown>): CardOverrideControl[] {

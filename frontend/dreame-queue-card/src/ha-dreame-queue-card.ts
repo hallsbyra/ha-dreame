@@ -235,7 +235,7 @@ class HaDreameQueueCard extends LitElement {
         <div class="header">
           <div>
             <h2 class="title">${view.title}</h2>
-            <p class="subtitle">${view.activity?.label ?? view.entityId ?? "Read-only queue"}</p>
+            <p class="subtitle">${view.summary ?? view.entityId ?? "Queue controls"}</p>
           </div>
           ${snapshot
             ? html`<span class="state-pill ${snapshot.runState}"
@@ -529,6 +529,6 @@ if (!window.customCards.some((card) => card["type"] === CARD_ELEMENT_TAG)) {
   window.customCards.push({
     type: CARD_ELEMENT_TAG,
     name: "HA Dreame Queue",
-    description: "Read-only queue summary for HA Dreame.",
+    description: "Queue controls for HA Dreame.",
   });
 }

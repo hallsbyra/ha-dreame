@@ -74,6 +74,7 @@ describe("card view model", () => {
       status: "not_configured",
       entityId: null,
       message: "Configure a HA Dreame queue status entity.",
+      summary: null,
       snapshot: null,
       activity: null,
       activeControls: [],
@@ -102,6 +103,7 @@ describe("card view model", () => {
       status: "ready",
       entityId: "sensor.robot_queue_status",
       message: null,
+      summary: "Vacuuming + mopping",
       snapshot: {
         runState: "running",
         configEntryId: "config-entry-1",
