@@ -28,4 +28,5 @@ npm ci
 npm run check
 ```
 
-The build output is `dist/ha-dreame-queue-card.js`. It is a development artifact for the future card packaging flow and is not a cutover signal by itself.
+The build output is packaged into `custom_components/ha_dreame/frontend/ha-dreame-queue-card.js`.
+When the integration is loaded, Home Assistant serves it from `/ha_dreame/frontend/ha-dreame-queue-card.js`.

@@ -58,6 +58,24 @@ Use this path only for local development. Keep commands generic and substitute l
 5. If automatic observation needs non-conventional entity names, set explicit companion observation entities in options.
 6. Restart or reload the config entry after changing options when Home Assistant asks for it.
 
+## Dashboard Card Resource
+
+The integration serves the packaged queue card from a namespaced static URL:
+
+```yaml
+url: /ha_dreame/frontend/ha-dreame-queue-card.js
+type: module
+```
+
+Example card configuration:
+
+```yaml
+type: custom:ha-dreame-queue-card
+entity: sensor.ha_dreame_queue_status
+```
+
+Keep dashboard examples generic. Do not commit private dashboard files, local entity ids, room names, or host-specific resource paths.
+
 ## Read-Only Validation
 
 Start with read-only behavior while the old controller remains active.
