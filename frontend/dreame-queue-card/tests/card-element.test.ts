@@ -141,11 +141,12 @@ describe("ha-dreame-queue-card", () => {
 
     await element.updateComplete;
 
+    const shadowRoot = element.shadowRoot as ShadowRoot | null;
     expect(element.shadowRoot?.textContent).toContain(
       "Queue out of sync. Review robot state before restarting.",
     );
     expect(
-      element.shadowRoot?.querySelector<HTMLButtonElement>('button[aria-label="Start queue"]'),
+      shadowRoot?.querySelector<HTMLButtonElement>('button[aria-label="Start queue"]'),
     ).toBeNull();
   });
 
