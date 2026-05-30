@@ -1,5 +1,6 @@
 """Tests for HA Dreame frontend card packaging."""
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from homeassistant.components.http import StaticPathConfig
@@ -21,10 +22,14 @@ def test_frontend_card_asset_is_packaged_inside_integration() -> None:
 async def test_async_setup_registers_frontend_static_path(
     hass: HomeAssistant,
     monkeypatch,
-) -> None:
+    ) -> None:
     """Test setup serves the packaged card bundle from a namespaced static URL."""
     register_static_paths = AsyncMock()
-    monkeypatch.setattr(hass.http, "async_register_static_paths", register_static_paths)
+    monkeypatch.setattr(
+        hass,
+        "http",
+        SimpleNamespace(async_register_static_paths=register_static_paths),
+    )
 
     assert await async_setup(hass, {})
 
