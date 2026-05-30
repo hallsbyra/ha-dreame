@@ -19,6 +19,15 @@ def test_frontend_card_asset_is_packaged_inside_integration() -> None:
     assert (FRONTEND_STATIC_PATH / FRONTEND_CARD_FILENAME).is_file()
 
 
+def test_frontend_card_editor_chunk_is_packaged_inside_integration() -> None:
+    """Test dynamic editor chunks are shipped beside the main card bundle."""
+    card_asset = FRONTEND_STATIC_PATH / FRONTEND_CARD_FILENAME
+    editor_chunks = sorted(FRONTEND_STATIC_PATH.glob("ha-dreame-queue-card-editor-*.js"))
+
+    assert editor_chunks
+    assert any(chunk.name in card_asset.read_text(encoding="utf-8") for chunk in editor_chunks)
+
+
 async def test_async_setup_registers_frontend_static_path(
     hass: HomeAssistant,
     monkeypatch,
