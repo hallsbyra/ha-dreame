@@ -17,6 +17,7 @@ The package starts with pure helpers and tests before runtime UI wiring. The pro
 - Move pending queue items and clear pending items through namespaced `ha_dreame` queue services.
 - Cycle pending queue item overrides through the `ha_dreame.update_queue_item_overrides` queue service.
 - Start, cancel, and skip queues through existing command-gated `ha_dreame` services.
+- Provide a Lovelace card editor and public-safe stub config for Home Assistant dashboard setup.
 - Keep service/entity assumptions under the `ha_dreame` namespace.
 - Use public-safe examples such as `vacuum.robot` and generic room names.
 - Keep legacy card behavior as a reference, not as copied private dashboard config.
@@ -30,3 +31,21 @@ npm run check
 
 The build output is packaged into `custom_components/ha_dreame/frontend/ha-dreame-queue-card.js`.
 When the integration is loaded, Home Assistant serves it from `/ha_dreame/frontend/ha-dreame-queue-card.js`.
+
+Add the packaged module as a dashboard resource:
+
+```yaml
+url: /ha_dreame/frontend/ha-dreame-queue-card.js
+type: module
+```
+
+The card exposes a Lovelace editor. When Home Assistant can see a public `ha_dreame`
+queue status sensor, the default card config uses that entity. If no queue sensor is
+detectable yet, the fallback remains generic and public-safe:
+
+```yaml
+type: custom:ha-dreame-queue-card
+entity: sensor.ha_dreame_queue_status
+```
+
+Keep dashboard examples generic. Do not commit private dashboard files, local entity ids, room names, or host-specific resource paths.
