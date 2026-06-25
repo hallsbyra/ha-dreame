@@ -28,6 +28,9 @@ jobs:
       - name: Format
         run: python -m ruff format --check .
 
+      - name: Type check
+        run: python -m pyright
+
       - name: Compile integration
         run: python -m compileall custom_components/ha_dreame
 

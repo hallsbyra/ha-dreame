@@ -63,4 +63,6 @@ rules:
   inject-websession:
     status: exempt
     comment: Command transport is provided by the upstream Dreame integration dependency.
-  strict-typing: todo
+  strict-typing:
+    status: todo
+    comment: Basic Pyright CI validation is in place; strict typing remains a later hardening target.

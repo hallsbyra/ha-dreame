@@ -25,6 +25,9 @@ Use HACS custom repository installation for public alpha testing.
 
 For local development, see [docs/parallel-install.md](docs/parallel-install.md). Keep machine-specific paths, hostnames, users, tokens, and entity ids out of committed files.
 
+For alpha candidate validation in Home Assistant, follow
+[docs/alpha-test-plan.md](docs/alpha-test-plan.md).
+
 ## Configuration
 
 The config flow selects an existing Dreame vacuum. The integration validates that the selected entity exists and is a vacuum before setup completes.
@@ -85,6 +88,7 @@ Rollback should leave the existing `dreame_vacuum` integration and any legacy co
 ```bash
 python -m ruff check .
 python -m ruff format --check .
+python -m pyright
 python -m compileall custom_components/ha_dreame
 python -m pytest
 cd frontend/dreame-queue-card

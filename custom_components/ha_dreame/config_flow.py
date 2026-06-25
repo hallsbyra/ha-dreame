@@ -7,8 +7,8 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import entity_registry as er, selector
 
 from .const import (
@@ -38,7 +38,10 @@ OBSERVATION_ENTITY_ID_OPTIONS = (
 )
 
 
-class HaDreameConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class HaDreameConfigFlow(  # pyright: ignore[reportGeneralTypeIssues]
+    config_entries.ConfigFlow,
+    domain=DOMAIN,  # pyright: ignore[reportCallIssue]
+):
     """Handle a config flow for HA Dreame."""
 
     VERSION = 1
@@ -51,7 +54,7 @@ class HaDreameConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Create the options flow."""
         return HaDreameOptionsFlow(config_entry)
 
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the initial step."""
         errors: dict[str, str] = {}
 
@@ -103,7 +106,7 @@ class HaDreameOptionsFlow(config_entries.OptionsFlow):
         """Initialize the options flow."""
         self._config_entry = config_entry
 
-    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle options."""
         if user_input is not None:
             errors = self._validate_observation_entities(user_input)

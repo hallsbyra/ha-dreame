@@ -1,0 +1,11 @@
+{
+  "include": ["custom_components/ha_dreame"],
+  "exclude": [
+    "custom_components/ha_dreame/frontend",
+    "frontend",
+    "tests"
+  ],
+  "pythonVersion": "3.13",
+  "pythonPlatform": "Linux",
+  "typeCheckingMode": "basic"
+}
