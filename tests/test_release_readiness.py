@@ -1,0 +1,98 @@
+"""Release readiness contract tests."""
+
+import json
+from pathlib import Path
+
+import yaml
+
+
+ALPHA_TEST_PLAN = Path("docs/alpha-test-plan.md")
+PYRIGHT_CONFIG = Path("pyrightconfig.json")
+VALIDATE_WORKFLOW = Path(".github/workflows/validate.yml")
+
+
+def test_validate_workflow_runs_python_type_validation() -> None:
+    """Test CI includes a pinned Python type validation gate."""
+    workflow = yaml.safe_load(VALIDATE_WORKFLOW.read_text(encoding="utf-8"))
+    python_steps = workflow["jobs"]["python"]["steps"]
+
+    step_names = {step["name"] for step in python_steps}
+    assert "Type check" in step_names
+
+    type_step = next(step for step in python_steps if step["name"] == "Type check")
+    assert type_step["run"] == "python -m pyright"
+    assert "pyright==1.1.411" in Path("requirements-dev.txt").read_text(encoding="utf-8")
+    assert Path("pyrightconfig.json").is_file()
+
+
+def test_pyright_config_scopes_release_type_gate_to_integration_code() -> None:
+    """Test the first Python type gate is focused on integration source."""
+    config = json.loads(PYRIGHT_CONFIG.read_text(encoding="utf-8"))
+
+    assert config["include"] == ["custom_components/ha_dreame"]
+    assert "custom_components/ha_dreame/frontend" in config["exclude"]
+    assert config["pythonVersion"] == "3.13"
+    assert config["typeCheckingMode"] == "basic"
+    assert "reportMissingImports" not in config
+    assert "reportMissingModuleSource" not in config
+
+
+def test_alpha_test_plan_is_linked_and_public_safe() -> None:
+    """Test the HA alpha validation runbook is visible and public-safe."""
+    plan = ALPHA_TEST_PLAN.read_text(encoding="utf-8")
+    readme = Path("README.md").read_text(encoding="utf-8")
+    agents = Path("AGENTS.md").read_text(encoding="utf-8")
+    release_checklist = Path("docs/release-checklist.md").read_text(encoding="utf-8")
+
+    assert "docs/alpha-test-plan.md" in readme
+    assert "docs/alpha-test-plan.md" in agents
+    assert "docs/alpha-test-plan.md" in release_checklist
+
+    required_sections = [
+        "## Goal",
+        "## Preconditions",
+        "## Preflight Validation",
+        "## Install Candidate",
+        "## Read-Only Smoke Test",
+        "## Dashboard Card Smoke Test",
+        "## Controlled Command Smoke Test",
+        "## Rollback",
+        "## Evidence To Capture",
+    ]
+    for section in required_sections:
+        assert section in plan
+
+    required_safety_phrases = [
+        "Leave `allow_robot_commands` disabled",
+        "Keep the old controller as the production path",
+        "Do not let two controllers send robot commands",
+        "docs/dreame-behavior-knowledge.md",
+    ]
+    for phrase in required_safety_phrases:
+        assert phrase in plan
+
+
+def test_public_release_docs_avoid_private_runtime_details() -> None:
+    """Test release-facing docs do not publish private runtime details."""
+    public_files = [
+        Path("README.md"),
+        Path("AGENTS.md"),
+        Path("docs/current-state.md"),
+        Path("docs/parallel-install.md"),
+        Path("docs/release-checklist.md"),
+        ALPHA_TEST_PLAN,
+    ]
+    forbidden_fragments = [
+        "haos.lan",
+        "root@",
+        "/home/fredrik",
+        "access_token",
+        "bearer ",
+        "musse",
+        "hallsbyra.se",
+    ]
+
+    for path in public_files:
+        normalized = path.read_text(encoding="utf-8").lower()
+        for fragment in forbidden_fragments:
+            assert fragment not in normalized, f"{fragment!r} leaked through {path}"

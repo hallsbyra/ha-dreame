@@ -26,6 +26,7 @@ The current production Dreame implementation still lives in the sibling repo `..
 - `docs/dreame-behavior-knowledge.md` - public-safe observed Dreame behavior and regression knowledge
 - `docs/merge-policy.md` - merge strategy for preserving TDD commit chains
 - `docs/parallel-install.md` - public-safe local and HAOS parallel-install workflow
+- `docs/alpha-test-plan.md` - public-safe Home Assistant alpha candidate validation plan
 - `docs/release-checklist.md` - release readiness gates
 
 ## Validation
@@ -36,6 +37,8 @@ The current production Dreame implementation still lives in the sibling repo `..
 - Lint and format:
   - `python -m ruff check .`
   - `python -m ruff format --check .`
+- Python type validation:
+  - `python -m pyright`
 - Frontend card package:
   - `cd frontend/dreame-queue-card && npm ci`
   - `cd frontend/dreame-queue-card && npm run check`

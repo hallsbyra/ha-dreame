@@ -5,8 +5,10 @@
 - [ ] HACS validation passes.
 - [ ] Hassfest passes.
 - [ ] Python tests pass with the configured coverage gate.
+- [ ] Python type validation passes with `python -m pyright`.
 - [ ] Config flow works in a clean Home Assistant test environment.
 - [x] README documents installation, removal, and current limitations.
+- [x] Alpha candidate validation is documented in `docs/alpha-test-plan.md`.
 - [ ] No secrets, private entity ids, private paths, or local hostnames are present.
 - [ ] Release notes clearly mark the release as experimental.
 

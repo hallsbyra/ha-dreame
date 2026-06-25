@@ -8,7 +8,7 @@ from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
 
 from .const import (
     ATTR_COMPLETED_ITEMS,
@@ -35,7 +35,7 @@ async def async_setup_entry(
     async_add_entities([HaDreameQueueStatusSensor(entry)])
 
 
-class HaDreameQueueStatusSensor(CoordinatorEntity, SensorEntity):
+class HaDreameQueueStatusSensor(CoordinatorEntity[DataUpdateCoordinator[QueueState]], SensorEntity):
     """Read-only status sensor for the HA Dreame queue."""
 
     _attr_name = f"{TITLE} Queue Status"
