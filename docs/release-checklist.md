@@ -11,6 +11,7 @@
 - [x] Alpha candidate validation is documented in `docs/alpha-test-plan.md`.
 - [ ] No secrets, private entity ids, private paths, or local hostnames are present.
 - [ ] Release notes clearly mark the release as experimental.
+- [ ] HACS prerelease visibility or explicit version selection is documented for alpha tags.
 
 ## Beta
 

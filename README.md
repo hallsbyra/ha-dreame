@@ -23,6 +23,11 @@ Use HACS custom repository installation for public alpha testing.
 5. Select the existing Dreame vacuum entity provided by `dreame_vacuum`.
 6. Leave `allow_robot_commands` disabled for initial validation.
 
+Alpha builds may be published as GitHub prerelease versions. If HACS does not
+offer the expected alpha tag as the latest version, open the repository in HACS,
+enable beta or prerelease visibility, and explicitly select the alpha tag before
+restarting Home Assistant.
+
 For local development, see [docs/parallel-install.md](docs/parallel-install.md). Keep machine-specific paths, hostnames, users, tokens, and entity ids out of committed files.
 
 For alpha candidate validation in Home Assistant, follow
