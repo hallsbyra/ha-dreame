@@ -26,11 +26,13 @@ from custom_components.ha_dreame.const import (
     ATTR_TOTAL_ITEMS,
     CONF_ALLOW_ROBOT_COMMANDS,
     CONF_CONFIG_ENTRY_ID,
+    CONF_FIELD,
     CONF_ITEM_ID,
     CONF_NEW_POSITION,
     CONF_OVERRIDES,
     CONF_ROOM_ID,
     CONF_ROOM_NAME,
+    CONF_VALUE,
     CONF_VACUUM_ENTITY_ID,
     DOMAIN,
     DREAME_VACUUM_DOMAIN,
@@ -43,6 +45,7 @@ from custom_components.ha_dreame.const import (
     SERVICE_SKIP_CURRENT_ROOM,
     SERVICE_START_QUEUE,
     SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES,
+    SERVICE_UPDATE_RUNNING_OVERRIDE,
 )
 from custom_components.ha_dreame.queue_core import start_run
 from custom_components.ha_dreame.runtime_state import QueueRunTracking
@@ -190,6 +193,27 @@ async def _call_update_queue_item_overrides_service(
     )
 
 
+async def _call_update_running_override_service(
+    hass: HomeAssistant,
+    config_entry_id: str,
+    *,
+    field: str = "suction_level",
+    value: int = 1,
+) -> dict[str, object]:
+    """Call the update running override service and return its response."""
+    return await hass.services.async_call(
+        DOMAIN,
+        SERVICE_UPDATE_RUNNING_OVERRIDE,
+        {
+            CONF_CONFIG_ENTRY_ID: config_entry_id,
+            CONF_FIELD: field,
+            CONF_VALUE: value,
+        },
+        blocking=True,
+        return_response=True,
+    )
+
+
 async def _call_start_queue_service(
     hass: HomeAssistant,
     config_entry_id: str,
@@ -328,6 +352,20 @@ async def test_setup_entry_registers_start_queue_service(
     await hass.async_block_till_done()
 
     assert hass.services.has_service(DOMAIN, SERVICE_START_QUEUE)
+
+
+async def test_setup_entry_registers_update_running_override_service(
+    hass: HomeAssistant,
+) -> None:
+    """Test setup registers the command-gated running override service."""
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.services.has_service(DOMAIN, SERVICE_UPDATE_RUNNING_OVERRIDE)
 
 
 async def test_add_queue_room_service_updates_runtime_queue_state(
@@ -875,6 +913,200 @@ async def test_start_queue_service_leaves_queue_idle_when_dispatch_fails(
     assert entry.runtime_data.run_tracking is None
 
 
+async def test_update_running_override_rejects_disabled_command_gate_without_dispatch(
+    hass: HomeAssistant,
+) -> None:
+    """Test disabled command gate prevents running override commands."""
+    calls: list[dict[str, object]] = []
+
+    async def _record_select_option(call: ServiceCall) -> None:
+        calls.append(dict(call.data))
+
+    hass.services.async_register("select", "select_option", _record_select_option)
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    await _call_add_queue_room_service(hass, entry.entry_id)
+    entry.runtime_data.set_queue_state(start_run(entry.runtime_data.queue_state))
+    hass.states.async_set("select.dreame_robot_suction_level", "quiet")
+
+    with pytest.raises(HomeAssistantError, match="robot commands are disabled"):
+        await _call_update_running_override_service(
+            hass,
+            entry.entry_id,
+            field="suction_level",
+            value=1,
+        )
+
+    assert calls == []
+
+
+async def test_update_running_override_rejects_idle_queue_without_dispatch(
+    hass: HomeAssistant,
+) -> None:
+    """Test running override commands are only accepted for active runs."""
+    calls: list[dict[str, object]] = []
+
+    async def _record_select_option(call: ServiceCall) -> None:
+        calls.append(dict(call.data))
+
+    hass.services.async_register("select", "select_option", _record_select_option)
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    hass.states.async_set("select.dreame_robot_suction_level", "quiet")
+
+    with pytest.raises(HomeAssistantError, match="Queue is not running"):
+        await _call_update_running_override_service(
+            hass,
+            entry.entry_id,
+            field="suction_level",
+            value=1,
+        )
+
+    assert calls == []
+
+
+async def test_update_running_suction_override_calls_companion_select(
+    hass: HomeAssistant,
+) -> None:
+    """Test running suction overrides dispatch to the vacuum companion select."""
+    calls: list[dict[str, object]] = []
+
+    async def _record_select_option(call: ServiceCall) -> None:
+        calls.append(dict(call.data))
+
+    hass.services.async_register("select", "select_option", _record_select_option)
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    await _call_add_queue_room_service(hass, entry.entry_id)
+    queue_state = start_run(entry.runtime_data.queue_state)
+    entry.runtime_data.set_queue_state(queue_state)
+    hass.states.async_set("select.dreame_robot_suction_level", "quiet")
+
+    response = await _call_update_running_override_service(
+        hass,
+        entry.entry_id,
+        field="suction_level",
+        value=3,
+    )
+
+    assert calls == [
+        {
+            "entity_id": "select.dreame_robot_suction_level",
+            "option": "turbo",
+        }
+    ]
+    assert entry.runtime_data.queue_state == queue_state
+    assert response == {
+        CONF_CONFIG_ENTRY_ID: entry.entry_id,
+        CONF_FIELD: "suction_level",
+        CONF_VALUE: 3,
+        "entity_id": "select.dreame_robot_suction_level",
+    }
+
+
+async def test_update_running_water_override_calls_companion_number(
+    hass: HomeAssistant,
+) -> None:
+    """Test running water overrides dispatch to the vacuum wetness number."""
+    calls: list[dict[str, object]] = []
+
+    async def _record_set_value(call: ServiceCall) -> None:
+        calls.append(dict(call.data))
+
+    hass.services.async_register("number", "set_value", _record_set_value)
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    await _call_add_queue_room_service(hass, entry.entry_id)
+    queue_state = start_run(entry.runtime_data.queue_state)
+    entry.runtime_data.set_queue_state(queue_state)
+    hass.states.async_set("number.dreame_robot_wetness_level", "8")
+
+    response = await _call_update_running_override_service(
+        hass,
+        entry.entry_id,
+        field="water_volume",
+        value=2,
+    )
+
+    assert calls == [
+        {
+            "entity_id": "number.dreame_robot_wetness_level",
+            "value": 16,
+        }
+    ]
+    assert entry.runtime_data.queue_state == queue_state
+    assert response == {
+        CONF_CONFIG_ENTRY_ID: entry.entry_id,
+        CONF_FIELD: "water_volume",
+        CONF_VALUE: 2,
+        "entity_id": "number.dreame_robot_wetness_level",
+    }
+
+
+async def test_update_running_override_rejects_invalid_values_without_dispatch(
+    hass: HomeAssistant,
+) -> None:
+    """Test invalid running override values fail before companion service calls."""
+    calls: list[dict[str, object]] = []
+
+    async def _record_select_option(call: ServiceCall) -> None:
+        calls.append(dict(call.data))
+
+    hass.services.async_register("select", "select_option", _record_select_option)
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    await _call_add_queue_room_service(hass, entry.entry_id)
+    entry.runtime_data.set_queue_state(start_run(entry.runtime_data.queue_state))
+    hass.states.async_set("select.dreame_robot_suction_level", "quiet")
+
+    with pytest.raises(HomeAssistantError, match="Invalid running override"):
+        await _call_update_running_override_service(
+            hass,
+            entry.entry_id,
+            field="suction_level",
+            value=4,
+        )
+
+    assert calls == []
+
+
 async def test_cancel_queue_service_rejects_disabled_command_gate_without_dispatch(
     hass: HomeAssistant,
 ) -> None:
@@ -1406,6 +1638,7 @@ async def test_unload_last_entry_removes_runtime_status_service(
     assert hass.services.has_service(DOMAIN, SERVICE_SKIP_CURRENT_ROOM)
     assert hass.services.has_service(DOMAIN, SERVICE_START_QUEUE)
     assert hass.services.has_service(DOMAIN, SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES)
+    assert hass.services.has_service(DOMAIN, SERVICE_UPDATE_RUNNING_OVERRIDE)
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
@@ -1419,3 +1652,4 @@ async def test_unload_last_entry_removes_runtime_status_service(
     assert not hass.services.has_service(DOMAIN, SERVICE_SKIP_CURRENT_ROOM)
     assert not hass.services.has_service(DOMAIN, SERVICE_START_QUEUE)
     assert not hass.services.has_service(DOMAIN, SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES)
+    assert not hass.services.has_service(DOMAIN, SERVICE_UPDATE_RUNNING_OVERRIDE)
