@@ -54,6 +54,20 @@ examples only.
   seen after dispatch.
 - Test implication: cover stale-completed-at-dispatch as a non-completion state.
 
+### Post-Run Completion Can Be Missed Without An In-Run Reconcile Tick
+
+- Confidence: `Observed`
+- Behavior: during a command-gated alpha smoke test with automatic reconciliation disabled, a room
+  can finish successfully and the robot can return to a dock/prep state while the HA Dreame runtime
+  still has `task_status_cleared_since_dispatch=false`. A later reconcile evaluation then sees
+  `task_status=completed` but ignores it as potentially stale, leaving the standalone queue in
+  `running` even though the robot is done.
+- Controller implication: command-smoke runbooks need either an in-run reconcile tick or an explicit
+  safe post-run completion path. A future fallback must still avoid accepting stale
+  `task_status=completed` immediately after dispatch.
+- Test implication: cover post-run `completed` plus dock/prep state after a successful room run when
+  no earlier reconcile tick set `task_status_cleared_since_dispatch`.
+
 ### Recoverable Robot Errors
 
 - Confidence: `Observed`
