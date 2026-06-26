@@ -6,6 +6,7 @@ import {
   CARD_ELEMENT_TAG,
   defaultCardConfig,
   type ActiveQueueService,
+  type CardOverrideControl,
   type HaDreameQueueCardConfig,
   type HomeAssistantLike,
 } from "./card-view";
@@ -524,7 +525,7 @@ class HaDreameQueueCard extends LitElement {
     roomName: string,
     itemId: string,
     overrides: Record<string, unknown>,
-    control: { field: OverrideField; label: string; valueLabel: string },
+    control: CardOverrideControl,
     configEntryId: string | null | undefined,
   ) {
     return html`
@@ -534,7 +535,8 @@ class HaDreameQueueCard extends LitElement {
         title=${`${control.label}: ${control.valueLabel}`}
         type="button"
         ?disabled=${!configEntryId}
-        @click=${() => this._updateOverrides(configEntryId, itemId, control.field, overrides)}
+        @click=${() =>
+          this._cycleOverride(configEntryId, itemId, overrides, control)}
       >
         <ha-icon icon=${this._overrideIcon(control.field, control.valueLabel)}></ha-icon>
         ${this._renderOverrideValue(control.field, control.valueLabel)}
@@ -690,6 +692,36 @@ class HaDreameQueueCard extends LitElement {
       config_entry_id: configEntryId,
       item_id: itemId,
       overrides: cycledOverrides(field, overrides, {}),
+    });
+  }
+
+  private _cycleOverride(
+    configEntryId: string | null | undefined,
+    itemId: string,
+    overrides: Record<string, unknown>,
+    control: CardOverrideControl,
+  ): void {
+    if (control.controlType === "running") {
+      this._updateRunningOverride(configEntryId, control.field, control.value);
+      return;
+    }
+
+    this._updateOverrides(configEntryId, itemId, control.field, overrides);
+  }
+
+  private _updateRunningOverride(
+    configEntryId: string | null | undefined,
+    field: OverrideField,
+    value: number | undefined,
+  ): void {
+    if (!configEntryId || !this.hass?.callService || field === "repeats" || value === undefined) {
+      return;
+    }
+
+    void this.hass.callService("ha_dreame", "update_running_override", {
+      config_entry_id: configEntryId,
+      field,
+      value,
     });
   }
 

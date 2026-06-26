@@ -1,4 +1,10 @@
 import { deriveRunActivity, sensorEntityIdForVacuum, type RunActivity } from "./activity";
+import {
+  nextRunningOverrideServiceCall,
+  runningOverrideEntityId,
+  runningOverrideValueFromState,
+  type RunningOverrideField,
+} from "./live-overrides";
 import { parseQueueSnapshot, queueRunStateLabel, type QueueItem, type QueueSnapshot } from "./queue";
 import { overrideLabel, type OverrideField } from "./queue-overrides";
 import { extractDreameRooms, type DreameRoom } from "./rooms";
@@ -39,9 +45,11 @@ export type CardActiveControl = {
 };
 
 export type CardOverrideControl = {
+  controlType: "pending" | "running";
   field: OverrideField;
   label: string;
   valueLabel: string;
+  value?: number;
 };
 
 export type CardQueueRow = {
@@ -61,6 +69,10 @@ const OVERRIDE_CONTROLS: Array<{ field: OverrideField; label: string }> = [
   { field: "water_volume", label: "Water" },
   { field: "suction_level", label: "Suction" },
   { field: "repeats", label: "Repeats" },
+];
+const RUNNING_OVERRIDE_CONTROLS: Array<{ field: RunningOverrideField; label: string }> = [
+  { field: "water_volume", label: "Water" },
+  { field: "suction_level", label: "Suction" },
 ];
 
 export type CardViewModel = {
@@ -133,7 +145,7 @@ export function buildCardViewModel(
     activeControls: buildActiveControls(snapshot),
     canClearPending: snapshot.pendingItems > 0,
     rooms,
-    rows: cardQueueRows(snapshot.items),
+    rows: cardQueueRows(hass, snapshot),
   };
 }
 
@@ -181,7 +193,11 @@ function buildActivity(
   });
 }
 
-function cardQueueRows(items: QueueItem[]): CardQueueRow[] {
+function cardQueueRows(
+  hass: HomeAssistantLike | undefined,
+  snapshot: QueueSnapshot,
+): CardQueueRow[] {
+  const items = snapshot.items;
   const pendingIndexes = items.flatMap((item, index) => (item.status === "pending" ? [index] : []));
   const firstPendingIndex = pendingIndexes[0] ?? null;
   const lastPendingIndex = pendingIndexes[pendingIndexes.length - 1] ?? null;
@@ -196,7 +212,10 @@ function cardQueueRows(items: QueueItem[]): CardQueueRow[] {
     canRemove: item.status === "pending",
     canMoveUp: item.status === "pending" && index !== firstPendingIndex,
     canMoveDown: item.status === "pending" && index !== lastPendingIndex,
-    overrideControls: item.status === "pending" ? buildOverrideControls(item.overrides) : [],
+    overrideControls:
+      item.status === "pending"
+        ? buildOverrideControls(item.overrides)
+        : buildRunningOverrideControls(hass, snapshot, item),
   }));
 }
 
@@ -262,10 +281,54 @@ function buildSummary(snapshot: QueueSnapshot, activity: RunActivity | null): st
 
 function buildOverrideControls(overrides: Record<string, unknown>): CardOverrideControl[] {
   return OVERRIDE_CONTROLS.map((control) => ({
+    controlType: "pending",
     field: control.field,
     label: control.label,
     valueLabel: overrideLabel(control.field, overrides, {}),
   }));
+}
+
+function buildRunningOverrideControls(
+  hass: HomeAssistantLike | undefined,
+  snapshot: QueueSnapshot,
+  item: QueueItem,
+): CardOverrideControl[] {
+  if (!hass || item.status !== "running" || !snapshot.configEntryId || !snapshot.vacuumEntityId) {
+    return [];
+  }
+
+  return RUNNING_OVERRIDE_CONTROLS.flatMap((control) => {
+    const entityId = runningOverrideEntityId(snapshot.vacuumEntityId ?? "", control.field);
+    if (!entityId) {
+      return [];
+    }
+
+    const entityState = hass.states[entityId]?.state;
+    if (entityState === undefined) {
+      return [];
+    }
+
+    const currentValue = runningOverrideValueFromState(control.field, entityState);
+    if (currentValue === null) {
+      return [];
+    }
+
+    const serviceCall = nextRunningOverrideServiceCall(
+      snapshot.configEntryId ?? "",
+      control.field,
+      entityState,
+    );
+
+    return [
+      {
+        controlType: "running" as const,
+        field: control.field,
+        label: control.label,
+        valueLabel: overrideLabel(control.field, { [control.field]: currentValue }, {}),
+        value: serviceCall.data.value,
+      },
+    ];
+  });
 }
 
 function buildRooms(
