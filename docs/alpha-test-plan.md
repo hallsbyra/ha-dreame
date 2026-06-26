@@ -42,6 +42,25 @@ npm run check
 If any local Python dependencies are unavailable, use the GitHub Actions
 Validate, HACS, and Hassfest results as the release candidate preflight gate.
 
+## HACS Prerelease Versions
+
+Alpha tags may be published as a GitHub prerelease. HACS can install these
+versions, but they may not appear as the normal latest version in the update
+entity.
+
+When validating a GitHub prerelease through HACS:
+
+1. Open the repository in HACS.
+2. Enable beta or prerelease visibility for the repository if the alpha tag is
+   not listed.
+3. If needed, explicitly select the alpha tag to download or install.
+4. Restart Home Assistant after an integration update.
+5. Confirm the HACS update entity shows the expected installed version.
+
+If HACS still reports an older latest version after the prerelease install, use
+the installed version as the source of truth for the candidate under test and
+record that behavior in the release evidence.
+
 ## Install Candidate
 
 Prefer HACS for alpha validation because it exercises the public custom
@@ -50,11 +69,13 @@ repository install path.
 1. Add the repository to HACS as a custom repository with category
    `Integration`.
 2. Install `HA Dreame`.
-3. Restart Home Assistant.
-4. Add the `HA Dreame` integration from the integrations UI.
-5. Select the existing Dreame vacuum entity provided by `dreame_vacuum`.
-6. Keep `allow_robot_commands` disabled.
-7. Keep `auto_reconcile_enabled` disabled.
+3. For alpha prereleases, enable beta or prerelease visibility and explicitly
+   select the alpha tag if HACS does not offer it as the latest version.
+4. Restart Home Assistant.
+5. Add the `HA Dreame` integration from the integrations UI.
+6. Select the existing Dreame vacuum entity provided by `dreame_vacuum`.
+7. Keep `allow_robot_commands` disabled.
+8. Keep `auto_reconcile_enabled` disabled.
 
 Local development copies are acceptable for focused debugging, but do not commit
 machine-specific paths, hostnames, tokens, entity ids, or room names.
@@ -138,6 +159,7 @@ Capture public-safe evidence for the release issue or follow-up PR:
 - commit SHA or release tag under test
 - GitHub Actions run links for Validate, HACS, and Hassfest
 - Home Assistant version
+- HACS installed version and whether beta or prerelease visibility was needed
 - whether install, config flow, queue sensor, services, diagnostics, and card
   loading passed
 - whether command testing was skipped or completed
