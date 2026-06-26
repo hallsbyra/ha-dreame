@@ -75,6 +75,14 @@ const hass = {
       state: "no_error",
       attributes: {},
     },
+    "select.robot_suction_level": {
+      state: "quiet",
+      attributes: {},
+    },
+    "number.robot_wetness_level": {
+      state: "16",
+      attributes: {},
+    },
   },
 };
 
@@ -332,7 +340,7 @@ describe("ha-dreame-queue-card", () => {
     });
   });
 
-  it("cycles pending queue item overrides through the ha_dreame queue service", async () => {
+  it("cycles running overrides through the command-gated ha_dreame service", async () => {
     const callService = vi.fn();
     const element = document.createElement(CARD_ELEMENT_TAG) as any;
     element.setConfig({
@@ -348,6 +356,47 @@ describe("ha-dreame-queue-card", () => {
     const runningWater = shadowRoot?.querySelector<HTMLButtonElement>(
       'button[aria-label="Cycle Kitchen water volume"]',
     );
+    const runningSuction = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Cycle Kitchen suction level"]',
+    );
+    const runningRepeats = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Cycle Kitchen repeats"]',
+    );
+
+    expect(runningWater).not.toBeNull();
+    expect(runningSuction).not.toBeNull();
+    expect(runningRepeats).toBeNull();
+    expect(runningWater!.querySelectorAll(".override-bar.active")).toHaveLength(2);
+    expect(runningSuction!.querySelectorAll(".override-bar.active")).toHaveLength(1);
+
+    runningWater!.click();
+    runningSuction!.click();
+
+    expect(callService).toHaveBeenNthCalledWith(1, "ha_dreame", "update_running_override", {
+      config_entry_id: "config-entry-1",
+      field: "water_volume",
+      value: 3,
+    });
+    expect(callService).toHaveBeenNthCalledWith(2, "ha_dreame", "update_running_override", {
+      config_entry_id: "config-entry-1",
+      field: "suction_level",
+      value: 1,
+    });
+  });
+
+  it("cycles pending queue item overrides through the ha_dreame queue service", async () => {
+    const callService = vi.fn();
+    const element = document.createElement(CARD_ELEMENT_TAG) as any;
+    element.setConfig({
+      entity: "sensor.robot_queue_status",
+      title: "Robot queue",
+    });
+    element.hass = { ...hass, callService };
+    document.body.append(element);
+
+    await element.updateComplete;
+
+    const shadowRoot = element.shadowRoot as ShadowRoot | null;
     const hallwayWater = shadowRoot?.querySelector<HTMLButtonElement>(
       'button[aria-label="Cycle Hallway water volume"]',
     );
@@ -358,7 +407,6 @@ describe("ha-dreame-queue-card", () => {
       'button[aria-label="Cycle Hallway repeats"]',
     );
 
-    expect(runningWater).toBeNull();
     expect(hallwayWater).not.toBeNull();
     expect(hallwaySuction).not.toBeNull();
     expect(hallwayRepeats).not.toBeNull();

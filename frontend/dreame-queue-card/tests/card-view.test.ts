@@ -64,6 +64,14 @@ const hass = {
       state: "no_error",
       attributes: {},
     },
+    "select.robot_suction_level": {
+      state: "quiet",
+      attributes: {},
+    },
+    "number.robot_wetness_level": {
+      state: "16",
+      attributes: {},
+    },
   },
 };
 
@@ -185,7 +193,22 @@ describe("card view model", () => {
           canRemove: false,
           canMoveUp: false,
           canMoveDown: false,
-          overrideControls: [],
+          overrideControls: [
+            {
+              controlType: "running",
+              field: "water_volume",
+              label: "Water",
+              valueLabel: "Med",
+              value: 3,
+            },
+            {
+              controlType: "running",
+              field: "suction_level",
+              label: "Suction",
+              valueLabel: "Min",
+              value: 1,
+            },
+          ],
         },
         {
           itemId: "item-2",
@@ -203,16 +226,19 @@ describe("card view model", () => {
           canMoveDown: true,
           overrideControls: [
             {
+              controlType: "pending",
               field: "water_volume",
               label: "Water",
               valueLabel: "Med",
             },
             {
+              controlType: "pending",
               field: "suction_level",
               label: "Suction",
               valueLabel: "Med",
             },
             {
+              controlType: "pending",
               field: "repeats",
               label: "Repeats",
               valueLabel: "x2",
@@ -231,16 +257,19 @@ describe("card view model", () => {
           canMoveDown: false,
           overrideControls: [
             {
+              controlType: "pending",
               field: "water_volume",
               label: "Water",
               valueLabel: "Med",
             },
             {
+              controlType: "pending",
               field: "suction_level",
               label: "Suction",
               valueLabel: "Med",
             },
             {
+              controlType: "pending",
               field: "repeats",
               label: "Repeats",
               valueLabel: "x1",
@@ -328,6 +357,25 @@ describe("card view model", () => {
     expect(outOfSync.activeControls).toEqual([]);
     expect(blocked.summary).toBe("Route blocked. Review room access before restarting.");
     expect(blocked.activeControls).toEqual([]);
+  });
+
+  it("hides running override controls when companion entities are missing", () => {
+    const view = buildCardViewModel(
+      {
+        ...hass,
+        states: {
+          ...hass.states,
+          "select.robot_suction_level": undefined,
+          "number.robot_wetness_level": undefined,
+        },
+      },
+      {
+        entity: "sensor.robot_queue_status",
+      },
+    );
+
+    expect(view.rows[0].status).toBe("running");
+    expect(view.rows[0].overrideControls).toEqual([]);
   });
 });
 
