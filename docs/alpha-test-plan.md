@@ -90,13 +90,16 @@ With robot commands disabled:
 
 1. Confirm the config entry loads without setup errors.
 2. Confirm a `ha_dreame` queue status sensor exists.
-3. Call `ha_dreame.get_runtime_status` for the config entry and inspect the
+3. Call `ha_dreame.get_control_readiness` for the config entry and confirm
+   `ready_for_read_only_observation` is true while
+   `ready_for_control_window` is false.
+4. Call `ha_dreame.get_runtime_status` for the config entry and inspect the
    queue snapshot.
-4. Call `ha_dreame.evaluate_reconcile` and confirm it reports observations
+5. Call `ha_dreame.evaluate_reconcile` and confirm it reports observations
    without mutating queue state or sending robot commands.
-5. Download diagnostics and confirm they contain no secrets or private runtime
+6. Download diagnostics and confirm they contain no secrets or private runtime
    values.
-6. Confirm legacy `pyscript.dreame_queue_*` services and the old dashboard card
+7. Confirm legacy `pyscript.dreame_queue_*` services and the old dashboard card
    still exist independently.
 
 ## Dashboard Card Smoke Test
@@ -132,14 +135,19 @@ Do not let two controllers send robot commands to the same robot.
 
 1. Confirm the legacy controller is not about to start or continue a run.
 2. Add one low-risk room to the `ha_dreame` queue.
-3. Enable `allow_robot_commands`.
-4. Keep `auto_reconcile_enabled` disabled unless this exact test targets
+3. Call `ha_dreame.get_control_readiness` and confirm the queue has a pending
+   item, the selected vacuum is available, and only `allow_robot_commands` is
+   blocking control readiness.
+4. Enable `allow_robot_commands`.
+5. Call `ha_dreame.get_control_readiness` again and confirm `start_queue` is in
+   `available_actions`.
+6. Keep `auto_reconcile_enabled` disabled unless this exact test targets
    automatic reconciliation.
-5. Start the queue from `ha_dreame`.
-6. Observe the queue status sensor, robot state, task status, and Home Assistant
+7. Start the queue from `ha_dreame`.
+8. Observe the queue status sensor, robot state, task status, and Home Assistant
    logs.
-7. Test either skip or cancel, not both, unless the first command path is clean.
-8. Disable `allow_robot_commands` after the command window.
+9. Test either skip or cancel, not both, unless the first command path is clean.
+10. Disable `allow_robot_commands` after the command window.
 
 If the robot reports a durable new state transition, update
 `docs/dreame-behavior-knowledge.md` and add or plan test coverage.

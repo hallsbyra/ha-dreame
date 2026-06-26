@@ -46,6 +46,11 @@ Important options:
 - `auto_reconcile_enabled`: disabled by default. Automatic reconcile only runs when both this option and `allow_robot_commands` are enabled.
 - Companion observation entities: optional explicit sensor ids for installations where the derived `sensor.<robot>_state`, `sensor.<robot>_task_status`, or `sensor.<robot>_error` names do not match.
 
+Before a controlled command window, call `ha_dreame.get_control_readiness` for
+the config entry. It reports the command gate, selected vacuum availability,
+queue state, companion entities for running overrides, and the actions that are
+currently safe to test without sending any robot command.
+
 ## Dashboard Card
 
 The integration serves the packaged queue card from:

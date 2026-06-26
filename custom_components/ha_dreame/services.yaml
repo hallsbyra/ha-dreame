@@ -42,6 +42,13 @@ evaluate_reconcile:
       selector:
         text:
 
+get_control_readiness:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        text:
+
 remove_queue_item:
   fields:
     config_entry_id:

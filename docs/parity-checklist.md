@@ -42,6 +42,7 @@ separate cutover issue exists.
 | Namespaced services | `Ported` | services live under `ha_dreame`, isolated from legacy service names | Continue coexistence observation beside old controller |
 | Command gate disabled by default | `Runtime validated` | alpha.2 HAOS smoke confirmed running override service is registered and blocked while commands are disabled | Keep disabled for read-only observation |
 | Explicit operator enablement | `Ported` | config options and service boundary tests require `allow_robot_commands` before dispatch | Controlled command smoke |
+| Manual control preflight | `Ported` | `ha_dreame.get_control_readiness` reports command gate, queue state, vacuum availability, companion entities, and available actions without dispatching commands | Use before each controlled command smoke |
 | Start dispatch payload planning | `Ported` | pure dispatch-plan tests cover payload shape before runtime execution | Controlled command smoke against real robot |
 | Runtime command executor | `Ported` | command-gated executor tests cover disabled gate and service-call failures | Controlled command smoke |
 | Running override controls | `Ported` | PR #100 backend service and PR #101 packaged card controls; alpha.2 installed | Visual/runtime validation while an item is actually running |

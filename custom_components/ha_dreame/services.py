@@ -7,7 +7,7 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.const import ATTR_ENTITY_ID
+from homeassistant.const import ATTR_ENTITY_ID, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
@@ -26,6 +26,7 @@ from .const import (
     ATTR_TASK_STATUS_CLEARED_SINCE_DISPATCH,
     ATTR_TOTAL_ITEMS,
     CONF_ALLOW_ROBOT_COMMANDS,
+    CONF_AUTO_RECONCILE_ENABLED,
     CONF_CONFIG_ENTRY_ID,
     CONF_FIELD,
     CONF_ITEM_ID,
@@ -41,6 +42,7 @@ from .const import (
     SERVICE_CANCEL_QUEUE,
     SERVICE_CLEAR_PENDING_QUEUE,
     SERVICE_EVALUATE_RECONCILE,
+    SERVICE_GET_CONTROL_READINESS,
     SERVICE_GET_RUNTIME_STATUS,
     SERVICE_MOVE_QUEUE_ITEM,
     SERVICE_REMOVE_QUEUE_ITEM,
@@ -88,6 +90,7 @@ APPLY_RECONCILE_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
 CANCEL_QUEUE_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
 CLEAR_PENDING_QUEUE_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
 EVALUATE_RECONCILE_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
+GET_CONTROL_READINESS_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
 GET_RUNTIME_STATUS_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
 MOVE_QUEUE_ITEM_SCHEMA = vol.Schema(
     {
@@ -210,6 +213,19 @@ def async_register_services(hass: HomeAssistant) -> None:
             SERVICE_GET_RUNTIME_STATUS,
             _async_get_runtime_status,
             schema=GET_RUNTIME_STATUS_SCHEMA,
+            supports_response=SupportsResponse.ONLY,
+        )
+
+    if not hass.services.has_service(DOMAIN, SERVICE_GET_CONTROL_READINESS):
+
+        async def _async_get_control_readiness(call: ServiceCall) -> ServiceResponse:
+            return _control_readiness_response(hass, call.data[CONF_CONFIG_ENTRY_ID])
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_GET_CONTROL_READINESS,
+            _async_get_control_readiness,
+            schema=GET_CONTROL_READINESS_SCHEMA,
             supports_response=SupportsResponse.ONLY,
         )
 
@@ -344,6 +360,7 @@ def async_remove_services(hass: HomeAssistant) -> None:
     hass.services.async_remove(DOMAIN, SERVICE_CANCEL_QUEUE)
     hass.services.async_remove(DOMAIN, SERVICE_CLEAR_PENDING_QUEUE)
     hass.services.async_remove(DOMAIN, SERVICE_EVALUATE_RECONCILE)
+    hass.services.async_remove(DOMAIN, SERVICE_GET_CONTROL_READINESS)
     hass.services.async_remove(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
     hass.services.async_remove(DOMAIN, SERVICE_MOVE_QUEUE_ITEM)
     hass.services.async_remove(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM)
@@ -688,6 +705,106 @@ def _vacuum_object_id(vacuum_entity_id: str) -> str:
     if not object_id:
         raise HomeAssistantError(f"Invalid vacuum entity id: {vacuum_entity_id}")
     return object_id
+
+
+def _control_readiness_response(
+    hass: HomeAssistant,
+    config_entry_id: str,
+) -> dict[str, Any]:
+    """Return a read-only manual control preflight snapshot."""
+    entry = _runtime_entry(hass, config_entry_id)
+    runtime_data = entry.runtime_data
+    queue_state = runtime_data.queue_state
+    pending_items = count_queue_items(queue_state, "pending")
+    running_items = count_queue_items(queue_state, "running")
+    vacuum_available = _entity_available(hass, runtime_data.vacuum_entity_id)
+    companion_entities = _running_override_companion_entities(
+        hass,
+        runtime_data.vacuum_entity_id,
+    )
+    running_override_ready = (
+        queue_state.run_state == "running"
+        and all(entity["available"] for entity in companion_entities.values())
+    )
+    available_actions: list[str] = []
+    blocking_reasons: list[str] = []
+
+    if not vacuum_available:
+        blocking_reasons.append("vacuum_entity_unavailable")
+    if not runtime_data.commands_enabled:
+        blocking_reasons.append("robot_commands_disabled")
+
+    can_offer_command_actions = runtime_data.commands_enabled and vacuum_available
+    if queue_state.run_state == "idle":
+        if can_offer_command_actions and pending_items > 0:
+            available_actions.append(SERVICE_START_QUEUE)
+        elif pending_items == 0:
+            blocking_reasons.append("queue_has_no_pending_items")
+    elif queue_state.run_state == "running":
+        if can_offer_command_actions:
+            available_actions.extend([SERVICE_CANCEL_QUEUE, SERVICE_SKIP_CURRENT_ROOM])
+            if running_override_ready:
+                available_actions.append(SERVICE_UPDATE_RUNNING_OVERRIDE)
+        if not running_override_ready:
+            blocking_reasons.append("running_override_entities_unavailable")
+    elif can_offer_command_actions:
+        blocking_reasons.append("queue_state_not_actionable")
+
+    return {
+        CONF_ALLOW_ROBOT_COMMANDS: runtime_data.commands_enabled,
+        CONF_AUTO_RECONCILE_ENABLED: runtime_data.auto_reconcile_enabled,
+        CONF_CONFIG_ENTRY_ID: entry.entry_id,
+        CONF_VACUUM_ENTITY_ID: runtime_data.vacuum_entity_id,
+        ATTR_PENDING_ITEMS: pending_items,
+        ATTR_RUNNING_ITEMS: running_items,
+        "available_actions": available_actions,
+        "blocking_reasons": blocking_reasons,
+        "companion_entities": companion_entities,
+        "queue_run_state": queue_state.run_state,
+        "ready_for_control_window": bool(available_actions),
+        "ready_for_read_only_observation": vacuum_available,
+        "running_override_ready": running_override_ready,
+        "vacuum_available": vacuum_available,
+    }
+
+
+def _running_override_companion_entities(
+    hass: HomeAssistant,
+    vacuum_entity_id: str,
+) -> dict[str, dict[str, Any]]:
+    """Return readiness for companion entities used by running overrides."""
+    suction_entity_id, *_ = _running_override_service_call(
+        vacuum_entity_id,
+        field="suction_level",
+        value=0,
+    )
+    water_entity_id, *_ = _running_override_service_call(
+        vacuum_entity_id,
+        field="water_volume",
+        value=1,
+    )
+
+    return {
+        "suction_level": _companion_entity_response(hass, suction_entity_id),
+        "water_volume": _companion_entity_response(hass, water_entity_id),
+    }
+
+
+def _companion_entity_response(
+    hass: HomeAssistant,
+    entity_id: str,
+) -> dict[str, Any]:
+    """Return a compact companion entity readiness response."""
+    return {
+        "available": _entity_available(hass, entity_id),
+        "entity_id": entity_id,
+    }
+
+
+def _entity_available(hass: HomeAssistant, entity_id: str) -> bool:
+    """Return whether an entity exists with a usable current state."""
+    state = hass.states.get(entity_id)
+    return state is not None and state.state not in {STATE_UNAVAILABLE, STATE_UNKNOWN}
 
 
 def _runtime_status_response(hass: HomeAssistant, config_entry_id: str) -> dict[str, Any]:
