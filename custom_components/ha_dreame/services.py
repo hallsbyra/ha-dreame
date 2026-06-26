@@ -27,11 +27,13 @@ from .const import (
     ATTR_TOTAL_ITEMS,
     CONF_ALLOW_ROBOT_COMMANDS,
     CONF_CONFIG_ENTRY_ID,
+    CONF_FIELD,
     CONF_ITEM_ID,
     CONF_NEW_POSITION,
     CONF_OVERRIDES,
     CONF_ROOM_ID,
     CONF_ROOM_NAME,
+    CONF_VALUE,
     CONF_VACUUM_ENTITY_ID,
     DOMAIN,
     SERVICE_ADD_QUEUE_ROOM,
@@ -45,6 +47,7 @@ from .const import (
     SERVICE_SKIP_CURRENT_ROOM,
     SERVICE_START_QUEUE,
     SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES,
+    SERVICE_UPDATE_RUNNING_OVERRIDE,
     VACUUM_DOMAIN,
 )
 from .dispatch_executor import async_execute_dispatch_plan
@@ -106,6 +109,25 @@ UPDATE_QUEUE_ITEM_OVERRIDES_SCHEMA = vol.Schema(
         vol.Required(CONF_CONFIG_ENTRY_ID): str,
         vol.Required(CONF_ITEM_ID): vol.All(str, vol.Length(min=1)),
         vol.Required(CONF_OVERRIDES): dict,
+    }
+)
+RUNNING_OVERRIDE_SUCTION_OPTIONS = {
+    0: "quiet",
+    1: "standard",
+    2: "strong",
+    3: "turbo",
+}
+RUNNING_OVERRIDE_WATER_VALUES = {
+    1: 8,
+    2: 16,
+    3: 24,
+}
+RUNNING_OVERRIDE_FIELDS = ("suction_level", "water_volume")
+UPDATE_RUNNING_OVERRIDE_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_CONFIG_ENTRY_ID): str,
+        vol.Required(CONF_FIELD): vol.In(RUNNING_OVERRIDE_FIELDS),
+        vol.Required(CONF_VALUE): vol.Coerce(int),
     }
 )
 
@@ -294,6 +316,26 @@ def async_register_services(hass: HomeAssistant) -> None:
             supports_response=SupportsResponse.OPTIONAL,
         )
 
+    if not hass.services.has_service(DOMAIN, SERVICE_UPDATE_RUNNING_OVERRIDE):
+
+        async def _async_update_running_override(
+            call: ServiceCall,
+        ) -> ServiceResponse:
+            return await _async_update_running_override_response(
+                hass,
+                call.data[CONF_CONFIG_ENTRY_ID],
+                field=call.data[CONF_FIELD],
+                value=call.data[CONF_VALUE],
+            )
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_UPDATE_RUNNING_OVERRIDE,
+            _async_update_running_override,
+            schema=UPDATE_RUNNING_OVERRIDE_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+
 
 def async_remove_services(hass: HomeAssistant) -> None:
     """Remove all HA Dreame services."""
@@ -308,6 +350,7 @@ def async_remove_services(hass: HomeAssistant) -> None:
     hass.services.async_remove(DOMAIN, SERVICE_SKIP_CURRENT_ROOM)
     hass.services.async_remove(DOMAIN, SERVICE_START_QUEUE)
     hass.services.async_remove(DOMAIN, SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES)
+    hass.services.async_remove(DOMAIN, SERVICE_UPDATE_RUNNING_OVERRIDE)
 
 
 def _runtime_entry(hass: HomeAssistant, config_entry_id: str) -> ConfigEntry:
@@ -533,6 +576,39 @@ def _update_queue_item_overrides_response(
     return _queue_status_response(entry)
 
 
+async def _async_update_running_override_response(
+    hass: HomeAssistant,
+    config_entry_id: str,
+    *,
+    field: str,
+    value: int,
+) -> dict[str, Any]:
+    """Update a live running override through command-gated companion entities."""
+    entry = _runtime_entry(hass, config_entry_id)
+    runtime_data = entry.runtime_data
+
+    if not runtime_data.commands_enabled:
+        raise HomeAssistantError("HA Dreame robot commands are disabled")
+    if runtime_data.queue_state.run_state != "running":
+        raise HomeAssistantError("Queue is not running")
+
+    entity_id, domain, service, data = _running_override_service_call(
+        runtime_data.vacuum_entity_id,
+        field=field,
+        value=value,
+    )
+    if hass.states.get(entity_id) is None:
+        raise HomeAssistantError(f"Running override entity is not available: {entity_id}")
+
+    await hass.services.async_call(domain, service, data, blocking=True)
+    return {
+        CONF_CONFIG_ENTRY_ID: entry.entry_id,
+        CONF_FIELD: field,
+        CONF_VALUE: value,
+        ATTR_ENTITY_ID: entity_id,
+    }
+
+
 async def _async_start_queue_response(
     hass: HomeAssistant,
     config_entry_id: str,
@@ -565,6 +641,53 @@ async def _async_start_queue_response(
     runtime_data.set_queue_state(queue_state)
     runtime_data.set_run_tracking(_new_run_tracking(queue_state))
     return _queue_status_response(entry)
+
+
+def _running_override_service_call(
+    vacuum_entity_id: str,
+    *,
+    field: str,
+    value: int,
+) -> tuple[str, str, str, dict[str, Any]]:
+    """Return the companion entity service call for one running override."""
+    vacuum_object_id = _vacuum_object_id(vacuum_entity_id)
+
+    if field == "suction_level":
+        option = RUNNING_OVERRIDE_SUCTION_OPTIONS.get(value)
+        if option is None:
+            raise HomeAssistantError("Invalid running override suction_level value")
+        entity_id = f"select.{vacuum_object_id}_suction_level"
+        return (
+            entity_id,
+            "select",
+            "select_option",
+            {ATTR_ENTITY_ID: entity_id, "option": option},
+        )
+
+    if field == "water_volume":
+        wetness = RUNNING_OVERRIDE_WATER_VALUES.get(value)
+        if wetness is None:
+            raise HomeAssistantError("Invalid running override water_volume value")
+        entity_id = f"number.{vacuum_object_id}_wetness_level"
+        return (
+            entity_id,
+            "number",
+            "set_value",
+            {ATTR_ENTITY_ID: entity_id, CONF_VALUE: wetness},
+        )
+
+    raise HomeAssistantError(f"Invalid running override field: {field}")
+
+
+def _vacuum_object_id(vacuum_entity_id: str) -> str:
+    """Return the object id for a configured vacuum entity."""
+    normalized = str(vacuum_entity_id or "").strip()
+    if not normalized.startswith(f"{VACUUM_DOMAIN}."):
+        raise HomeAssistantError(f"Invalid vacuum entity id: {vacuum_entity_id}")
+    object_id = normalized.split(".", maxsplit=1)[1]
+    if not object_id:
+        raise HomeAssistantError(f"Invalid vacuum entity id: {vacuum_entity_id}")
+    return object_id
 
 
 def _runtime_status_response(hass: HomeAssistant, config_entry_id: str) -> dict[str, Any]:
