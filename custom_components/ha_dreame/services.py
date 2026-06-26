@@ -722,9 +722,8 @@ def _control_readiness_response(
         hass,
         runtime_data.vacuum_entity_id,
     )
-    running_override_ready = (
-        queue_state.run_state == "running"
-        and all(entity["available"] for entity in companion_entities.values())
+    running_override_ready = queue_state.run_state == "running" and all(
+        entity["available"] for entity in companion_entities.values()
     )
     available_actions: list[str] = []
     blocking_reasons: list[str] = []
