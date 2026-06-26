@@ -25,6 +25,7 @@ from custom_components.ha_dreame.const import (
     ATTR_TASK_STATUS_CLEARED_SINCE_DISPATCH,
     ATTR_TOTAL_ITEMS,
     CONF_ALLOW_ROBOT_COMMANDS,
+    CONF_AUTO_RECONCILE_ENABLED,
     CONF_CONFIG_ENTRY_ID,
     CONF_FIELD,
     CONF_ITEM_ID,
@@ -39,6 +40,7 @@ from custom_components.ha_dreame.const import (
     SERVICE_ADD_QUEUE_ROOM,
     SERVICE_CANCEL_QUEUE,
     SERVICE_CLEAR_PENDING_QUEUE,
+    SERVICE_GET_CONTROL_READINESS,
     SERVICE_GET_RUNTIME_STATUS,
     SERVICE_MOVE_QUEUE_ITEM,
     SERVICE_REMOVE_QUEUE_ITEM,
@@ -63,6 +65,20 @@ async def _call_runtime_status_service(
     return await hass.services.async_call(
         DOMAIN,
         SERVICE_GET_RUNTIME_STATUS,
+        {CONF_CONFIG_ENTRY_ID: config_entry_id},
+        blocking=True,
+        return_response=True,
+    )
+
+
+async def _call_control_readiness_service(
+    hass: HomeAssistant,
+    config_entry_id: str,
+) -> dict[str, object]:
+    """Call the control readiness service and return its response."""
+    return await hass.services.async_call(
+        DOMAIN,
+        SERVICE_GET_CONTROL_READINESS,
         {CONF_CONFIG_ENTRY_ID: config_entry_id},
         blocking=True,
         return_response=True,
@@ -240,6 +256,20 @@ async def test_setup_entry_registers_runtime_status_service(
     await hass.async_block_till_done()
 
     assert hass.services.has_service(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
+
+
+async def test_setup_entry_registers_control_readiness_service(
+    hass: HomeAssistant,
+) -> None:
+    """Test setup registers the read-only control readiness service."""
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.services.has_service(DOMAIN, SERVICE_GET_CONTROL_READINESS)
 
 
 async def test_setup_entry_registers_add_queue_room_service(
@@ -1620,6 +1650,172 @@ async def test_runtime_status_service_rejects_unknown_entry(
         await _call_runtime_status_service(hass, "missing-entry")
 
 
+async def test_control_readiness_reports_read_only_safe_default(
+    hass: HomeAssistant,
+) -> None:
+    """Test control readiness reports safe default state before manual testing."""
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    hass.states.async_set(vacuum_entity_id, "docked")
+
+    assert await _call_control_readiness_service(hass, entry.entry_id) == {
+        CONF_ALLOW_ROBOT_COMMANDS: False,
+        CONF_AUTO_RECONCILE_ENABLED: False,
+        CONF_CONFIG_ENTRY_ID: entry.entry_id,
+        CONF_VACUUM_ENTITY_ID: vacuum_entity_id,
+        ATTR_PENDING_ITEMS: 0,
+        ATTR_RUNNING_ITEMS: 0,
+        "available_actions": [],
+        "blocking_reasons": [
+            "robot_commands_disabled",
+            "queue_has_no_pending_items",
+        ],
+        "companion_entities": {
+            "suction_level": {
+                "available": False,
+                "entity_id": "select.dreame_robot_suction_level",
+            },
+            "water_volume": {
+                "available": False,
+                "entity_id": "number.dreame_robot_wetness_level",
+            },
+        },
+        "queue_run_state": "idle",
+        "ready_for_control_window": False,
+        "ready_for_read_only_observation": True,
+        "running_override_ready": False,
+        "vacuum_available": True,
+    }
+
+
+async def test_control_readiness_reports_start_queue_ready(
+    hass: HomeAssistant,
+) -> None:
+    """Test control readiness reports start readiness for a pending queue."""
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    hass.states.async_set(vacuum_entity_id, "docked")
+    await _call_add_queue_room_service(hass, entry.entry_id)
+
+    response = await _call_control_readiness_service(hass, entry.entry_id)
+
+    assert response["ready_for_read_only_observation"] is True
+    assert response["ready_for_control_window"] is True
+    assert response["queue_run_state"] == "idle"
+    assert response[ATTR_PENDING_ITEMS] == 1
+    assert response["available_actions"] == [SERVICE_START_QUEUE]
+    assert response["blocking_reasons"] == []
+
+
+async def test_control_readiness_reports_running_override_ready(
+    hass: HomeAssistant,
+) -> None:
+    """Test control readiness reports live override companion readiness."""
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={
+            CONF_ALLOW_ROBOT_COMMANDS: True,
+            CONF_AUTO_RECONCILE_ENABLED: True,
+        },
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    hass.states.async_set(vacuum_entity_id, "cleaning")
+    hass.states.async_set("select.dreame_robot_suction_level", "quiet")
+    hass.states.async_set("number.dreame_robot_wetness_level", "8")
+    await _call_add_queue_room_service(hass, entry.entry_id)
+    entry.runtime_data.set_queue_state(start_run(entry.runtime_data.queue_state))
+
+    assert await _call_control_readiness_service(hass, entry.entry_id) == {
+        CONF_ALLOW_ROBOT_COMMANDS: True,
+        CONF_AUTO_RECONCILE_ENABLED: True,
+        CONF_CONFIG_ENTRY_ID: entry.entry_id,
+        CONF_VACUUM_ENTITY_ID: vacuum_entity_id,
+        ATTR_PENDING_ITEMS: 0,
+        ATTR_RUNNING_ITEMS: 1,
+        "available_actions": [
+            SERVICE_CANCEL_QUEUE,
+            SERVICE_SKIP_CURRENT_ROOM,
+            SERVICE_UPDATE_RUNNING_OVERRIDE,
+        ],
+        "blocking_reasons": [],
+        "companion_entities": {
+            "suction_level": {
+                "available": True,
+                "entity_id": "select.dreame_robot_suction_level",
+            },
+            "water_volume": {
+                "available": True,
+                "entity_id": "number.dreame_robot_wetness_level",
+            },
+        },
+        "queue_run_state": "running",
+        "ready_for_control_window": True,
+        "ready_for_read_only_observation": True,
+        "running_override_ready": True,
+        "vacuum_available": True,
+    }
+
+
+async def test_control_readiness_reports_missing_running_override_entities(
+    hass: HomeAssistant,
+) -> None:
+    """Test running control readiness keeps cancel and skip separate from overrides."""
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    hass.states.async_set(vacuum_entity_id, "cleaning")
+    await _call_add_queue_room_service(hass, entry.entry_id)
+    entry.runtime_data.set_queue_state(start_run(entry.runtime_data.queue_state))
+
+    response = await _call_control_readiness_service(hass, entry.entry_id)
+
+    assert response["ready_for_control_window"] is True
+    assert response["available_actions"] == [
+        SERVICE_CANCEL_QUEUE,
+        SERVICE_SKIP_CURRENT_ROOM,
+    ]
+    assert response["running_override_ready"] is False
+    assert response["blocking_reasons"] == [
+        "running_override_entities_unavailable",
+    ]
+
+
+async def test_control_readiness_service_rejects_unknown_entry(
+    hass: HomeAssistant,
+) -> None:
+    """Test control readiness rejects unknown config entry ids."""
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    with pytest.raises(HomeAssistantError):
+        await _call_control_readiness_service(hass, "missing-entry")
+
+
 async def test_unload_last_entry_removes_runtime_status_service(
     hass: HomeAssistant,
 ) -> None:
@@ -1632,6 +1828,7 @@ async def test_unload_last_entry_removes_runtime_status_service(
     await hass.async_block_till_done()
     assert hass.services.has_service(DOMAIN, SERVICE_CLEAR_PENDING_QUEUE)
     assert hass.services.has_service(DOMAIN, SERVICE_CANCEL_QUEUE)
+    assert hass.services.has_service(DOMAIN, SERVICE_GET_CONTROL_READINESS)
     assert hass.services.has_service(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
     assert hass.services.has_service(DOMAIN, SERVICE_MOVE_QUEUE_ITEM)
     assert hass.services.has_service(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM)
@@ -1647,6 +1844,7 @@ async def test_unload_last_entry_removes_runtime_status_service(
     assert not hass.services.has_service(DOMAIN, SERVICE_ADD_QUEUE_ROOM)
     assert not hass.services.has_service(DOMAIN, SERVICE_CANCEL_QUEUE)
     assert not hass.services.has_service(DOMAIN, SERVICE_CLEAR_PENDING_QUEUE)
+    assert not hass.services.has_service(DOMAIN, SERVICE_GET_CONTROL_READINESS)
     assert not hass.services.has_service(DOMAIN, SERVICE_MOVE_QUEUE_ITEM)
     assert not hass.services.has_service(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM)
     assert not hass.services.has_service(DOMAIN, SERVICE_SKIP_CURRENT_ROOM)
