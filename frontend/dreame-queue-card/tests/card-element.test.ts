@@ -136,6 +136,12 @@ describe("ha-dreame-queue-card", () => {
     expect(editor.tagName.toLowerCase()).toBe(CARD_EDITOR_TAG);
   });
 
+  it("reports a masonry size that fits the room catalog and queue controls", () => {
+    const element = document.createElement(CARD_ELEMENT_TAG) as any;
+
+    expect(element.getCardSize()).toBe(6);
+  });
+
   it("renders a read-only queue summary", async () => {
     const element = document.createElement(CARD_ELEMENT_TAG) as any;
     element.setConfig({
@@ -207,6 +213,7 @@ describe("ha-dreame-queue-card", () => {
     const hallwayButton = buttons.find((button) => button.textContent?.includes("Hallway"));
 
     expect(hallwayButton).toBeDefined();
+    expect(hallwayButton?.querySelector("ha-icon")?.getAttribute("icon")).toBe("mdi:plus");
     hallwayButton?.click();
 
     expect(callService).toHaveBeenCalledWith("ha_dreame", "add_queue_room", {
@@ -280,6 +287,10 @@ describe("ha-dreame-queue-card", () => {
     expect(hallwayMoveDown).toBeDefined();
     expect(officeMoveUp).toBeDefined();
     expect(officeMoveDown).toBeNull();
+    expect(hallwayMoveDown?.querySelector("ha-icon")?.getAttribute("icon")).toBe(
+      "mdi:arrow-down",
+    );
+    expect(officeMoveUp?.querySelector("ha-icon")?.getAttribute("icon")).toBe("mdi:arrow-up");
 
     officeMoveUp?.click();
     hallwayMoveDown?.click();
@@ -351,9 +362,14 @@ describe("ha-dreame-queue-card", () => {
     expect(hallwayWater).not.toBeNull();
     expect(hallwaySuction).not.toBeNull();
     expect(hallwayRepeats).not.toBeNull();
-    expect(hallwayWater!.textContent).toContain("Water Med");
-    expect(hallwaySuction!.textContent).toContain("Suction Med");
-    expect(hallwayRepeats!.textContent).toContain("Repeats x2");
+    expect(hallwayWater!.querySelector("ha-icon")?.getAttribute("icon")).toBe(
+      "mdi:water-percent",
+    );
+    expect(hallwayWater!.querySelectorAll(".override-bar.active")).toHaveLength(2);
+    expect(hallwaySuction!.querySelector("ha-icon")?.getAttribute("icon")).toBe("mdi:fan");
+    expect(hallwaySuction!.querySelectorAll(".override-bar.active")).toHaveLength(2);
+    expect(hallwayRepeats!.querySelector("ha-icon")?.getAttribute("icon")).toBe("mdi:repeat");
+    expect(hallwayRepeats!.textContent).toContain("x2");
 
     hallwayWater!.click();
     hallwaySuction!.click();
@@ -414,6 +430,7 @@ describe("ha-dreame-queue-card", () => {
     expect(startQueue).not.toBeNull();
     expect(cancelQueue).toBeNull();
     expect(skipCurrentRoom).toBeNull();
+    expect(startQueue!.querySelector("ha-icon")?.getAttribute("icon")).toBe("mdi:play");
 
     startQueue!.click();
 
@@ -448,6 +465,10 @@ describe("ha-dreame-queue-card", () => {
     expect(startQueue).toBeNull();
     expect(cancelQueue).not.toBeNull();
     expect(skipCurrentRoom).not.toBeNull();
+    expect(cancelQueue!.querySelector("ha-icon")?.getAttribute("icon")).toBe("mdi:stop");
+    expect(skipCurrentRoom!.querySelector("ha-icon")?.getAttribute("icon")).toBe(
+      "mdi:skip-next",
+    );
 
     cancelQueue!.click();
     skipCurrentRoom!.click();
