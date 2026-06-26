@@ -52,6 +52,7 @@ def test_alpha_test_plan_is_linked_and_public_safe() -> None:
         "## Goal",
         "## Preconditions",
         "## Preflight Validation",
+        "## HACS Prerelease Versions",
         "## Install Candidate",
         "## Read-Only Smoke Test",
         "## Dashboard Card Smoke Test",
@@ -70,6 +71,25 @@ def test_alpha_test_plan_is_linked_and_public_safe() -> None:
     ]
     for phrase in required_safety_phrases:
         assert phrase in plan
+
+
+def test_alpha_docs_explain_hacs_prerelease_flow() -> None:
+    """Test alpha docs explain how prerelease tags surface in HACS."""
+    plan = ALPHA_TEST_PLAN.read_text(encoding="utf-8")
+    readme = Path("README.md").read_text(encoding="utf-8")
+    release_checklist = Path("docs/release-checklist.md").read_text(encoding="utf-8")
+
+    required_fragments = [
+        "GitHub prerelease",
+        "enable beta or prerelease visibility",
+        "explicitly select the alpha tag",
+        "installed version",
+    ]
+    for fragment in required_fragments:
+        assert fragment in plan
+
+    assert "enable beta or prerelease visibility" in readme
+    assert "HACS prerelease visibility" in release_checklist
 
 
 def test_public_release_docs_avoid_private_runtime_details() -> None:
