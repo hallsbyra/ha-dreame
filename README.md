@@ -33,6 +33,9 @@ For local development, see [docs/parallel-install.md](docs/parallel-install.md).
 For alpha candidate validation in Home Assistant, follow
 [docs/alpha-test-plan.md](docs/alpha-test-plan.md).
 
+For release parity tracking against the previous controller, follow
+[docs/parity-checklist.md](docs/parity-checklist.md).
+
 ## Configuration
 
 The config flow selects an existing Dreame vacuum. The integration validates that the selected entity exists and is a vacuum before setup completes.

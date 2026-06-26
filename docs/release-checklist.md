@@ -24,7 +24,7 @@
 
 ## Release Candidate
 
-- [ ] Parity checklist against the current production queue is complete.
+- [ ] `docs/parity-checklist.md` is complete against the current production queue.
 - [ ] Frontend card or documented dashboard path works against `ha_dreame` entities/services.
 - [ ] Diagnostics and failure reporting are sufficient for runtime debugging.
 - [ ] HACS brand/readiness work is complete or explicitly tracked.

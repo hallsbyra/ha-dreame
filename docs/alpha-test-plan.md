@@ -42,6 +42,10 @@ npm run check
 If any local Python dependencies are unavailable, use the GitHub Actions
 Validate, HACS, and Hassfest results as the release candidate preflight gate.
 
+Before promoting an alpha toward beta, update
+`docs/parity-checklist.md` with the candidate's runtime evidence and remaining
+gates.
+
 ## HACS Prerelease Versions
 
 Alpha tags may be published as a GitHub prerelease. HACS can install these
