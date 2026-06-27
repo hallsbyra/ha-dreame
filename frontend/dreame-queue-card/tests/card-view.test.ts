@@ -114,6 +114,8 @@ describe("card view model", () => {
       summary: "Vacuuming + mopping",
       snapshot: {
         runState: "running",
+        allowRobotCommands: null,
+        autoReconcileEnabled: null,
         configEntryId: "config-entry-1",
         vacuumEntityId: "vacuum.robot",
         pendingItems: 2,
@@ -298,6 +300,82 @@ describe("card view model", () => {
     expect(view.activeControls).toEqual([
       {
         ariaLabel: "Start queue",
+        label: "Start",
+        service: "start_queue",
+      },
+    ]);
+  });
+
+  it("offers Continue and End when the active robot run is interrupted", () => {
+    const view = buildCardViewModel(
+      {
+        ...hass,
+        states: {
+          ...hass.states,
+          "sensor.robot_queue_status": {
+            state: "running",
+            attributes: {
+              ...queueAttributes,
+              allow_robot_commands: true,
+            },
+          },
+          "vacuum.robot": {
+            state: "error",
+            attributes: {},
+          },
+          "sensor.robot_task_status": {
+            state: "room_cleaning",
+            attributes: {},
+          },
+          "sensor.robot_error": {
+            state: "mop_removed",
+            attributes: {},
+          },
+        },
+      },
+      {
+        entity: "sensor.robot_queue_status",
+      },
+    );
+
+    expect(view.summary).toBe("mop removed");
+    expect(view.activity).toEqual({
+      phase: "error",
+      label: "mop removed",
+    });
+    expect(view.activeControls).toEqual([
+      {
+        ariaLabel: "Continue robot run",
+        label: "Continue",
+        service: "resume_queue",
+      },
+      {
+        ariaLabel: "End robot run",
+        label: "End",
+        service: "cancel_queue",
+      },
+    ]);
+  });
+
+  it("disables robot command controls when the command gate is closed", () => {
+    const view = buildCardViewModel(
+      hassWithQueueState("idle", {
+        allow_robot_commands: false,
+        queue_items: [queueAttributes.queue_items[1]],
+        pending_items: 1,
+        running_items: 0,
+        total_items: 1,
+      }),
+      {
+        entity: "sensor.robot_queue_status",
+      },
+    );
+
+    expect(view.activeControls).toEqual([
+      {
+        ariaLabel: "Start queue",
+        disabled: true,
+        disabledReason: "Robot commands disabled",
         label: "Start",
         service: "start_queue",
       },

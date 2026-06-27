@@ -18,6 +18,7 @@ from custom_components.ha_dreame.const import (
     ATTR_STATUS,
     ATTR_TOTAL_ITEMS,
     CONF_ALLOW_ROBOT_COMMANDS,
+    CONF_AUTO_RECONCILE_ENABLED,
     CONF_CONFIG_ENTRY_ID,
     CONF_ITEM_ID,
     CONF_NEW_POSITION,
@@ -76,6 +77,8 @@ async def test_queue_status_sensor_exposes_initial_queue_state(
     assert state is not None
     assert state.state == "idle"
     assert state.attributes[ATTR_FRIENDLY_NAME] == "HA Dreame Queue Status"
+    assert state.attributes[CONF_ALLOW_ROBOT_COMMANDS] is False
+    assert state.attributes[CONF_AUTO_RECONCILE_ENABLED] is False
     assert state.attributes[CONF_CONFIG_ENTRY_ID] == entry.entry_id
     assert state.attributes[CONF_VACUUM_ENTITY_ID] == vacuum_entity_id
     assert state.attributes[ATTR_PENDING_ITEMS] == 0
