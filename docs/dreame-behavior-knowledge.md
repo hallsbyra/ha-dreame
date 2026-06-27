@@ -77,6 +77,21 @@ examples only.
   impossible or explicitly timed out.
 - Test implication: cover recoverable errors as hold states, not immediate `out_of_sync`.
 
+### Interrupted Room Runs Can Resume After User Action
+
+- Confidence: `Observed`
+- Behavior: during an active room run, Dreame can enter a paused or error state such as
+  `vacuum_state=paused`, `vacuum_state=error`, `task_status=room_cleaning_paused`, or a recoverable
+  `sensor.<robot>_error` value. After the operator fixes the physical issue and presses Continue in
+  Dreame, the same room run can resume, progress can continue, and `task_status=completed` can later
+  finish the HA Dreame queue item correctly.
+- Controller implication: paused/error states during an active room queue should be shown as
+  operator-action interruptions, not as ordinary running and not as automatic retry conditions. A
+  command-gated Continue control can map to Home Assistant `vacuum.start`; an End control can use the
+  existing queue cancel path.
+- Test implication: cover interrupted room runs as wait states, cover command-gated manual resume,
+  and cover UI controls for Continue/End during interrupted active runs.
+
 ### Dock Wash Pause Can Hide Behind High-Level Cleaning State
 
 - Confidence: `Observed`
