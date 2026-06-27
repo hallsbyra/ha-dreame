@@ -169,7 +169,7 @@ def _current_room(state: State | None) -> tuple[int | None, str | None]:
 
     if room_id is None:
         room_id = _parse_int(state_value)
-    if room_name is None and room_id is None:
+    if room_name is None and state_value and _parse_int(state_value) is None:
         room_name = state_value or None
 
     return room_id, room_name

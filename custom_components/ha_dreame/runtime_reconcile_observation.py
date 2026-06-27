@@ -46,7 +46,7 @@ class RuntimeReconcileSettings:
     non_fatal_error_codes: frozenset[str] = field(default_factory=frozenset)
     active_room_mismatch_required_streak: int = 1
     active_room_mismatch_min_progress: int = 1
-    active_room_mismatch_max_progress: int | None = None
+    active_room_mismatch_max_progress: int | None = 90
 
 
 DEFAULT_RUNTIME_RECONCILE_SETTINGS = RuntimeReconcileSettings()

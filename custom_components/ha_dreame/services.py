@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime
+import logging
 from typing import Any
 
 import voluptuous as vol
@@ -82,6 +83,8 @@ from .runtime_reconcile_runner import (
     evaluate_runtime_reconcile,
 )
 from .runtime_state import QueueRunTracking
+
+_LOGGER = logging.getLogger(__name__)
 
 ADD_QUEUE_ROOM_SCHEMA = vol.Schema(
     {
@@ -726,6 +729,14 @@ async def _async_start_queue_response(
 
     runtime_data.set_queue_state(queue_state)
     runtime_data.set_run_tracking(_new_run_tracking(queue_state))
+    _LOGGER.info(
+        ("HA Dreame queue started vacuum=%s run_id=%s item_id=%s room_id=%s room_name=%s"),
+        runtime_data.vacuum_entity_id,
+        queue_state.run_id,
+        item.item_id,
+        item.room_id,
+        item.room_name,
+    )
     return _queue_status_response(entry)
 
 
