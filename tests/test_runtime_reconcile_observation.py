@@ -182,6 +182,32 @@ def test_evaluate_observation_active_room_mismatch_can_retry() -> None:
     )
 
 
+def test_evaluate_observation_late_room_mismatch_uses_default_completion_guard() -> None:
+    """Test default runtime settings suppress redispatch near completion."""
+    state = _running_state()
+
+    evaluation = evaluate_runtime_reconcile_observation(
+        state,
+        _tracking(
+            state,
+            active_room_mismatch_streak=1,
+            last_command_at=(NOW - timedelta(seconds=30)).isoformat(),
+        ),
+        RuntimeReconcileObservation(
+            vacuum_state="cleaning",
+            task_status="room_cleaning",
+            observed_room_id=7,
+            cleaning_progress=95,
+        ),
+        now=NOW,
+    )
+
+    assert evaluation.decision.retry_current_room is False
+    assert evaluation.decision.event_reasons == (
+        "active_room_mismatch_waiting_near_completion:expected_1:observed_7:progress_95:max_90",
+    )
+
+
 def test_evaluate_observation_mop_maintenance_waits_without_retry() -> None:
     """Test explicit mop-maintenance observations do not consume retry budget."""
     state = _running_state()
