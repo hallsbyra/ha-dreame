@@ -36,10 +36,16 @@ export type HomeAssistantLike = {
 
 export type CardViewStatus = "not_configured" | "missing" | "ready";
 
-export type ActiveQueueService = "start_queue" | "cancel_queue" | "skip_current_room";
+export type ActiveQueueService =
+  | "start_queue"
+  | "resume_queue"
+  | "cancel_queue"
+  | "skip_current_room";
 
 export type CardActiveControl = {
   ariaLabel: string;
+  disabled?: boolean;
+  disabledReason?: string;
   label: string;
   service: ActiveQueueService;
 };
@@ -142,7 +148,7 @@ export function buildCardViewModel(
     summary: buildSummary(snapshot, activity),
     snapshot,
     activity,
-    activeControls: buildActiveControls(snapshot),
+    activeControls: buildActiveControls(snapshot, activity),
     canClearPending: snapshot.pendingItems > 0,
     rooms,
     rows: cardQueueRows(hass, snapshot),
@@ -219,18 +225,45 @@ function cardQueueRows(
   }));
 }
 
-function buildActiveControls(snapshot: QueueSnapshot): CardActiveControl[] {
+function buildActiveControls(
+  snapshot: QueueSnapshot,
+  activity: RunActivity | null,
+): CardActiveControl[] {
+  const disabledState =
+    snapshot.allowRobotCommands === false
+      ? { disabled: true, disabledReason: "Robot commands disabled" }
+      : {};
+
   if (snapshot.runState === "running") {
+    if (activity?.phase === "paused" || activity?.phase === "error") {
+      return [
+        {
+          ariaLabel: "Continue robot run",
+          label: "Continue",
+          service: "resume_queue",
+          ...disabledState,
+        },
+        {
+          ariaLabel: "End robot run",
+          label: "End",
+          service: "cancel_queue",
+          ...disabledState,
+        },
+      ];
+    }
+
     return [
       {
         ariaLabel: "Cancel queue",
         label: "Cancel",
         service: "cancel_queue",
+        ...disabledState,
       },
       {
         ariaLabel: "Skip current room",
         label: "Skip",
         service: "skip_current_room",
+        ...disabledState,
       },
     ];
   }
@@ -241,6 +274,7 @@ function buildActiveControls(snapshot: QueueSnapshot): CardActiveControl[] {
         ariaLabel: "Start queue",
         label: "Start",
         service: "start_queue",
+        ...disabledState,
       },
     ];
   }
