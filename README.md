@@ -102,18 +102,27 @@ Rollback should leave the existing `dreame_vacuum` integration and any legacy co
 
 ## Validation
 
+Local development is Dockerized. The only required local runtime tool is Docker;
+Python 3.13, Node 22, npm, and Python test dependencies are provided by the dev
+image.
+
 ```bash
-python -m ruff check .
-python -m ruff format --check .
-python -m pyright
-python -m compileall custom_components/ha_dreame
-python -m pytest
-cd frontend/dreame-queue-card
-npm ci
-npm run check
+./scripts/dev check
 ```
 
-GitHub Actions also runs Python validation, frontend validation, HACS validation, and Hassfest.
+Focused checks:
+
+```bash
+./scripts/dev python-check
+./scripts/dev frontend-check
+./scripts/dev test-python
+./scripts/dev test-frontend
+./scripts/dev shell
+```
+
+The dev image uses Python 3.13 and Node 22 to match the supported Home Assistant
+and frontend validation targets. GitHub Actions also uses `./scripts/dev` for
+Python and frontend validation, and separately runs HACS validation and Hassfest.
 
 ## Development Notes
 
