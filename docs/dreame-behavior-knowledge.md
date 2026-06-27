@@ -235,6 +235,28 @@ When running a planned manual test, record:
 - Follow-up tests:
 ```
 
+### 2026-06-27 - Command-Gated Two-Room Queue With Auto Reconcile
+
+- Confidence: `Observed`
+- Setup: standalone `ha_dreame` queue with robot commands and automatic reconciliation enabled;
+  two rooms queued through the new integration.
+- Expected: first room completes, second room dispatches, final queue state is `completed`.
+- Observed timeline:
+  - t0: queue entered `running`; first room was active and second room was pending.
+  - t1: first room progress reached the high nineties and stayed there for several minutes while
+    cleaned area and elapsed cleaning time still changed.
+  - t2: near first-room completion, `current_room` flipped through other room names/ids and progress
+    briefly reset to `0`, then later reported `100` while task status still indicated room cleaning.
+  - t3: once `task_status=completed` arrived, the queue marked the first room completed and
+    dispatched the second room.
+  - t4: after the second room completed, the standalone queue reached `completed`; post-run washing
+    left the high-level vacuum state looking active without changing the completed queue state.
+- Outcome: successful two-room queue completion with no `out_of_sync` or `blocked` terminal state.
+- Controller implication: keep completion gated on task lifecycle rather than progress; tolerate
+  late `current_room` flips and post-run dock/wash states after the queue is complete.
+- Follow-up tests: add an end-to-end reconcile test covering late room flips plus progress
+  `95 -> 0 -> 100` before `task_status=completed`, followed by post-completion washing.
+
 ## Open Questions
 
 1. Under what conditions does a multi-room app run return for a mid-job wash?
