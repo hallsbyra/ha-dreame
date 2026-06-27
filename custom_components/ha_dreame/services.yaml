@@ -77,6 +77,13 @@ move_queue_item:
           min: 0
           mode: box
 
+resume_queue:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        text:
+
 skip_current_room:
   fields:
     config_entry_id:

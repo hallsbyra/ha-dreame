@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -46,6 +47,7 @@ from .const import (
     SERVICE_GET_RUNTIME_STATUS,
     SERVICE_MOVE_QUEUE_ITEM,
     SERVICE_REMOVE_QUEUE_ITEM,
+    SERVICE_RESUME_QUEUE,
     SERVICE_SKIP_CURRENT_ROOM,
     SERVICE_START_QUEUE,
     SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES,
@@ -68,6 +70,8 @@ from .queue_core import (
     update_item_overrides,
 )
 from .queue_snapshot import count_queue_items, queue_item_snapshots
+from .runtime import HaDreameRuntimeData
+from .runtime_observation import build_runtime_reconcile_observation
 from .runtime_reconcile import RuntimeReconcileResult
 from .runtime_reconcile_observation import (
     RuntimeReconcileEvaluation,
@@ -105,6 +109,7 @@ REMOVE_QUEUE_ITEM_SCHEMA = vol.Schema(
         vol.Required(CONF_ITEM_ID): vol.All(str, vol.Length(min=1)),
     }
 )
+RESUME_QUEUE_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
 SKIP_CURRENT_ROOM_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
 START_QUEUE_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
 UPDATE_QUEUE_ITEM_OVERRIDES_SCHEMA = vol.Schema(
@@ -296,6 +301,22 @@ def async_register_services(hass: HomeAssistant) -> None:
             supports_response=SupportsResponse.OPTIONAL,
         )
 
+    if not hass.services.has_service(DOMAIN, SERVICE_RESUME_QUEUE):
+
+        async def _async_resume_queue(call: ServiceCall) -> ServiceResponse:
+            return await _async_resume_queue_response(
+                hass,
+                call.data[CONF_CONFIG_ENTRY_ID],
+            )
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_RESUME_QUEUE,
+            _async_resume_queue,
+            schema=RESUME_QUEUE_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+
     if not hass.services.has_service(DOMAIN, SERVICE_START_QUEUE):
 
         async def _async_start_queue(call: ServiceCall) -> ServiceResponse:
@@ -364,6 +385,7 @@ def async_remove_services(hass: HomeAssistant) -> None:
     hass.services.async_remove(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
     hass.services.async_remove(DOMAIN, SERVICE_MOVE_QUEUE_ITEM)
     hass.services.async_remove(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM)
+    hass.services.async_remove(DOMAIN, SERVICE_RESUME_QUEUE)
     hass.services.async_remove(DOMAIN, SERVICE_SKIP_CURRENT_ROOM)
     hass.services.async_remove(DOMAIN, SERVICE_START_QUEUE)
     hass.services.async_remove(DOMAIN, SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES)
@@ -524,6 +546,53 @@ async def _async_skip_current_room_response(
     runtime_data.set_queue_state(queue_state)
     runtime_data.set_run_tracking(None)
     return _queue_status_response(entry)
+
+
+async def _async_resume_queue_response(
+    hass: HomeAssistant,
+    config_entry_id: str,
+) -> dict[str, Any]:
+    """Resume an interrupted active queue run through the vacuum start command."""
+    entry = _runtime_entry(hass, config_entry_id)
+    runtime_data = entry.runtime_data
+
+    if not runtime_data.commands_enabled:
+        raise HomeAssistantError("HA Dreame robot commands are disabled")
+    if runtime_data.queue_state.run_state != "running":
+        raise HomeAssistantError("Queue is not running")
+
+    run_tracking = runtime_data.run_tracking
+    if (
+        run_tracking is None
+        or run_tracking.run_id != runtime_data.queue_state.run_id
+        or run_tracking.current_item_id != runtime_data.queue_state.current_item_id
+    ):
+        raise HomeAssistantError("Queue run tracking is not active")
+
+    robot_status = _robot_status_response(hass, runtime_data)
+    if not robot_status["interrupted"]:
+        raise HomeAssistantError("Robot is not waiting for user action")
+
+    await hass.services.async_call(
+        VACUUM_DOMAIN,
+        "start",
+        {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
+        blocking=True,
+    )
+    runtime_data.set_run_tracking(
+        replace(
+            run_tracking,
+            active_room_mismatch_streak=0,
+            dispatch_retry_count=0,
+            last_command_at=datetime.now(UTC).isoformat(),
+        )
+    )
+    return {
+        CONF_CONFIG_ENTRY_ID: entry.entry_id,
+        CONF_VACUUM_ENTITY_ID: runtime_data.vacuum_entity_id,
+        "resumed": True,
+        "robot_status": robot_status,
+    }
 
 
 def _remove_queue_item_response(
@@ -725,6 +794,7 @@ def _control_readiness_response(
     running_override_ready = queue_state.run_state == "running" and all(
         entity["available"] for entity in companion_entities.values()
     )
+    robot_status = _robot_status_response(hass, runtime_data)
     available_actions: list[str] = []
     blocking_reasons: list[str] = []
 
@@ -741,10 +811,13 @@ def _control_readiness_response(
             blocking_reasons.append("queue_has_no_pending_items")
     elif queue_state.run_state == "running":
         if can_offer_command_actions:
-            available_actions.extend([SERVICE_CANCEL_QUEUE, SERVICE_SKIP_CURRENT_ROOM])
-            if running_override_ready:
+            if robot_status["interrupted"]:
+                available_actions.extend([SERVICE_RESUME_QUEUE, SERVICE_CANCEL_QUEUE])
+            else:
+                available_actions.extend([SERVICE_CANCEL_QUEUE, SERVICE_SKIP_CURRENT_ROOM])
+            if running_override_ready and not robot_status["interrupted"]:
                 available_actions.append(SERVICE_UPDATE_RUNNING_OVERRIDE)
-        if not running_override_ready:
+        if not running_override_ready and not robot_status["interrupted"]:
             blocking_reasons.append("running_override_entities_unavailable")
     elif can_offer_command_actions:
         blocking_reasons.append("queue_state_not_actionable")
@@ -762,6 +835,7 @@ def _control_readiness_response(
         "queue_run_state": queue_state.run_state,
         "ready_for_control_window": bool(available_actions),
         "ready_for_read_only_observation": vacuum_available,
+        "robot_status": robot_status,
         "running_override_ready": running_override_ready,
         "vacuum_available": vacuum_available,
     }
@@ -815,8 +889,55 @@ def _runtime_status_response(hass: HomeAssistant, config_entry_id: str) -> dict[
         CONF_ALLOW_ROBOT_COMMANDS: runtime_data.commands_enabled,
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
         ATTR_RUN_TRACKING: _run_tracking_response(runtime_data.run_tracking),
+        "robot_status": _robot_status_response(hass, runtime_data),
         CONF_VACUUM_ENTITY_ID: runtime_data.vacuum_entity_id,
     }
+
+
+def _robot_status_response(
+    hass: HomeAssistant,
+    runtime_data: HaDreameRuntimeData,
+) -> dict[str, Any]:
+    """Return robot interruption status derived from read-only companion entities."""
+    observation = build_runtime_reconcile_observation(
+        hass,
+        vacuum_entity_id=runtime_data.vacuum_entity_id,
+        entity_ids=runtime_data.observation_entity_ids,
+    )
+    vacuum_state = _normalize_status_value(observation.vacuum_state)
+    task_status = _normalize_status_value(observation.task_status)
+    error_code = _normalize_status_value(observation.vacuum_error_code)
+
+    interruption_reasons: list[str] = []
+    if vacuum_state == "paused":
+        interruption_reasons.append("vacuum_paused")
+    if task_status.endswith("_paused"):
+        interruption_reasons.append("task_status_paused")
+    interruption_context = bool(interruption_reasons) or vacuum_state == "error"
+    if vacuum_state == "error":
+        interruption_reasons.append(
+            f"vacuum_error:{error_code}" if _meaningful_error(error_code) else "vacuum_error"
+        )
+    elif interruption_context and _meaningful_error(error_code):
+        interruption_reasons.append(f"vacuum_error:{error_code}")
+
+    return {
+        "error_code": error_code,
+        "interruption_reasons": interruption_reasons,
+        "interrupted": bool(interruption_reasons),
+        "task_status": task_status,
+        "vacuum_state": vacuum_state,
+    }
+
+
+def _normalize_status_value(value: str) -> str:
+    """Normalize runtime status strings for service responses."""
+    return str(value or "").strip().lower()
+
+
+def _meaningful_error(error_code: str) -> bool:
+    """Return whether a Dreame error code represents an actionable robot error."""
+    return error_code not in {"", "unknown", "unavailable", "no_error"}
 
 
 def _evaluate_reconcile_response(hass: HomeAssistant, config_entry_id: str) -> dict[str, Any]:

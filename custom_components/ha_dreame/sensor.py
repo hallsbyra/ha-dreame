@@ -16,6 +16,8 @@ from .const import (
     ATTR_QUEUE_ITEMS,
     ATTR_RUNNING_ITEMS,
     ATTR_TOTAL_ITEMS,
+    CONF_ALLOW_ROBOT_COMMANDS,
+    CONF_AUTO_RECONCILE_ENABLED,
     CONF_CONFIG_ENTRY_ID,
     CONF_VACUUM_ENTITY_ID,
     SENSOR_QUEUE_STATUS,
@@ -59,6 +61,8 @@ class HaDreameQueueStatusSensor(CoordinatorEntity[DataUpdateCoordinator[QueueSta
         """Return public-safe queue status attributes."""
         queue_state = self._queue_state
         return {
+            CONF_ALLOW_ROBOT_COMMANDS: self._runtime_data.commands_enabled,
+            CONF_AUTO_RECONCILE_ENABLED: self._runtime_data.auto_reconcile_enabled,
             CONF_CONFIG_ENTRY_ID: self._entry_id,
             CONF_VACUUM_ENTITY_ID: self._runtime_data.vacuum_entity_id,
             ATTR_PENDING_ITEMS: count_queue_items(queue_state, "pending"),

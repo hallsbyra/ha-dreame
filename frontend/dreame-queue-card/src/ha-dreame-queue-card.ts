@@ -416,7 +416,12 @@ class HaDreameQueueCard extends LitElement {
   }
 
   private _renderHeaderActions(
-    controls: Array<{ ariaLabel: string; service: ActiveQueueService }>,
+    controls: Array<{
+      ariaLabel: string;
+      disabled?: boolean;
+      disabledReason?: string;
+      service: ActiveQueueService;
+    }>,
     canClearPending: boolean,
     configEntryId: string | null | undefined,
   ) {
@@ -431,9 +436,9 @@ class HaDreameQueueCard extends LitElement {
             <button
               aria-label=${control.ariaLabel}
               class="icon-btn ${control.service === "cancel_queue" ? "delete" : ""}"
-              title=${control.ariaLabel}
+              title=${control.disabledReason ?? control.ariaLabel}
               type="button"
-              ?disabled=${!configEntryId}
+              ?disabled=${!configEntryId || control.disabled === true}
               @click=${() => this._callQueueService(configEntryId, control.service)}
             >
               <ha-icon icon=${this._activeControlIcon(control.service)}></ha-icon>
@@ -580,7 +585,7 @@ class HaDreameQueueCard extends LitElement {
   }
 
   private _activeControlIcon(service: ActiveQueueService): string {
-    if (service === "start_queue") {
+    if (service === "start_queue" || service === "resume_queue") {
       return "mdi:play";
     }
     if (service === "skip_current_room") {
