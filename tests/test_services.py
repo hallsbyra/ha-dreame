@@ -1,11 +1,13 @@
 """Tests for HA Dreame services."""
 
 from datetime import datetime
+import logging
 
 import pytest
 
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
+from _pytest.logging import LogCaptureFixture
 
 from custom_components.ha_dreame.const import (
     ATTR_ACTIVE_ROOM_MISMATCH_STREAK,
@@ -854,6 +856,7 @@ async def test_start_queue_service_rejects_empty_queue(
 
 async def test_start_queue_service_dispatches_first_room_and_updates_runtime_state(
     hass: HomeAssistant,
+    caplog: LogCaptureFixture,
 ) -> None:
     """Test start queue dispatches the first pending room and marks it running."""
     calls: list[dict[str, object]] = []
@@ -866,6 +869,7 @@ async def test_start_queue_service_dispatches_first_room_and_updates_runtime_sta
         "vacuum_clean_segment",
         _record_clean_segment,
     )
+    caplog.set_level(logging.INFO, "custom_components.ha_dreame.services")
     vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
     entry = mock_entry(
         {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
@@ -927,6 +931,12 @@ async def test_start_queue_service_dispatches_first_room_and_updates_runtime_sta
         ATTR_RUN_ID: queue_state.run_id,
         ATTR_TASK_STATUS_CLEARED_SINCE_DISPATCH: False,
     }
+    assert any(
+        record.levelno == logging.INFO
+        and "HA Dreame queue started" in record.message
+        and "room_id=7" in record.message
+        for record in caplog.records
+    )
 
 
 async def test_start_queue_service_leaves_queue_idle_when_dispatch_fails(

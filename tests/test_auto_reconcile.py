@@ -1,12 +1,14 @@
 """Tests for disabled-by-default automatic runtime reconciliation."""
 
 from datetime import timedelta
+import logging
 
 import pytest
 
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
+from _pytest.logging import LogCaptureFixture
 
 from custom_components.ha_dreame import AUTO_RECONCILE_INTERVAL
 from custom_components.ha_dreame.const import (
@@ -199,6 +201,138 @@ async def test_auto_reconcile_dispatches_next_room_after_completion(
     assert entry.runtime_data.queue_state.current_item_id == next_item.item_id
     assert entry.runtime_data.run_tracking is not None
     assert entry.runtime_data.run_tracking.current_item_id == next_item.item_id
+
+
+async def test_auto_reconcile_logs_late_room_mismatch_as_debug_hold(
+    hass: HomeAssistant,
+    caplog: LogCaptureFixture,
+) -> None:
+    """Test ignored late room flips are diagnostic debug, not normal log noise."""
+    caplog.set_level(
+        logging.DEBUG,
+        "custom_components.ha_dreame.runtime_reconcile_runner",
+    )
+    vacuum_entity_id, entry = await _setup_loaded_entry(
+        hass,
+        commands_enabled=True,
+        auto_reconcile_enabled=True,
+    )
+    queue_state = _running_state()
+    run_tracking = _tracking(
+        queue_state,
+        task_status_cleared_since_dispatch=True,
+    )
+    entry.runtime_data.set_queue_state(queue_state)
+    entry.runtime_data.set_run_tracking(run_tracking)
+    hass.states.async_set(vacuum_entity_id, "cleaning")
+    hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning")
+    hass.states.async_set("sensor.dreame_robot_cleaning_progress", "95")
+    _set_current_room(hass, 7, "Hall")
+
+    await _fire_auto_reconcile_interval(hass)
+
+    assert entry.runtime_data.run_tracking == run_tracking
+    assert any(
+        record.levelno == logging.DEBUG
+        and record.name == "custom_components.ha_dreame.runtime_reconcile_runner"
+        and "action=hold" in record.message
+        and "active_room_mismatch_waiting_near_completion" in record.message
+        for record in caplog.records
+    )
+    assert not any(
+        record.name == "custom_components.ha_dreame.runtime_reconcile_runner"
+        and record.levelno >= logging.INFO
+        for record in caplog.records
+    )
+
+
+async def test_auto_reconcile_logs_retry_dispatch_as_info(
+    hass: HomeAssistant,
+    caplog: LogCaptureFixture,
+) -> None:
+    """Test redispatch decisions are visible without enabling debug logging."""
+    calls: list[dict[str, object]] = []
+
+    async def _record_clean_segment(call: ServiceCall) -> None:
+        calls.append(dict(call.data))
+
+    caplog.set_level(
+        logging.INFO,
+        "custom_components.ha_dreame.runtime_reconcile_runner",
+    )
+    hass.services.async_register(
+        DREAME_VACUUM_DOMAIN,
+        "vacuum_clean_segment",
+        _record_clean_segment,
+    )
+    vacuum_entity_id, entry = await _setup_loaded_entry(
+        hass,
+        commands_enabled=True,
+        auto_reconcile_enabled=True,
+    )
+    queue_state = _running_state()
+    entry.runtime_data.set_queue_state(queue_state)
+    entry.runtime_data.set_run_tracking(
+        _tracking(
+            queue_state,
+            task_status_cleared_since_dispatch=True,
+        )
+    )
+    hass.states.async_set(vacuum_entity_id, "cleaning")
+    hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning")
+    hass.states.async_set("sensor.dreame_robot_cleaning_progress", "20")
+    _set_current_room(hass, 7, "Hall")
+
+    await _fire_auto_reconcile_interval(hass)
+
+    assert calls == [{"entity_id": vacuum_entity_id, "segments": [1]}]
+    assert any(
+        record.levelno == logging.INFO
+        and record.name == "custom_components.ha_dreame.runtime_reconcile_runner"
+        and "action=retry_dispatch" in record.message
+        and "active_room_mismatch_retry:1:expected_1:observed_7" in record.message
+        for record in caplog.records
+    )
+
+
+async def test_auto_reconcile_logs_terminal_problem_as_warning(
+    hass: HomeAssistant,
+    caplog: LogCaptureFixture,
+) -> None:
+    """Test terminal reconcile problem states are warning-level events."""
+    caplog.set_level(
+        logging.WARNING,
+        "custom_components.ha_dreame.runtime_reconcile_runner",
+    )
+    vacuum_entity_id, entry = await _setup_loaded_entry(
+        hass,
+        commands_enabled=True,
+        auto_reconcile_enabled=True,
+    )
+    queue_state = _running_state()
+    entry.runtime_data.set_queue_state(queue_state)
+    entry.runtime_data.set_run_tracking(
+        _tracking(
+            queue_state,
+            dispatch_retry_count=2,
+            task_status_cleared_since_dispatch=True,
+        )
+    )
+    hass.states.async_set(vacuum_entity_id, "idle")
+    hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning")
+    _set_current_room(hass, 7, "Hall")
+
+    await _fire_auto_reconcile_interval(hass)
+
+    assert entry.runtime_data.queue_state.run_state == "out_of_sync"
+    assert entry.runtime_data.run_tracking is None
+    assert any(
+        record.levelno == logging.WARNING
+        and record.name == "custom_components.ha_dreame.runtime_reconcile_runner"
+        and "action=out_of_sync" in record.message
+        and "dispatch_retry_exhausted" in record.message
+        for record in caplog.records
+    )
 
 
 async def test_auto_reconcile_dispatch_failure_preserves_runtime_state(

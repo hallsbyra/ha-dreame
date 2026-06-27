@@ -128,6 +128,26 @@ def test_observation_extracts_current_room_from_state_variants(
     assert observation.observed_room_name == "Hall"
 
 
+def test_observation_keeps_current_room_state_name_with_room_id_attribute(
+    hass: HomeAssistant,
+) -> None:
+    """Test room name falls back to state text when only room id is attributed."""
+    hass.states.async_set("vacuum.dreame_robot", "cleaning")
+    hass.states.async_set(
+        "sensor.dreame_robot_current_room",
+        "Hall",
+        {"room_id": "7"},
+    )
+
+    observation = build_runtime_reconcile_observation(
+        hass,
+        vacuum_entity_id="vacuum.dreame_robot",
+    )
+
+    assert observation.observed_room_id == 7
+    assert observation.observed_room_name == "Hall"
+
+
 def test_observation_detects_mop_remove_install_maintenance(
     hass: HomeAssistant,
 ) -> None:
