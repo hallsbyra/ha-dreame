@@ -145,7 +145,7 @@ export function deriveRunActivity(signals: RobotSignals): RunActivity | null {
 
 export function sensorEntityIdForVacuum(
   vacuumEntityId: string,
-  suffix: "state" | "task_status" | "error",
+  suffix: "state" | "task_status" | "error" | "cleaning_progress",
 ): string | null {
   const normalized = String(vacuumEntityId || "").trim();
   if (!normalized.startsWith("vacuum.")) {

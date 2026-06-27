@@ -217,6 +217,31 @@ class HaDreameQueueCard extends LitElement {
       margin-top: 8px;
     }
 
+    .progress {
+      display: grid;
+      gap: 4px;
+      margin-top: 2px;
+    }
+
+    .progress-track {
+      background: color-mix(in srgb, var(--divider-color) 55%, transparent);
+      border-radius: 999px;
+      height: 7px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      background: var(--primary-color, #03a9f4);
+      height: 100%;
+      transition: width 180ms ease-out;
+    }
+
+    .progress-label {
+      color: var(--secondary-text-color);
+      font-size: 0.76rem;
+      line-height: 1.2;
+    }
+
     .item-queue-controls {
       align-items: center;
       display: flex;
@@ -404,6 +429,9 @@ class HaDreameQueueCard extends LitElement {
                                   </div>
                                 `
                               : nothing}
+                            ${row.progress !== undefined
+                              ? this._renderProgress(row.progress)
+                              : nothing}
                           </div>
                         </div>
                       `,
@@ -412,6 +440,24 @@ class HaDreameQueueCard extends LitElement {
               </div>
             `}
       </ha-card>
+    `;
+  }
+
+  private _renderProgress(progress: number) {
+    return html`
+      <div class="progress">
+        <div
+          aria-label="Room cleaning progress"
+          aria-valuemax="100"
+          aria-valuemin="0"
+          aria-valuenow=${progress}
+          class="progress-track"
+          role="progressbar"
+        >
+          <div class="progress-fill" style=${`width: ${progress}%;`}></div>
+        </div>
+        <span class="progress-label">${progress}%</span>
+      </div>
     `;
   }
 
