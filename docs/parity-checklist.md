@@ -47,6 +47,7 @@ separate cutover issue exists.
 | Runtime command executor | `Ported` | command-gated executor tests cover disabled gate and service-call failures | Controlled command smoke |
 | Running override controls | `Ported` | PR #100 backend service and PR #101 packaged card controls; alpha.2 installed | Visual/runtime validation while an item is actually running |
 | Running override command gate | `Runtime validated` | alpha.2 HAOS smoke confirmed disabled gate blocks `update_running_override` | Recheck during controlled command smoke after enabling commands |
+| Interrupted run Continue/End controls | `Ported` | HACS card and `resume_queue` service expose command-gated Continue/End for paused/error active runs | Controlled smoke after installing the next alpha |
 | No parallel active control | `Ported` | docs and command gate require a deliberate test window | Operator discipline during alpha/beta testing |
 
 ## Runtime Reconciliation

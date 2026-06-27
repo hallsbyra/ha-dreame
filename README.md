@@ -69,6 +69,10 @@ entity: sensor.ha_dreame_queue_status
 
 The card includes a Lovelace editor for the queue entity and title. When Home Assistant exposes a `ha_dreame` queue status sensor, the editor can suggest that sensor; otherwise use the generic entity shape above and adjust it to the entity created by your config entry.
 
+During an active queue run, the card shows a dedicated interrupted state when the selected robot
+reports paused/error signals. In that state it offers command-gated Continue and End controls,
+matching the operator workflow exposed by Dreame while keeping `allow_robot_commands` authoritative.
+
 ## Safety Model
 
 - `ha_dreame` uses separate services, entities, storage keys, and card identifiers from legacy `pyscript.dreame_queue_*` paths.
