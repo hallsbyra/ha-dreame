@@ -528,4 +528,69 @@ describe("ha-dreame-queue-card", () => {
       config_entry_id: "config-entry-1",
     });
   });
+
+  it("continues and ends an interrupted robot run through command-gated services", async () => {
+    const callService = vi.fn();
+    const element = document.createElement(CARD_ELEMENT_TAG) as any;
+    element.setConfig({
+      entity: "sensor.robot_queue_status",
+      title: "Robot queue",
+    });
+    element.hass = {
+      ...hass,
+      states: {
+        ...hass.states,
+        "sensor.robot_queue_status": {
+          state: "running",
+          attributes: {
+            ...hass.states["sensor.robot_queue_status"].attributes,
+            allow_robot_commands: true,
+          },
+        },
+        "vacuum.robot": {
+          state: "error",
+          attributes: {},
+        },
+        "sensor.robot_task_status": {
+          state: "room_cleaning",
+          attributes: {},
+        },
+        "sensor.robot_error": {
+          state: "mop_removed",
+          attributes: {},
+        },
+      },
+      callService,
+    };
+    document.body.append(element);
+
+    await element.updateComplete;
+
+    const shadowRoot = element.shadowRoot as ShadowRoot | null;
+    const continueRun = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Continue robot run"]',
+    );
+    const endRun = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="End robot run"]',
+    );
+    const skipCurrentRoom = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Skip current room"]',
+    );
+
+    expect(continueRun).not.toBeNull();
+    expect(endRun).not.toBeNull();
+    expect(skipCurrentRoom).toBeNull();
+    expect(continueRun!.querySelector("ha-icon")?.getAttribute("icon")).toBe("mdi:play");
+    expect(endRun!.querySelector("ha-icon")?.getAttribute("icon")).toBe("mdi:stop");
+
+    continueRun!.click();
+    endRun!.click();
+
+    expect(callService).toHaveBeenNthCalledWith(1, "ha_dreame", "resume_queue", {
+      config_entry_id: "config-entry-1",
+    });
+    expect(callService).toHaveBeenNthCalledWith(2, "ha_dreame", "cancel_queue", {
+      config_entry_id: "config-entry-1",
+    });
+  });
 });
