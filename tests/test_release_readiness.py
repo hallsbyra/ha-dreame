@@ -12,15 +12,16 @@ VALIDATE_WORKFLOW = Path(".github/workflows/validate.yml")
 
 
 def test_validate_workflow_runs_python_type_validation() -> None:
-    """Test CI includes a pinned Python type validation gate."""
+    """Test CI includes Python type validation through the Docker runner."""
     workflow = yaml.safe_load(VALIDATE_WORKFLOW.read_text(encoding="utf-8"))
     python_steps = workflow["jobs"]["python"]["steps"]
 
     step_names = {step["name"] for step in python_steps}
-    assert "Type check" in step_names
+    assert "Validate Python" in step_names
 
-    type_step = next(step for step in python_steps if step["name"] == "Type check")
-    assert type_step["run"] == "python -m pyright"
+    validation_step = next(step for step in python_steps if step["name"] == "Validate Python")
+    assert validation_step["run"] == "./scripts/dev python-check"
+    assert "python -m pyright" in Path("scripts/dev").read_text(encoding="utf-8")
     assert "pyright==1.1.411" in Path("requirements-dev.txt").read_text(encoding="utf-8")
     assert Path("pyrightconfig.json").is_file()
 
