@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+IMAGE_NAME="${HA_DREAME_DEV_IMAGE:-ha-dreame-dev:local}"
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/dev <command>
+
+Commands:
+  build           Build the development image
+  shell           Open an interactive shell in the development image
+  check           Run Python and frontend validation
+  python-check    Run Python lint, format check, type check, compile, and tests
+  frontend-check  Install frontend dependencies and run frontend checks
+  test-python     Run Python tests
+  test-frontend   Install frontend dependencies and run frontend tests
+  lint            Run Python lint/type checks and frontend TypeScript checks
+  format          Format Python files with ruff
+  compile         Compile the integration package
+EOF
+}
+
+build_image() {
+  docker build -f "${ROOT_DIR}/Dockerfile.dev" -t "${IMAGE_NAME}" "${ROOT_DIR}"
+}
+
+docker_run_args() {
+  local args=(
+    --rm
+    -i
+    -u "$(id -u):$(id -g)"
+    -e COVERAGE_FILE=/tmp/ha-dreame-coverage
+    -e HOME=/tmp
+    -e npm_config_cache=/tmp/npm-cache
+    -v "${ROOT_DIR}:/workspace"
+    -w /workspace
+  )
+
+  if [ -t 1 ]; then
+    args+=(-t)
+  fi
+
+  printf '%s\n' "${args[@]}"
+}
+
+run_in_container() {
+  local command="$1"
+  build_image
+  mapfile -t args < <(docker_run_args)
+  docker run "${args[@]}" "${IMAGE_NAME}" bash -lc "${command}"
+}
+
+frontend_install_and() {
+  local command="$1"
+  run_in_container "cd frontend/dreame-queue-card && npm ci && ${command}"
+}
+
+command="${1:-help}"
+
+case "${command}" in
+  build)
+    build_image
+    ;;
+  shell)
+    build_image
+    mapfile -t args < <(docker_run_args)
+    docker run "${args[@]}" "${IMAGE_NAME}" bash
+    ;;
+  check)
+    run_in_container "python -m ruff check . && python -m ruff format --check . && python -m pyright && python -m compileall custom_components/ha_dreame && python -m pytest && cd frontend/dreame-queue-card && npm ci && npm run check"
+    ;;
+  python-check)
+    run_in_container "python -m ruff check . && python -m ruff format --check . && python -m pyright && python -m compileall custom_components/ha_dreame && python -m pytest"
+    ;;
+  frontend-check)
+    frontend_install_and "npm run check"
+    ;;
+  test-python)
+    run_in_container "python -m pytest"
+    ;;
+  test-frontend)
+    frontend_install_and "npm run test"
+    ;;
+  lint)
+    run_in_container "python -m ruff check . && python -m pyright && cd frontend/dreame-queue-card && npm ci && npm run lint"
+    ;;
+  format)
+    run_in_container "python -m ruff format ."
+    ;;
+  compile)
+    run_in_container "python -m compileall custom_components/ha_dreame"
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

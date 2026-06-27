@@ -30,19 +30,20 @@ The current production Dreame implementation still lives in the sibling repo `..
 - `docs/release-checklist.md` - release readiness gates
 
 ## Validation
-- Python scaffold check:
-  - `python3 -m compileall custom_components/ha_dreame`
-- Test suite:
-  - `python -m pytest`
-- Lint and format:
-  - `python -m ruff check .`
-  - `python -m ruff format --check .`
-- Python type validation:
-  - `python -m pyright`
+- Local development validation is Dockerized. Do not require host Python,
+  Node, npm, venv, or frontend tooling.
+- Required local tool:
+  - `docker`
+- Full local check:
+  - `./scripts/dev check`
+- Python validation:
+  - `./scripts/dev python-check`
 - Frontend card package:
-  - `cd frontend/dreame-queue-card && npm ci`
-  - `cd frontend/dreame-queue-card && npm run check`
-- GitHub Actions also runs frontend validation, HACS validation, and Hassfest.
+  - `./scripts/dev frontend-check`
+- Interactive development shell:
+  - `./scripts/dev shell`
+- GitHub Actions uses the same Docker runner for Python and frontend validation,
+  and also runs HACS validation and Hassfest.
 
 ## Development Model
 - Use TDD for all functional changes and bug fixes.
