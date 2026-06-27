@@ -169,6 +169,36 @@ describe("ha-dreame-queue-card", () => {
     expect(element.shadowRoot?.textContent).toContain("Hallway");
   });
 
+  it("renders running room progress from the robot progress sensor", async () => {
+    const element = document.createElement(CARD_ELEMENT_TAG) as any;
+    element.setConfig({
+      entity: "sensor.robot_queue_status",
+      title: "Robot queue",
+    });
+    element.hass = {
+      ...hass,
+      states: {
+        ...hass.states,
+        "sensor.robot_cleaning_progress": {
+          state: "42",
+          attributes: {},
+        },
+      },
+    };
+    document.body.append(element);
+
+    await element.updateComplete;
+
+    const shadowRoot = element.shadowRoot as ShadowRoot | null;
+    const progress = shadowRoot?.querySelector<HTMLElement>(".progress-track");
+    const fill = shadowRoot?.querySelector<HTMLElement>(".progress-fill");
+
+    expect(progress).not.toBeNull();
+    expect(progress?.getAttribute("aria-valuenow")).toBe("42");
+    expect(fill?.getAttribute("style")).toContain("width: 42%;");
+    expect(element.shadowRoot?.textContent).toContain("42%");
+  });
+
   it("renders terminal queue state guidance without start controls", async () => {
     const element = document.createElement(CARD_ELEMENT_TAG) as any;
     element.setConfig({
