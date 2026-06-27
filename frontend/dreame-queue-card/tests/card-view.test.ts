@@ -306,6 +306,56 @@ describe("card view model", () => {
     ]);
   });
 
+  it("derives running room progress from the conventional Dreame progress sensor", () => {
+    const view = buildCardViewModel(
+      {
+        ...hass,
+        states: {
+          ...hass.states,
+          "sensor.robot_cleaning_progress": {
+            state: "42",
+            attributes: {},
+          },
+        },
+      },
+      {
+        entity: "sensor.robot_queue_status",
+      },
+    );
+
+    expect(view.rows[0]).toMatchObject({
+      roomName: "Kitchen",
+      status: "running",
+      progress: 42,
+    });
+    expect(view.rows[1]).not.toHaveProperty("progress");
+  });
+
+  it("falls back to the vacuum cleaning_progress attribute", () => {
+    const view = buildCardViewModel(
+      {
+        ...hass,
+        states: {
+          ...hass.states,
+          "vacuum.robot": {
+            state: "cleaning",
+            attributes: {
+              cleaning_progress: 68,
+            },
+          },
+        },
+      },
+      {
+        entity: "sensor.robot_queue_status",
+      },
+    );
+
+    expect(view.rows[0]).toMatchObject({
+      status: "running",
+      progress: 68,
+    });
+  });
+
   it("offers Continue and End when the active robot run is interrupted", () => {
     const view = buildCardViewModel(
       {
