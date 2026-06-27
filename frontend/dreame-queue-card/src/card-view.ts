@@ -64,6 +64,7 @@ export type CardQueueRow = {
   roomName: string;
   status: string;
   statusLabel: string;
+  progress?: number;
   overrides: Record<string, unknown>;
   canRemove: boolean;
   canMoveUp: boolean;
@@ -204,6 +205,7 @@ function cardQueueRows(
   snapshot: QueueSnapshot,
 ): CardQueueRow[] {
   const items = snapshot.items;
+  const activeProgress = runningCleaningProgress(hass, snapshot);
   const pendingIndexes = items.flatMap((item, index) => (item.status === "pending" ? [index] : []));
   const firstPendingIndex = pendingIndexes[0] ?? null;
   const lastPendingIndex = pendingIndexes[pendingIndexes.length - 1] ?? null;
@@ -214,6 +216,7 @@ function cardQueueRows(
     roomName: item.roomName,
     status: item.status,
     statusLabel: queueRunStateLabel(item.status),
+    ...(item.status === "running" && activeProgress !== null ? { progress: activeProgress } : {}),
     overrides: { ...item.overrides },
     canRemove: item.status === "pending",
     canMoveUp: item.status === "pending" && index !== firstPendingIndex,
@@ -223,6 +226,42 @@ function cardQueueRows(
         ? buildOverrideControls(item.overrides)
         : buildRunningOverrideControls(hass, snapshot, item),
   }));
+}
+
+function runningCleaningProgress(
+  hass: HomeAssistantLike | undefined,
+  snapshot: QueueSnapshot,
+): number | null {
+  const vacuumEntityId = snapshot.vacuumEntityId;
+  if (!hass || !vacuumEntityId) {
+    return null;
+  }
+
+  const progressEntityId = sensorEntityIdForVacuum(vacuumEntityId, "cleaning_progress");
+  const progressFromSensor = progressPercent(progressEntityId ? hass.states[progressEntityId]?.state : undefined);
+  if (progressFromSensor !== null) {
+    return progressFromSensor;
+  }
+
+  const vacuumAttributes = hass.states[vacuumEntityId]?.attributes;
+  if (!isRecord(vacuumAttributes)) {
+    return null;
+  }
+
+  return progressPercent(vacuumAttributes["cleaning_progress"]);
+}
+
+function progressPercent(value: unknown): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const parsed = Number(String(value).trim());
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  return Math.max(0, Math.min(100, Math.round(parsed)));
 }
 
 function buildActiveControls(
