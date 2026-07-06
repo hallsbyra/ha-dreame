@@ -1,17 +1,16 @@
 # Parallel Install Guide
 
-This guide describes how to install and test `ha_dreame` beside an existing Dreame controller during migration.
+This guide describes how to install and test `ha_dreame` with an existing `dreame_vacuum` setup.
 
 It is intentionally public-safe. Use placeholder paths and generic entity examples. Do not add private hostnames, private paths, exact local entity ids, tokens, secrets, or room names.
 
 ## Safety Model
 
-- `ha_dreame` uses the Home Assistant domain `ha_dreame`, so its services and entities are separate from legacy queue services.
+- `ha_dreame` uses the Home Assistant domain `ha_dreame`, so its services and entities are namespaced.
 - The integration depends on an existing `dreame_vacuum` vacuum entity. It does not replace that integration.
 - `ha_dreame` is command-disabled by default. Active robot commands require the `allow_robot_commands` option to be enabled explicitly.
 - Automatic reconcile is opt-in: auto reconcile is disabled by default and only runs when both `allow_robot_commands` and `auto_reconcile_enabled` are enabled.
-- Do not let two controllers send robot commands to the same robot at the same time. Parallel installation is supported; parallel active command control is not a target.
-- Keep the existing controller as the production path until a separate cutover issue and PR exist.
+- Do not let two controllers or integration instances send robot commands to the same robot at the same time. Parallel active command control is not a target.
 
 ## HACS Custom Repository Install
 
@@ -83,7 +82,7 @@ Keep dashboard examples generic. Do not commit private dashboard files, local en
 
 ## Read-Only Validation
 
-Start with read-only behavior while the old controller remains active.
+Start with read-only behavior on fresh installs.
 
 Useful checks:
 
@@ -99,7 +98,7 @@ Do not enable commands for read-only validation.
 
 Only use active commands in a short controlled window.
 
-1. Ensure the old controller is not about to send robot commands for the same robot.
+1. Ensure no other controller or integration instance is about to send robot commands for the same robot.
 2. Enable `allow_robot_commands` in `HA Dreame` options.
 3. Keep `auto_reconcile_enabled` disabled unless the test specifically covers automatic reconciliation.
 4. Start with one simple room queue and observe the robot state before adding more pending work.
@@ -109,7 +108,7 @@ Only use active commands in a short controlled window.
 
 ## Rollback
 
-Rollback should leave the existing controller untouched.
+Rollback should leave the existing `dreame_vacuum` integration untouched.
 
 1. Disable `allow_robot_commands`.
 2. Disable `auto_reconcile_enabled`.

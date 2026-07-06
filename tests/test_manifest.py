@@ -65,7 +65,7 @@ def test_parallel_install_guide_is_public_safe_and_linked() -> None:
     required_phrases = (
         "command-disabled by default",
         "auto reconcile is disabled by default",
-        "Do not let two controllers send robot commands",
+        "Do not let two controllers or integration instances send robot commands",
         "docs/dreame-behavior-knowledge.md",
     )
     for phrase in required_phrases:

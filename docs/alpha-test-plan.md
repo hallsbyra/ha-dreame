@@ -2,12 +2,12 @@
 
 ## Goal
 
-Validate an alpha candidate of `ha_dreame` in Home Assistant while the legacy
-Dreame controller remains the production path.
+Validate an alpha candidate of `ha_dreame` in Home Assistant as the primary
+Dreame queue controller.
 
 The alpha test is successful when the integration installs, configures, exposes
 the expected read-only state, loads the packaged dashboard card, and can run one
-controlled command-gated smoke test without namespace collisions.
+controlled command-gated smoke test without namespace or command-gate problems.
 
 ## Preconditions
 
@@ -15,14 +15,12 @@ controlled command-gated smoke test without namespace collisions.
   and Hassfest checks.
 - The existing `dreame_vacuum` integration is already configured in Home
   Assistant and exposes one vacuum entity.
-- The existing Dreame controller remains installed and is still the production
-  path.
 - The tester has a rollback path and can restart Home Assistant.
 - Leave `allow_robot_commands` disabled for initial validation.
 - Leave `auto_reconcile_enabled` disabled for initial validation.
 
-Keep the old controller as the production path until a separate cutover issue
-and pull request exist.
+Keep command windows narrow and deliberate until the candidate has passed the
+read-only and dashboard smoke checks.
 
 ## Preflight Validation
 
@@ -99,8 +97,8 @@ With robot commands disabled:
    without mutating queue state or sending robot commands.
 6. Download diagnostics and confirm they contain no secrets or private runtime
    values.
-7. Confirm legacy `pyscript.dreame_queue_*` services and the old dashboard card
-   still exist independently.
+7. Confirm no unexpected setup, service, or namespace errors appear in Home
+   Assistant logs.
 
 ## Dashboard Card Smoke Test
 
@@ -131,9 +129,9 @@ Validate:
 
 Only run this test in a short controlled window.
 
-Do not let two controllers send robot commands to the same robot.
+Do not let two integration instances or controllers send robot commands to the same robot.
 
-1. Confirm the legacy controller is not about to start or continue a run.
+1. Confirm no other integration instance or controller is about to start or continue a run.
 2. Add one low-risk room to the `ha_dreame` queue.
 3. Call `ha_dreame.get_control_readiness` and confirm the queue has a pending
    item, the selected vacuum is available, and only `allow_robot_commands` is
@@ -154,7 +152,7 @@ If the robot reports a durable new state transition, update
 
 ## Rollback
 
-Rollback should leave the legacy controller untouched.
+Rollback should leave the existing `dreame_vacuum` integration untouched.
 
 1. Disable `allow_robot_commands`.
 2. Disable `auto_reconcile_enabled`.

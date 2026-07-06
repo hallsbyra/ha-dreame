@@ -1,27 +1,25 @@
 # AGENTS.md
 
 ## Scope
-This repository is the greenfield Dreame product track.
-
-The current production Dreame implementation still lives in the sibling repo `../ha-config`.
+This repository is the standalone Dreame product track.
 
 ## Current Status
-- `ha-config` is still the production path for Dreame queue behavior, dashboards and bug fixes.
-- `ha-dreame` is the future standalone replacement track.
-- Do not remove or rename production Dreame pieces in `ha-config` from work done here unless the user explicitly asks for cutover work.
+- `ha-dreame` is the primary Dreame queue product after cutover.
+- `ha-config` owns private HA dashboard wiring, automations, deploy and runtime checks for the installed HACS integration.
+- The old private Dreame queue path has been removed from `ha-config`; do not reintroduce product logic there.
 
 ## Product Direction
 - Target product: a standalone Home Assistant integration under the domain `ha_dreame`.
 - Long-term goal: HACS-friendly packaging and release flow.
-- Migration model: run in parallel with the old implementation until feature parity is reached.
-- Collision rule: keep new services, events, entity ids and card identifiers isolated from the current `pyscript.dreame_queue_*` implementation.
+- Migration model: public HACS product with private HA wiring kept outside this repo.
+- Namespace rule: keep new services, events, entity ids and card identifiers under `ha_dreame`.
 - Command safety rule: new runtime behavior starts read-only / command-disabled by default. Any code path that sends robot commands must require explicit operator enablement before it can run.
 - Public repo rule: do not commit secrets, local hostnames, private paths, local-only entity ids, or assumptions from one Home Assistant installation.
 - Dependency rule: it is acceptable for this integration to depend explicitly on the existing `dreame_vacuum` integration, but runtime setup must still validate that the selected dependency exists and is usable.
 
 ## Repository Map
-- `custom_components/ha_dreame/` - future Home Assistant integration
-- `frontend/dreame-queue-card/` - future home for the standalone Dreame dashboard card
+- `custom_components/ha_dreame/` - Home Assistant integration
+- `frontend/dreame-queue-card/` - standalone Dreame dashboard card
 - `docs/` - migration guardrails and product notes
 - `docs/dreame-behavior-knowledge.md` - public-safe observed Dreame behavior and regression knowledge
 - `docs/merge-policy.md` - merge strategy for preserving TDD commit chains
@@ -55,21 +53,20 @@ The current production Dreame implementation still lives in the sibling repo `..
 - Do not squash TDD branches unless the PR explicitly says the intermediate commits are not useful.
 - Keep feature branches small and centered on one behavior slice.
 - Use Conventional Commits for commits made in this repo.
-- Treat the private production implementation in `../ha-config` as a reference during migration, not as a runtime dependency.
+- Treat historical private implementation details as migration reference material only, not as a runtime dependency.
 - Keep implementation code deterministic and testable before wiring it to Home Assistant runtime APIs.
 - Track quality-scale progress in `custom_components/ha_dreame/quality_scale.yaml`.
 
 ## Deploy
-- This repo is not the production deploy path yet.
-- Do not deploy this scaffold to HAOS as a replacement for the running Dreame solution without explicit user approval.
-- During migration, local development deploys may install `ha_dreame` beside the old implementation. New runtime behavior must be namespaced, and robot command dispatch must stay disabled until explicit operator enablement is implemented and turned on.
-- For local or HAOS parallel-install work, follow `docs/parallel-install.md` and keep examples public-safe.
+- Release through HACS/GitHub releases, then update the installed integration in HAOS.
+- Private HA dashboard/automation deploy belongs in `../ha-config`.
+- Local development deploys may install `ha_dreame` into a Home Assistant test environment. Robot command dispatch must stay disabled unless explicitly enabled by the operator.
+- For local or HAOS install work, follow `docs/parallel-install.md` and keep examples public-safe.
 
 ## Working Rules
-- If the task is to fix the currently running Dreame setup, work in `../ha-config`.
-- If the task is to build the next-generation Dreame component, work here.
-- Prefer additive migration work over in-place replacement work.
-- Do not remove, rename, or disable production Dreame pieces in `../ha-config` unless the user explicitly asks for cutover work.
+- If the task is Dreame product logic, frontend card behavior, tests, release, or behavior knowledge, work here.
+- If the task is private HA dashboard wiring, automations, deploy, runtime checks, or local Home Assistant configuration, work in `../ha-config`.
+- Keep private HA details out of this public repo.
 
 ## Dreame Behavior Knowledge
 - Update `docs/dreame-behavior-knowledge.md` whenever runtime debugging reveals durable Dreame behavior that should influence queue logic.

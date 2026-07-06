@@ -2,15 +2,15 @@
 
 `ha-dreame` is a standalone Home Assistant custom integration and dashboard card for testing a Dreame room-cleaning queue beside an existing `dreame_vacuum` setup.
 
-This repository is still an alpha migration track. The integration is intended to become a public HACS custom repository, but it is not a drop-in replacement for an existing private Dreame controller yet.
+This repository is still an alpha product track, but the migration cutover has happened in the maintainer's HAOS setup. The integration is now the product source for Dreame queue behavior and is intended to become a public HACS custom repository.
 
 ## Current Status
 
 - Home Assistant domain: `ha_dreame`
 - Upstream dependency: an already configured `dreame_vacuum` vacuum entity
-- Default mode: command-disabled and safe for read-only parallel installation
+- Default mode: command-disabled and safe for read-only initial installation
 - Dashboard card: packaged with the integration and served from a namespaced static URL
-- Cutover status: no production cutover is implied by installing this repository
+- Cutover status: primary in the maintainer's HAOS setup; private HA wiring lives outside this public repo
 
 ## Installation
 
@@ -75,23 +75,22 @@ matching the operator workflow exposed by Dreame while keeping `allow_robot_comm
 
 ## Safety Model
 
-- `ha_dreame` uses separate services, entities, storage keys, and card identifiers from legacy `pyscript.dreame_queue_*` paths.
+- `ha_dreame` owns its own services, entities, storage keys, and card identifiers under the `ha_dreame` namespace.
 - The integration depends on `dreame_vacuum`; it does not replace or authenticate to the robot directly.
 - Active robot commands require explicit operator enablement through `allow_robot_commands`.
-- Parallel installation is supported for migration testing. Parallel active control of the same robot by two controllers is not a target.
-- Keep the old controller as the production path until a separate cutover issue and PR exist.
+- Parallel installation of multiple controllers for the same robot is not a target. Avoid parallel active control.
 
 ## Current Limitations
 
 - This is an alpha migration project, not a stable release.
-- Real-world parity with the previous private queue and dashboard still needs controlled runtime validation.
-- Automatic reconciliation is opt-in and should remain disabled during initial parallel testing.
+- Real-world parity with the previous private queue and dashboard has passed initial cutover use, but remaining release hardening is still tracked in issues.
+- Automatic reconciliation is opt-in and should remain disabled unless a user deliberately wants command-gated automatic reconcile.
 - Brand assets for HACS presentation are tracked separately from runtime readiness.
 - The public repository intentionally avoids private room names, dashboard files, local hostnames, and local entity ids.
 
 ## Removal
 
-Rollback should leave the existing `dreame_vacuum` integration and any legacy controller untouched.
+Rollback should leave the existing `dreame_vacuum` integration untouched.
 
 1. Disable `allow_robot_commands`.
 2. Disable `auto_reconcile_enabled`.

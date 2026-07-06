@@ -77,8 +77,8 @@ def test_alpha_test_plan_is_linked_and_public_safe() -> None:
 
     required_safety_phrases = [
         "Leave `allow_robot_commands` disabled",
-        "Keep the old controller as the production path",
-        "Do not let two controllers send robot commands",
+        "Keep command windows narrow and deliberate",
+        "Do not let two integration instances or controllers send robot commands",
         "docs/dreame-behavior-knowledge.md",
     ]
     for phrase in required_safety_phrases:

@@ -2,15 +2,14 @@
 
 ## Scope
 
-This checklist tracks public-safe parity between the current private Dreame
+This checklist tracks public-safe parity between the previous private Dreame
 queue controller and the standalone `ha_dreame` HACS integration.
 
 It is a release gate, not a private implementation dump. Keep it generic: no
 private room names, local entity ids, hostnames, paths, tokens, or dashboards.
 
-Use the private controller only as a reference for behavior. The target remains
-a standalone HACS integration that can run beside the old controller until a
-separate cutover issue exists.
+Use the previous private controller only as historical behavior reference. The
+target is now the standalone HACS integration.
 
 ## Status Legend
 
@@ -39,7 +38,7 @@ separate cutover issue exists.
 
 | Capability | Status | Evidence | Remaining gate |
 |---|---|---|---|
-| Namespaced services | `Ported` | services live under `ha_dreame`, isolated from legacy service names | Continue coexistence observation beside old controller |
+| Namespaced services | `Ported` | services live under `ha_dreame` | Continue public API review before beta |
 | Command gate disabled by default | `Runtime validated` | alpha.2 HAOS smoke confirmed running override service is registered and blocked while commands are disabled | Keep disabled for read-only observation |
 | Explicit operator enablement | `Ported` | config options and service boundary tests require `allow_robot_commands` before dispatch | Controlled command smoke |
 | Manual control preflight | `Ported` | `ha_dreame.get_control_readiness` reports command gate, queue state, vacuum availability, companion entities, and available actions without dispatching commands | Use before each controlled command smoke |
@@ -72,7 +71,7 @@ separate cutover issue exists.
 | HACS packaged card resource | `Runtime validated` | alpha.1 and alpha.2 HAOS smoke confirmed resource serving | Continue cache/reload observation |
 | Lovelace editor | `Ported` | editor tests and packaged editor chunk verification | Manual UI check after each release candidate |
 | Queue rendering | `Ported` | card tests cover idle, running, completed, out-of-sync, and blocked guidance | Visual check during real alpha use |
-| Add/remove/move/clear controls | `Ported` | frontend service-call tests and HAOS card smoke | Runtime observation beside legacy card |
+| Add/remove/move/clear controls | `Runtime validated` | frontend service-call tests, HAOS card smoke, and primary-path use | Continue observation during normal use |
 | Pending override controls | `Ported` | frontend override tests and service tests | Runtime observation |
 | Active start/cancel/skip controls | `Ported` | frontend tests and command-gated services | Controlled command smoke |
 | Running override visual controls | `Ported` | frontend tests and alpha.2 installed bundle | Visual validation during a real running state |
@@ -82,9 +81,9 @@ separate cutover issue exists.
 
 | Gate | Status | Evidence | Remaining gate |
 |---|---|---|---|
-| Read-only HACS alpha install | `Runtime validated` | alpha.2 installed through HACS, HA restarted, sensor/services/card resource available | Keep observing beside old controller |
+| Read-only HACS alpha install | `Runtime validated` | alpha.2+ installed through HACS, HA restarted, sensor/services/card resource available | Keep observing normal primary-path use |
 | Public-safe docs and behavior knowledge | `Ported` | README, alpha plan, behavior knowledge, release checklist, and AGENTS rules | Update after each durable runtime finding |
-| Controlled command smoke | `Deferred` | command-gated service stack is implemented | Requires a short operator-approved robot test window |
+| Controlled command smoke | `Runtime validated` | command-gated service stack has completed real primary-path runs | Continue normal-use observation |
 | Compact parity checklist | `Ported` | this document | Keep current after each runtime slice |
-| Beta promotion | `Deferred` | not ready until controlled command smoke and real-run observations are clean | Plan after first active command window |
-| Cutover issue exists | `Deferred` | cutover is explicitly out of alpha scope | Open only after beta/RC parity is proven |
+| Beta promotion | `Deferred` | primary-path use is clean, but remaining hardening decisions are open | Plan after cleanup and release-readiness decisions |
+| Cutover issue exists | `Runtime validated` | #110 tracks cutover cleanup and rollback retirement | Close after cleanup is merged or explicitly deferred |

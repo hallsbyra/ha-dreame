@@ -22,13 +22,13 @@ async def _async_setup_dreame_vacuum_dependency(
     hass: HomeAssistant,
     config: dict,
 ) -> bool:
-    """Set up the mocked legacy Dreame dependency."""
+    """Set up the mocked upstream Dreame dependency."""
     return True
 
 
 @pytest.fixture
 def mock_dreame_vacuum_dependency(hass: HomeAssistant) -> None:
-    """Register the legacy Dreame integration dependency for HA load tests."""
+    """Register the upstream Dreame integration dependency for HA load tests."""
     mock_integration(
         hass,
         MockModule(

@@ -17,18 +17,18 @@
 
 - [ ] Queue core has tests for creation, mutation, start, cancel, skip, completion, and drift.
 - [ ] Behavior knowledge regressions have corresponding automated tests.
-- [ ] Read-only/default command-disabled behavior is verified while installed beside the old implementation.
+- [ ] Read-only/default command-disabled behavior is verified on a fresh install.
 - [ ] Robot command dispatch is explicitly opt-in.
-- [ ] The integration can coexist with the old production implementation.
+- [ ] The integration avoids namespace collisions with other custom integrations.
 - [ ] Known limitations and troubleshooting are documented.
 
 ## Release Candidate
 
-- [ ] `docs/parity-checklist.md` is complete against the current production queue.
+- [ ] `docs/parity-checklist.md` is complete against the previous private queue behavior.
 - [ ] Frontend card or documented dashboard path works against `ha_dreame` entities/services.
 - [ ] Diagnostics and failure reporting are sufficient for runtime debugging.
 - [ ] HACS brand/readiness work is complete or explicitly tracked.
-- [ ] Cutover issue exists before any private production cleanup starts.
+- [ ] Cutover cleanup is complete or explicitly deferred.
 
 ## Stable
 
