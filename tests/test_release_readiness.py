@@ -8,6 +8,7 @@ import yaml
 
 ALPHA_TEST_PLAN = Path("docs/alpha-test-plan.md")
 PYRIGHT_CONFIG = Path("pyrightconfig.json")
+REPOSITORY_LICENSE = Path("LICENSE")
 VALIDATE_WORKFLOW = Path(".github/workflows/validate.yml")
 
 
@@ -24,6 +25,16 @@ def test_validate_workflow_runs_python_type_validation() -> None:
     assert "python -m pyright" in Path("scripts/dev").read_text(encoding="utf-8")
     assert "pyright==1.1.411" in Path("requirements-dev.txt").read_text(encoding="utf-8")
     assert Path("pyrightconfig.json").is_file()
+
+
+def test_repository_declares_hacs_compatible_license() -> None:
+    """Test the public HACS repository declares an explicit license."""
+    assert REPOSITORY_LICENSE.is_file()
+
+    license_text = REPOSITORY_LICENSE.read_text(encoding="utf-8")
+
+    assert license_text.startswith("MIT License")
+    assert "Permission is hereby granted" in license_text
 
 
 def test_pyright_config_scopes_release_type_gate_to_integration_code() -> None:
