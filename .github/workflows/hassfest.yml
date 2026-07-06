@@ -3,8 +3,6 @@ name: Hassfest
 on:
   push:
   pull_request:
-  schedule:
-    - cron: "43 3 * * *"
   workflow_dispatch:
 
 permissions:
