@@ -403,3 +403,55 @@ async def test_auto_reconcile_resumes_current_room_when_ready(
     assert entry.runtime_data.run_tracking.current_item_id == queue_state.current_item_id
     assert entry.runtime_data.run_tracking.task_status_cleared_since_dispatch is True
     assert entry.runtime_data.run_tracking.last_command_at != run_tracking.last_command_at
+
+
+async def test_auto_reconcile_resumes_after_transient_low_water_pause(
+    hass: HomeAssistant,
+) -> None:
+    """Test refill recovery survives a dock-pause state pulse between polls."""
+    calls: list[dict[str, object]] = []
+
+    async def _record_start(call: ServiceCall) -> None:
+        calls.append(dict(call.data))
+
+    hass.services.async_register("vacuum", "start", _record_start)
+    vacuum_entity_id, entry = await _setup_loaded_entry(
+        hass,
+        commands_enabled=True,
+        auto_reconcile_enabled=True,
+    )
+    queue_state = _running_state()
+    run_tracking = _tracking(queue_state)
+    entry.runtime_data.set_queue_state(queue_state)
+    entry.runtime_data.set_run_tracking(run_tracking)
+    hass.states.async_set(
+        vacuum_entity_id,
+        "cleaning",
+        {
+            "paused": True,
+            "running": False,
+            "washing": True,
+        },
+    )
+    hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning")
+    hass.states.async_set("sensor.dreame_robot_state", "washing_paused")
+    hass.states.async_set("sensor.dreame_robot_self_wash_base_status", "paused")
+    hass.states.async_set("sensor.dreame_robot_clean_water_tank_status", "low_water")
+    hass.states.async_set("sensor.dreame_robot_error", "water_tank_dry")
+    _set_current_room(hass, 1, "Kitchen")
+
+    # The short pause pulse disappears before the next reconcile tick, while
+    # the vacuum's durable attributes still say that the dock task is paused.
+    hass.states.async_set("sensor.dreame_robot_state", "washing")
+    hass.states.async_set("sensor.dreame_robot_self_wash_base_status", "washing")
+    hass.states.async_set("sensor.dreame_robot_clean_water_tank_status", "installed")
+    hass.states.async_set("sensor.dreame_robot_error", "no_error")
+
+    await _fire_auto_reconcile_interval(hass)
+
+    assert calls == [{"entity_id": vacuum_entity_id}]
+    assert entry.runtime_data.queue_state == queue_state
+    assert entry.runtime_data.run_tracking is not None
+    assert entry.runtime_data.run_tracking.current_item_id == queue_state.current_item_id
+    assert entry.runtime_data.run_tracking.task_status_cleared_since_dispatch is True
+    assert entry.runtime_data.run_tracking.last_command_at != run_tracking.last_command_at
