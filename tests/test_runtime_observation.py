@@ -213,3 +213,55 @@ def test_observation_keeps_transient_dock_pause_from_vacuum_attributes(
     assert observation.is_dock_prep_state is True
     assert observation.is_dock_prep_paused is True
     assert observation.dock_prep_resume_ready is True
+
+
+def test_observation_rejects_stale_pause_attribute_while_vacuum_is_running(
+    hass: HomeAssistant,
+) -> None:
+    """Test a stale pause flag cannot interrupt an actively running dock phase."""
+    hass.states.async_set(
+        "vacuum.dreame_robot",
+        "cleaning",
+        {
+            "paused": True,
+            "running": True,
+            "washing": True,
+        },
+    )
+    hass.states.async_set("sensor.dreame_robot_state", "washing")
+    hass.states.async_set("sensor.dreame_robot_self_wash_base_status", "washing")
+    hass.states.async_set("sensor.dreame_robot_clean_water_tank_status", "installed")
+
+    observation = build_runtime_reconcile_observation(
+        hass,
+        vacuum_entity_id="vacuum.dreame_robot",
+    )
+
+    assert observation.is_dock_prep_state is True
+    assert observation.is_dock_prep_paused is False
+
+
+def test_observation_rejects_non_running_dock_without_pause_attribute(
+    hass: HomeAssistant,
+) -> None:
+    """Test non-running dock work alone is not treated as paused."""
+    hass.states.async_set(
+        "vacuum.dreame_robot",
+        "cleaning",
+        {
+            "paused": False,
+            "running": False,
+            "washing": True,
+        },
+    )
+    hass.states.async_set("sensor.dreame_robot_state", "washing")
+    hass.states.async_set("sensor.dreame_robot_self_wash_base_status", "washing")
+    hass.states.async_set("sensor.dreame_robot_clean_water_tank_status", "installed")
+
+    observation = build_runtime_reconcile_observation(
+        hass,
+        vacuum_entity_id="vacuum.dreame_robot",
+    )
+
+    assert observation.is_dock_prep_state is True
+    assert observation.is_dock_prep_paused is False
