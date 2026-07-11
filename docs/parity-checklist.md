@@ -56,7 +56,7 @@ target is now the standalone HACS integration.
 | Read-only observation extraction | `Ported` | HA state extraction tests and `ha_dreame.evaluate_reconcile` response smoke | Observe during real cleaning cycles |
 | Stale completion after dispatch | `Ported` | reconciliation tests require non-completed status before completion | Runtime observation |
 | Recoverable robot errors | `Ported` | behavior knowledge and reconciliation tests treat recovery as hold state | Runtime observation during refill/tank cases |
-| Dock wash pause recovery | `Ported` | explicit companion entity options and resume-command tests | Controlled recovery test when condition occurs naturally |
+| Dock wash pause recovery | `Ported` | companion states plus durable vacuum pause attributes cover transient low-water pause signals | Validate the fixed refill sequence after installing alpha.6 |
 | Current-room transition noise | `Ported` | early mismatch and low-progress mismatch tests avoid false redispatch | Runtime observation |
 | Late room flips near completion | `Ported` | high-progress mismatch tests suppress redispatch near completion | Runtime observation |
 | Mop remove/install maintenance | `Ported` | regression coverage from observed legacy failure treats these states as wait states | Runtime observation when maintenance transition occurs |

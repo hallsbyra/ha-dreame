@@ -96,10 +96,16 @@ examples only.
 
 - Confidence: `Observed`
 - Behavior: the high-level vacuum state can still report active cleaning while dock wash is paused.
+- Behavior: the detailed `washing_paused` and wash-base `paused` states can be a sub-second pulse.
+  After that pulse, the detailed states can return to `washing` while the vacuum attributes continue
+  to report `paused=true`, `running=false`, and an active wash phase.
 - Controller implication: include detailed robot state and self-wash-base status in reconciliation.
+  Use the durable vacuum pause attributes as fallback evidence when the detailed pause pulse falls
+  between reconciliation ticks.
   Resume attempts should wait until blocking refill or tank conditions are cleared.
   When resume is requested, call Home Assistant's `vacuum.start` service for the configured vacuum.
-- Test implication: cover paused dock wash with high-level `cleaning` as a recoverable hold.
+- Test implication: cover paused dock wash with high-level `cleaning` as a recoverable hold, including
+  refill recovery after the detailed pause signals have already returned to `washing`.
 
 ### Current Room Is Noisy During Transitions
 
@@ -256,6 +262,25 @@ When running a planned manual test, record:
   late `current_room` flips and post-run dock/wash states after the queue is complete.
 - Follow-up tests: add an end-to-end reconcile test covering late room flips plus progress
   `95 -> 0 -> 100` before `task_status=completed`, followed by post-completion washing.
+
+### 2026-07-11 - Low-Water Dock Pause Between Reconcile Ticks
+
+- Confidence: `Observed`
+- Setup: one active room queue with robot commands and automatic reconciliation enabled; clean-water
+  refill performed after a dock wash stopped for low water.
+- Expected: clearing the water condition resumes the same active room automatically.
+- Observed timeline:
+  - t0: the robot reported a clean-water error during dock preparation.
+  - t1: detailed robot and wash-base sensors reported a paused wash for less than one second, then
+    returned to `washing`.
+  - t2: the error cleared and the clean-water tank reported `installed`.
+  - t3: the vacuum entity still reported `paused=true` and `running=false`, but reconciliation saw
+    only the non-paused detailed states and issued no resume command.
+- Outcome: the queue remained running at zero progress until manual recovery.
+- Controller implication: durable vacuum pause attributes must supplement transient detailed pause
+  states before refill recovery is evaluated.
+- Follow-up tests: cover the full signal transition and verify exactly one recovery start intent is
+  produced after the tank becomes ready.
 
 ## Open Questions
 
