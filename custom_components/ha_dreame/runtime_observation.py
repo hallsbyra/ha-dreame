@@ -43,7 +43,8 @@ def build_runtime_reconcile_observation(
 ) -> RuntimeReconcileObservation:
     """Build a read-only reconcile observation from Home Assistant state."""
     resolved_entity_ids = entity_ids or RuntimeObservationEntityIds()
-    vacuum_state = _state_value(hass.states.get(vacuum_entity_id))
+    vacuum = hass.states.get(vacuum_entity_id)
+    vacuum_state = _state_value(vacuum)
     task_status = _state_value(
         _get_companion_state(
             hass,
@@ -108,7 +109,11 @@ def build_runtime_reconcile_observation(
         observed_room_name=observed_room_name,
         cleaning_progress=cleaning_progress,
         is_dock_prep_state=_is_dock_prep_state(robot_state, self_wash_base_status),
-        is_dock_prep_paused=_is_dock_prep_paused(robot_state, self_wash_base_status),
+        is_dock_prep_paused=_is_dock_prep_paused(
+            robot_state,
+            self_wash_base_status,
+            vacuum,
+        ),
         dock_prep_resume_ready=_is_dock_prep_resume_ready(clean_water_tank_status),
         is_mop_maintenance_state=_is_mop_maintenance_state(task_status, robot_state),
         is_returning_state=_is_returning_state(vacuum_state, robot_state),
@@ -220,9 +225,19 @@ def _is_dock_prep_state(robot_state: str, self_wash_base_status: str) -> bool:
     return any(fragment in combined_state for fragment in DOCK_PREP_STATE_FRAGMENTS)
 
 
-def _is_dock_prep_paused(robot_state: str, self_wash_base_status: str) -> bool:
+def _is_dock_prep_paused(
+    robot_state: str,
+    self_wash_base_status: str,
+    vacuum: State | None,
+) -> bool:
     combined_state = f"{_normalize_signal(robot_state)} {_normalize_signal(self_wash_base_status)}"
-    return "paused" in combined_state or "pause" in combined_state
+    if "paused" in combined_state or "pause" in combined_state:
+        return True
+
+    return any(
+        _true_state_attribute(vacuum, attribute)
+        for attribute in ("paused", "washing_paused", "returning_to_wash_paused")
+    )
 
 
 def _is_dock_prep_resume_ready(clean_water_tank_status: str) -> bool:
@@ -232,3 +247,9 @@ def _is_dock_prep_resume_ready(clean_water_tank_status: str) -> bool:
 
 def _normalize_signal(value: str) -> str:
     return str(value or "").strip().lower()
+
+
+def _true_state_attribute(state: State | None, attribute: str) -> bool:
+    if state is None:
+        return False
+    return state.attributes.get(attribute) is True
