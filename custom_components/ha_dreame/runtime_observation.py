@@ -234,10 +234,7 @@ def _is_dock_prep_paused(
     if "paused" in combined_state or "pause" in combined_state:
         return True
 
-    return any(
-        _true_state_attribute(vacuum, attribute)
-        for attribute in ("paused", "washing_paused", "returning_to_wash_paused")
-    )
+    return _vacuum_attributes_report_paused(vacuum)
 
 
 def _is_dock_prep_resume_ready(clean_water_tank_status: str) -> bool:
@@ -249,7 +246,7 @@ def _normalize_signal(value: str) -> str:
     return str(value or "").strip().lower()
 
 
-def _true_state_attribute(state: State | None, attribute: str) -> bool:
+def _vacuum_attributes_report_paused(state: State | None) -> bool:
     if state is None:
         return False
-    return state.attributes.get(attribute) is True
+    return state.attributes.get("paused") is True and state.attributes.get("running") is False
