@@ -622,3 +622,173 @@ def test_reconcile_non_active_state_escalates_after_retry_budget() -> None:
         "dispatch_retry_exhausted:expected_1:observed_7:vacuum_idle"
     )
     assert decision.event_reasons == ("dispatch_retry_exhausted",)
+
+
+def test_reconcile_unavailable_vacuum_waits_without_consuming_retry_budget() -> None:
+    """Test missing robot observations cannot redispatch or exhaust retries."""
+    decision = _decision(
+        vacuum_state="",
+        task_status="",
+        seconds_since_last_command=300,
+        dispatch_retry_count=2,
+        dispatch_retry_max=2,
+    )
+
+    assert decision.retry_current_room is False
+    assert decision.mark_out_of_sync_reason is None
+    assert decision.reset_dispatch_retry_count is False
+    assert decision.event_reasons == ("vacuum_unavailable_waiting",)
+
+
+def test_reconcile_completed_task_survives_unavailable_vacuum_observation() -> None:
+    """Test a valid completion remains authoritative during a vacuum outage."""
+    decision = _decision(
+        vacuum_state="",
+        task_status="completed",
+        task_status_cleared_since_dispatch=True,
+        dispatch_retry_count=2,
+        dispatch_retry_max=2,
+    )
+
+    assert decision.complete_current_room is True
+    assert decision.retry_current_room is False
+    assert decision.mark_out_of_sync_reason is None
+    assert decision.event_reasons == ("task_status_completed",)
+
+
+def test_reconcile_active_room_confirmation_resets_retry_budget() -> None:
+    """Test a confirmed matching run clears retries from transient failures."""
+    decision = _decision(
+        vacuum_state="cleaning",
+        task_status="room_cleaning",
+        dispatch_retry_count=2,
+        expected_room_id=1,
+        observed_room_id=1,
+    )
+
+    assert decision.retry_current_room is False
+    assert decision.mark_out_of_sync_reason is None
+    assert decision.reset_dispatch_retry_count is True
+    assert decision.set_active_room_confirmed_since_dispatch is True
+    assert decision.event_reasons == ("dispatch_retry_reset_after_active_confirmation",)
+
+
+def test_reconcile_active_state_without_room_confirmation_preserves_retry_budget() -> None:
+    """Test missing room telemetry cannot repeatedly restore retry attempts."""
+    decision = _decision(
+        vacuum_state="cleaning",
+        task_status="room_cleaning",
+        dispatch_retry_count=1,
+        expected_room_id=1,
+        observed_room_id=None,
+        observed_room_name=None,
+    )
+
+    assert decision.retry_current_room is False
+    assert decision.reset_dispatch_retry_count is False
+    assert decision.event_reasons == ()
+
+
+def test_reconcile_active_room_mismatch_does_not_reset_retry_budget() -> None:
+    """Test confirming the wrong active room cannot restore retry budget."""
+    decision = _decision(
+        vacuum_state="cleaning",
+        task_status="room_cleaning",
+        dispatch_retry_count=1,
+        expected_room_id=1,
+        observed_room_id=7,
+        cleaning_progress=20,
+        active_room_mismatch_streak=2,
+        active_room_mismatch_required_streak=2,
+        seconds_since_last_command=5,
+    )
+
+    assert decision.retry_current_room is False
+    assert decision.reset_dispatch_retry_count is False
+    assert decision.event_reasons == (
+        "active_room_mismatch_waiting_retry_interval:expected_1:observed_7",
+    )
+
+
+def test_reconcile_dock_prep_preserves_retry_history_while_active() -> None:
+    """Test ordinary dock preparation holds without claiming room confirmation."""
+    decision = _decision(
+        vacuum_state="docked",
+        task_status="room_cleaning",
+        is_dock_prep_state=True,
+        seconds_since_last_command=300,
+        dispatch_retry_count=2,
+        dispatch_retry_max=2,
+    )
+
+    assert decision.retry_current_room is False
+    assert decision.mark_out_of_sync_reason is None
+    assert decision.reset_dispatch_retry_count is False
+    assert decision.event_reasons == ()
+
+
+def test_reconcile_post_run_maintenance_holds_without_resuming_or_retrying() -> None:
+    """Test auto-emptying cannot resume, retry, or fail a completed robot run."""
+    decision = _decision(
+        vacuum_state="docked",
+        task_status="room_cleaning",
+        active_room_confirmed_since_dispatch=True,
+        is_post_run_maintenance_state=True,
+        is_dock_prep_paused=True,
+        dock_prep_resume_ready=True,
+        seconds_since_last_command=300,
+        dispatch_retry_count=2,
+        dispatch_retry_max=2,
+    )
+
+    assert decision.complete_current_room is False
+    assert decision.retry_current_room is False
+    assert decision.resume_current_room is False
+    assert decision.mark_out_of_sync_reason is None
+    assert decision.reset_dispatch_retry_count is True
+    assert decision.set_post_run_maintenance_seen is True
+    assert decision.event_reasons == ("post_run_maintenance_waiting",)
+
+
+def test_reconcile_does_not_bind_stale_maintenance_to_unconfirmed_room() -> None:
+    """Test prior-room auto-emptying cannot become sticky for a new queue item."""
+    decision = _decision(
+        vacuum_state="docked",
+        task_status="completed",
+        task_status_cleared_since_dispatch=False,
+        active_room_confirmed_since_dispatch=False,
+        is_post_run_maintenance_state=True,
+        seconds_since_last_command=300,
+        dispatch_retry_count=1,
+        dispatch_retry_max=2,
+    )
+
+    assert decision.complete_current_room is False
+    assert decision.retry_current_room is False
+    assert decision.resume_current_room is False
+    assert decision.mark_out_of_sync_reason is None
+    assert decision.reset_dispatch_retry_count is False
+    assert decision.set_post_run_maintenance_seen is False
+    assert decision.event_reasons == (
+        "task_status_completed_ignored_not_cleared_after_dispatch",
+        "post_run_maintenance_waiting",
+    )
+
+
+def test_reconcile_remembers_post_run_maintenance_until_completion() -> None:
+    """Test a plain docked state after auto-emptying cannot redispatch the room."""
+    decision = _decision(
+        vacuum_state="docked",
+        task_status="room_cleaning",
+        post_run_maintenance_seen=True,
+        seconds_since_last_command=300,
+        dispatch_retry_count=0,
+        dispatch_retry_max=2,
+    )
+
+    assert decision.complete_current_room is False
+    assert decision.retry_current_room is False
+    assert decision.resume_current_room is False
+    assert decision.mark_out_of_sync_reason is None
+    assert decision.reset_dispatch_retry_count is False
+    assert decision.event_reasons == ("post_run_completion_waiting",)
