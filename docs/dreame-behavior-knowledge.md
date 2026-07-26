@@ -63,10 +63,40 @@ examples only.
   `task_status=completed` but ignores it as potentially stale, leaving the standalone queue in
   `running` even though the robot is done.
 - Controller implication: command-smoke runbooks need either an in-run reconcile tick or an explicit
-  safe post-run completion path. A future fallback must still avoid accepting stale
-  `task_status=completed` immediately after dispatch.
+  safe post-run completion path. Automatic reconciliation should react to a task-status state
+  change instead of relying only on its polling interval. It must still avoid accepting stale
+  `task_status=completed` immediately after dispatch and must serialize event and interval passes.
 - Test implication: cover post-run `completed` plus dock/prep state after a successful room run when
-  no earlier reconcile tick set `task_status_cleared_since_dispatch`.
+  no earlier reconcile tick set `task_status_cleared_since_dispatch`. Cover a brief valid completion
+  pulse between interval ticks and simultaneous event/interval reconciliation.
+
+### Transient Runtime Unavailability Is Inconclusive
+
+- Confidence: `Observed`
+- Behavior: a cloud-backed Dreame update can temporarily make the vacuum and companion entities
+  unavailable during an otherwise successful room run.
+- Controller implication: missing, `unknown`, or `unavailable` vacuum state must hold the current
+  queue item without redispatching, consuming retry budget, or marking the queue `out_of_sync`.
+  Once the expected active room is confirmed again, clear retry attempts left by the transient
+  outage. A valid cleared-since-dispatch `task_status=completed` remains authoritative even if the
+  high-level vacuum state is unavailable.
+- Test implication: cover unavailable observations at an exhausted retry count, completion during
+  vacuum unavailability, active-room recovery resetting retries, and wrong-room activity preserving
+  its retry history.
+
+### Auto-Emptying Is Post-Run Maintenance
+
+- Confidence: `Observed`
+- Behavior: after room cleaning, the detailed robot state can report `auto_emptying` while the
+  high-level vacuum is docked and task completion is still settling.
+- Controller implication: treat auto-emptying as post-run maintenance that waits for task lifecycle
+  completion. Do not classify it as resumable dock preparation, retry the room, or send
+  `vacuum.start`, even when stale pause attributes are present. Persist that post-run hold only
+  after the current queue room has been positively confirmed active; auto-emptying left over from a
+  preceding room must not become sticky for the newly dispatched item.
+- Test implication: cover auto-emptying as a separate post-run observation and verify that it cannot
+  produce resume, redispatch, or terminal queue decisions. Also cover completion dispatch while the
+  preceding room still reports auto-emptying.
 
 ### Recoverable Robot Errors
 
@@ -213,6 +243,9 @@ examples only.
 7. New runtime behavior must default to read-only / command-disabled while old and new controllers run in parallel.
 8. Active robot command dispatch must require explicit operator enablement.
 9. Mop remove/install transitions can briefly look like dispatch failure but are normal in-run maintenance.
+10. A polling interval can miss short task-status transitions; completion handling must be event-aware.
+11. Missing cloud-backed robot state is absence of evidence, not evidence that dispatch failed.
+12. Auto-emptying is post-run maintenance and must not enter resumable dock-prep logic.
 
 ## Experiment Protocol
 
@@ -281,6 +314,31 @@ When running a planned manual test, record:
   states before refill recovery is evaluated.
 - Follow-up tests: cover the full signal transition and verify exactly one recovery start intent is
   produced after the tank becomes ready.
+
+### 2026-07-26 - Transient Cloud Outage Around Room Completion
+
+- Confidence: `Observed`
+- Setup: two-room standalone queue with robot commands and automatic reconciliation enabled.
+- Expected: the first successful room completes and the second room dispatches.
+- Observed timeline:
+  - t0: the first room was confirmed active and progressed to completion.
+  - t1: multiple brief cloud update timeouts made the vacuum and companion entities unavailable.
+  - t2: interval reconciliation treated missing state as dispatch failure and consumed the retry
+    budget even though the expected room had been active.
+  - t3: the robot docked and entered auto-emptying; `task_status=completed` was visible for roughly
+    one second between 20-second reconciliation ticks.
+  - t4: the next interval saw a non-completed task value and exhausted retry history, leaving the
+    queue `out_of_sync`; the second room was never dispatched.
+- Outcome: physical cleaning of the first room succeeded, but orchestration failed because transient
+  absence and a missed completion pulse were interpreted as command failure.
+- Controller implication: unavailable observations must hold without retries; confirmed matching
+  activity must reset old retries; auto-emptying must be a non-resumable post-run hold; task
+  completion needs a serialized state-change reconcile path in addition to interval polling.
+  Post-run maintenance memory must be scoped to an actively confirmed current queue item so that
+  lingering maintenance cannot attach to the next room.
+- Follow-up tests: cover outage recovery, a completion pulse between ticks, auto-emptying with stale
+  pause attributes, and simultaneous completion-event/interval reconciliation with exactly one next
+  room dispatch.
 
 ## Open Questions
 
