@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import logging
 
@@ -35,6 +35,8 @@ class RuntimeReconcileApplyOutcome:
 def evaluate_runtime_reconcile(
     hass: HomeAssistant,
     runtime_data: HaDreameRuntimeData,
+    *,
+    task_status_override: str | None = None,
 ) -> tuple[RuntimeReconcileObservation, RuntimeReconcileEvaluation]:
     """Build and evaluate one runtime reconcile observation."""
     observation = build_runtime_reconcile_observation(
@@ -42,6 +44,8 @@ def evaluate_runtime_reconcile(
         vacuum_entity_id=runtime_data.vacuum_entity_id,
         entity_ids=runtime_data.observation_entity_ids,
     )
+    if task_status_override is not None:
+        observation = replace(observation, task_status=task_status_override)
     evaluation = evaluate_runtime_reconcile_observation(
         runtime_data.queue_state,
         runtime_data.run_tracking,
@@ -57,7 +61,27 @@ async def async_evaluate_and_apply_runtime_reconcile(
     runtime_data: HaDreameRuntimeData,
 ) -> RuntimeReconcileApplyOutcome:
     """Evaluate and apply one runtime reconcile pass."""
-    observation, evaluation = evaluate_runtime_reconcile(hass, runtime_data)
+    async with runtime_data.operation_lock:
+        if runtime_data.unload_requested.is_set():
+            raise HomeAssistantError("HA Dreame runtime is unloading")
+        return await async_evaluate_and_apply_runtime_reconcile_under_lock(
+            hass,
+            runtime_data,
+        )
+
+
+async def async_evaluate_and_apply_runtime_reconcile_under_lock(
+    hass: HomeAssistant,
+    runtime_data: HaDreameRuntimeData,
+    *,
+    task_status_override: str | None = None,
+) -> RuntimeReconcileApplyOutcome:
+    """Evaluate and apply while the caller owns the runtime operation lock."""
+    observation, evaluation = evaluate_runtime_reconcile(
+        hass,
+        runtime_data,
+        task_status_override=task_status_override,
+    )
     try:
         result = apply_reconcile_decision(
             runtime_data.queue_state,
@@ -132,7 +156,9 @@ def _should_log_reconcile_outcome(
         or decision.retry_current_room
         or decision.resume_current_room
         or decision.mark_out_of_sync_reason
+        or decision.set_active_room_confirmed_since_dispatch
         or decision.set_task_status_cleared_since_dispatch
+        or decision.set_post_run_maintenance_seen
         or decision.reset_dispatch_retry_count
         or result.command_intent
     )
@@ -151,7 +177,12 @@ def _reconcile_log_action(
         return "retry_dispatch"
     if decision.resume_current_room:
         return "resume_room"
-    if decision.set_task_status_cleared_since_dispatch or decision.reset_dispatch_retry_count:
+    if (
+        decision.set_active_room_confirmed_since_dispatch
+        or decision.set_task_status_cleared_since_dispatch
+        or decision.set_post_run_maintenance_seen
+        or decision.reset_dispatch_retry_count
+    ):
         return "update_tracking"
     return "hold"
 

@@ -13,6 +13,7 @@ from .runtime_reconcile_observation import RuntimeReconcileObservation
 
 ABSENT_STATES = {"", "unknown", "unavailable", "none", "null"}
 DOCK_PREP_STATE_FRAGMENTS = ("wash", "washing", "dry", "drying", "dock_prep")
+POST_RUN_MAINTENANCE_STATE_FRAGMENTS = ("auto_empty",)
 MOP_MAINTENANCE_STATE_FRAGMENTS = (
     "remove_mop",
     "install_mop",
@@ -116,6 +117,10 @@ def build_runtime_reconcile_observation(
         ),
         dock_prep_resume_ready=_is_dock_prep_resume_ready(clean_water_tank_status),
         is_mop_maintenance_state=_is_mop_maintenance_state(task_status, robot_state),
+        is_post_run_maintenance_state=_is_post_run_maintenance_state(
+            robot_state,
+            self_wash_base_status,
+        ),
         is_returning_state=_is_returning_state(vacuum_state, robot_state),
     )
 
@@ -223,6 +228,14 @@ def _is_mop_maintenance_state(task_status: str, robot_state: str) -> bool:
 def _is_dock_prep_state(robot_state: str, self_wash_base_status: str) -> bool:
     combined_state = f"{_normalize_signal(robot_state)} {_normalize_signal(self_wash_base_status)}"
     return any(fragment in combined_state for fragment in DOCK_PREP_STATE_FRAGMENTS)
+
+
+def _is_post_run_maintenance_state(
+    robot_state: str,
+    self_wash_base_status: str,
+) -> bool:
+    combined_state = f"{_normalize_signal(robot_state)} {_normalize_signal(self_wash_base_status)}"
+    return any(fragment in combined_state for fragment in POST_RUN_MAINTENANCE_STATE_FRAGMENTS)
 
 
 def _is_dock_prep_paused(

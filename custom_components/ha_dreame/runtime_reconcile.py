@@ -106,7 +106,9 @@ def _decision_has_runtime_effect(decision: ReconcileDecision) -> bool:
         or decision.retry_current_room
         or decision.resume_current_room
         or decision.mark_out_of_sync_reason is not None
+        or decision.set_active_room_confirmed_since_dispatch
         or decision.set_task_status_cleared_since_dispatch
+        or decision.set_post_run_maintenance_seen
         or decision.reset_dispatch_retry_count
     )
 
@@ -129,8 +131,15 @@ def _apply_tracking_updates(
     decision: ReconcileDecision,
 ) -> QueueRunTracking:
     next_tracking = run_tracking
+    if decision.set_active_room_confirmed_since_dispatch:
+        next_tracking = replace(
+            next_tracking,
+            active_room_confirmed_since_dispatch=True,
+        )
     if decision.set_task_status_cleared_since_dispatch:
         next_tracking = replace(next_tracking, task_status_cleared_since_dispatch=True)
+    if decision.set_post_run_maintenance_seen:
+        next_tracking = replace(next_tracking, post_run_maintenance_seen=True)
     if decision.reset_dispatch_retry_count:
         next_tracking = replace(next_tracking, dispatch_retry_count=0)
     return next_tracking

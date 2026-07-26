@@ -49,7 +49,9 @@ class ReconcileDecision:
     retry_current_room: bool = False
     resume_current_room: bool = False
     mark_out_of_sync_reason: str | None = None
+    set_active_room_confirmed_since_dispatch: bool = False
     set_task_status_cleared_since_dispatch: bool = False
+    set_post_run_maintenance_seen: bool = False
     reset_dispatch_retry_count: bool = False
     event_reasons: tuple[str, ...] = ()
 
@@ -259,6 +261,9 @@ def evaluate_reconcile_tick(
     active_room_mismatch_max_progress: int | None = None,
     dock_prep_resume_ready: bool = False,
     is_mop_maintenance_state: bool = False,
+    is_post_run_maintenance_state: bool = False,
+    post_run_maintenance_seen: bool = False,
+    active_room_confirmed_since_dispatch: bool = False,
 ) -> ReconcileDecision:
     """Evaluate one robot/queue reconciliation tick."""
     if not awaiting_completion_event:
@@ -328,6 +333,30 @@ def evaluate_reconcile_tick(
                 set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
                 event_reasons=tuple(event_reasons + ["task_status_completed"]),
             )
+
+    if is_post_run_maintenance_state:
+        return ReconcileDecision(
+            set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+            set_post_run_maintenance_seen=(
+                active_room_confirmed_since_dispatch and not post_run_maintenance_seen
+            ),
+            reset_dispatch_retry_count=(
+                active_room_confirmed_since_dispatch and dispatch_retry_count > 0
+            ),
+            event_reasons=tuple(event_reasons + ["post_run_maintenance_waiting"]),
+        )
+
+    if normalized_vacuum in {"", "unknown", "unavailable"}:
+        return ReconcileDecision(
+            set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+            event_reasons=tuple(event_reasons + ["vacuum_unavailable_waiting"]),
+        )
+
+    if post_run_maintenance_seen:
+        return ReconcileDecision(
+            set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+            event_reasons=tuple(event_reasons + ["post_run_completion_waiting"]),
+        )
 
     if normalized_task in MOP_MAINTENANCE_TASK_STATUSES or is_mop_maintenance_state:
         if normalized_error not in {"", "unknown", "unavailable", "no_error"}:
@@ -410,6 +439,7 @@ def evaluate_reconcile_tick(
             seconds_since_last_command=seconds_since_last_command,
             dispatch_retry_interval_sec=dispatch_retry_interval_sec,
             dispatch_retry_count=dispatch_retry_count,
+            active_room_confirmed_since_dispatch=(active_room_confirmed_since_dispatch),
         )
 
     if force_retry_after_recovery:
@@ -471,21 +501,28 @@ def _evaluate_active_reconcile(
     seconds_since_last_command: float | None,
     dispatch_retry_interval_sec: int,
     dispatch_retry_count: int,
+    active_room_confirmed_since_dispatch: bool,
 ) -> ReconcileDecision:
     room_mismatch = False
+    room_match = False
     if normalized_vacuum == "cleaning" and not is_dock_prep_state:
         if normalized_expected_room_name and normalized_observed_room_name:
-            room_mismatch = normalized_expected_room_name != normalized_observed_room_name
-        else:
-            room_mismatch = (
-                expected_room_id is not None
-                and observed_room_id is not None
-                and expected_room_id != observed_room_id
-            )
+            room_match = normalized_expected_room_name == normalized_observed_room_name
+            room_mismatch = not room_match
+        elif expected_room_id is not None and observed_room_id is not None:
+            room_match = expected_room_id == observed_room_id
+            room_mismatch = not room_match
 
     if not room_mismatch:
+        reset_dispatch_retry_count = room_match and dispatch_retry_count > 0
+        if reset_dispatch_retry_count:
+            event_reasons.append("dispatch_retry_reset_after_active_confirmation")
         return ReconcileDecision(
+            set_active_room_confirmed_since_dispatch=(
+                room_match and not active_room_confirmed_since_dispatch
+            ),
             set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+            reset_dispatch_retry_count=reset_dispatch_retry_count,
             event_reasons=tuple(event_reasons),
         )
 
