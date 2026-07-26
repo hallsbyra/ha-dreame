@@ -10,6 +10,7 @@ from homeassistant.exceptions import HomeAssistantError
 from _pytest.logging import LogCaptureFixture
 
 from custom_components.ha_dreame.const import (
+    ATTR_ACTIVE_ROOM_CONFIRMED_SINCE_DISPATCH,
     ATTR_ACTIVE_ROOM_MISMATCH_STREAK,
     ATTR_COMPLETED_ITEMS,
     ATTR_CURRENT_ITEM_ID,
@@ -18,6 +19,7 @@ from custom_components.ha_dreame.const import (
     ATTR_LAST_COMMAND_AT,
     ATTR_OVERRIDES,
     ATTR_PENDING_ITEMS,
+    ATTR_POST_RUN_MAINTENANCE_SEEN,
     ATTR_QUEUE_ITEMS,
     ATTR_RESULT,
     ATTR_RUN_ID,
@@ -924,10 +926,12 @@ async def test_start_queue_service_dispatches_first_room_and_updates_runtime_sta
 
     runtime_status = await _call_runtime_status_service(hass, entry.entry_id)
     assert runtime_status[ATTR_RUN_TRACKING] == {
+        ATTR_ACTIVE_ROOM_CONFIRMED_SINCE_DISPATCH: False,
         ATTR_ACTIVE_ROOM_MISMATCH_STREAK: 0,
         ATTR_CURRENT_ITEM_ID: running_item.item_id,
         ATTR_DISPATCH_RETRY_COUNT: 0,
         ATTR_LAST_COMMAND_AT: run_tracking.last_command_at,
+        ATTR_POST_RUN_MAINTENANCE_SEEN: False,
         ATTR_RUN_ID: queue_state.run_id,
         ATTR_TASK_STATUS_CLEARED_SINCE_DISPATCH: False,
     }

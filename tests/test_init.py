@@ -3,15 +3,21 @@
 import pytest
 
 from homeassistant.core import HomeAssistant
+from _pytest.monkeypatch import MonkeyPatch
 
+from custom_components.ha_dreame import async_unload_entry
 from custom_components.ha_dreame.const import (
     CONF_ALLOW_ROBOT_COMMANDS,
     CONF_AUTO_RECONCILE_ENABLED,
+    CONF_CONFIG_ENTRY_ID,
     CONF_CURRENT_ROOM_ENTITY_ID,
+    CONF_ROOM_ID,
+    CONF_ROOM_NAME,
     CONF_TASK_STATUS_ENTITY_ID,
     CONF_VACUUM_ENTITY_ID,
     DOMAIN,
     DREAME_VACUUM_DOMAIN,
+    SERVICE_ADD_QUEUE_ROOM,
 )
 from custom_components.ha_dreame.queue_core import QueueState, add_room
 from custom_components.ha_dreame.runtime import HaDreameRuntimeData
@@ -218,6 +224,49 @@ async def test_unload_entry_clears_runtime_data(hass: HomeAssistant) -> None:
 
     assert not hasattr(entry, "runtime_data")
     assert entry.entry_id not in hass.data[DOMAIN]
+
+
+async def test_failed_unload_restores_runtime_operations(
+    hass: HomeAssistant,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Test a rejected platform unload leaves the loaded runtime usable."""
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    runtime_data = entry.runtime_data
+
+    async def _reject_platform_unload(*_args: object) -> bool:
+        return False
+
+    monkeypatch.setattr(
+        hass.config_entries,
+        "async_unload_platforms",
+        _reject_platform_unload,
+    )
+
+    assert await async_unload_entry(hass, entry) is False
+    assert runtime_data.unload_requested.is_set() is False
+    assert entry.runtime_data is runtime_data
+    assert hass.data[DOMAIN][entry.entry_id] is entry
+
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_ADD_QUEUE_ROOM,
+        {
+            CONF_CONFIG_ENTRY_ID: entry.entry_id,
+            CONF_ROOM_ID: 1,
+            CONF_ROOM_NAME: "Kitchen",
+        },
+        blocking=True,
+        return_response=True,
+    )
+
+    assert len(runtime_data.queue_state.items) == 1
 
 
 @pytest.mark.parametrize(

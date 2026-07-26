@@ -134,6 +134,8 @@ async def test_evaluate_reconcile_returns_noop_for_idle_queue(
         "retry_current_room": False,
         "resume_current_room": False,
         "mark_out_of_sync_reason": None,
+        "set_active_room_confirmed_since_dispatch": False,
+        "set_post_run_maintenance_seen": False,
         "set_task_status_cleared_since_dispatch": False,
         "reset_dispatch_retry_count": False,
         "event_reasons": [],
