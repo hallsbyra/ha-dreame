@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
 import logging
@@ -15,12 +17,14 @@ from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, Supp
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
+    ATTR_ACTIVE_ROOM_CONFIRMED_SINCE_DISPATCH,
     ATTR_ACTIVE_ROOM_MISMATCH_STREAK,
     ATTR_COMPLETED_ITEMS,
     ATTR_CURRENT_ITEM_ID,
     ATTR_DISPATCH_RETRY_COUNT,
     ATTR_LAST_COMMAND_AT,
     ATTR_PENDING_ITEMS,
+    ATTR_POST_RUN_MAINTENANCE_SEEN,
     ATTR_QUEUE_ITEMS,
     ATTR_RUN_ID,
     ATTR_RUN_TRACKING,
@@ -148,12 +152,14 @@ def async_register_services(hass: HomeAssistant) -> None:
     if not hass.services.has_service(DOMAIN, SERVICE_ADD_QUEUE_ROOM):
 
         async def _async_add_queue_room(call: ServiceCall) -> ServiceResponse:
-            return _add_queue_room_response(
-                hass,
-                call.data[CONF_CONFIG_ENTRY_ID],
-                room_id=call.data[CONF_ROOM_ID],
-                room_name=call.data[CONF_ROOM_NAME],
-            )
+            config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
+            async with _async_runtime_operation(hass, config_entry_id):
+                return _add_queue_room_response(
+                    hass,
+                    config_entry_id,
+                    room_id=call.data[CONF_ROOM_ID],
+                    room_name=call.data[CONF_ROOM_NAME],
+                )
 
         hass.services.async_register(
             DOMAIN,
@@ -182,10 +188,9 @@ def async_register_services(hass: HomeAssistant) -> None:
     if not hass.services.has_service(DOMAIN, SERVICE_CANCEL_QUEUE):
 
         async def _async_cancel_queue(call: ServiceCall) -> ServiceResponse:
-            return await _async_cancel_queue_response(
-                hass,
-                call.data[CONF_CONFIG_ENTRY_ID],
-            )
+            config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
+            async with _async_runtime_operation(hass, config_entry_id):
+                return await _async_cancel_queue_response(hass, config_entry_id)
 
         hass.services.async_register(
             DOMAIN,
@@ -198,10 +203,9 @@ def async_register_services(hass: HomeAssistant) -> None:
     if not hass.services.has_service(DOMAIN, SERVICE_CLEAR_PENDING_QUEUE):
 
         async def _async_clear_pending_queue(call: ServiceCall) -> ServiceResponse:
-            return _clear_pending_queue_response(
-                hass,
-                call.data[CONF_CONFIG_ENTRY_ID],
-            )
+            config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
+            async with _async_runtime_operation(hass, config_entry_id):
+                return _clear_pending_queue_response(hass, config_entry_id)
 
         hass.services.async_register(
             DOMAIN,
@@ -256,11 +260,13 @@ def async_register_services(hass: HomeAssistant) -> None:
     if not hass.services.has_service(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM):
 
         async def _async_remove_queue_item(call: ServiceCall) -> ServiceResponse:
-            return _remove_queue_item_response(
-                hass,
-                call.data[CONF_CONFIG_ENTRY_ID],
-                item_id=call.data[CONF_ITEM_ID],
-            )
+            config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
+            async with _async_runtime_operation(hass, config_entry_id):
+                return _remove_queue_item_response(
+                    hass,
+                    config_entry_id,
+                    item_id=call.data[CONF_ITEM_ID],
+                )
 
         hass.services.async_register(
             DOMAIN,
@@ -273,12 +279,14 @@ def async_register_services(hass: HomeAssistant) -> None:
     if not hass.services.has_service(DOMAIN, SERVICE_MOVE_QUEUE_ITEM):
 
         async def _async_move_queue_item(call: ServiceCall) -> ServiceResponse:
-            return _move_queue_item_response(
-                hass,
-                call.data[CONF_CONFIG_ENTRY_ID],
-                item_id=call.data[CONF_ITEM_ID],
-                new_position=call.data[CONF_NEW_POSITION],
-            )
+            config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
+            async with _async_runtime_operation(hass, config_entry_id):
+                return _move_queue_item_response(
+                    hass,
+                    config_entry_id,
+                    item_id=call.data[CONF_ITEM_ID],
+                    new_position=call.data[CONF_NEW_POSITION],
+                )
 
         hass.services.async_register(
             DOMAIN,
@@ -291,10 +299,9 @@ def async_register_services(hass: HomeAssistant) -> None:
     if not hass.services.has_service(DOMAIN, SERVICE_SKIP_CURRENT_ROOM):
 
         async def _async_skip_current_room(call: ServiceCall) -> ServiceResponse:
-            return await _async_skip_current_room_response(
-                hass,
-                call.data[CONF_CONFIG_ENTRY_ID],
-            )
+            config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
+            async with _async_runtime_operation(hass, config_entry_id):
+                return await _async_skip_current_room_response(hass, config_entry_id)
 
         hass.services.async_register(
             DOMAIN,
@@ -307,10 +314,9 @@ def async_register_services(hass: HomeAssistant) -> None:
     if not hass.services.has_service(DOMAIN, SERVICE_RESUME_QUEUE):
 
         async def _async_resume_queue(call: ServiceCall) -> ServiceResponse:
-            return await _async_resume_queue_response(
-                hass,
-                call.data[CONF_CONFIG_ENTRY_ID],
-            )
+            config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
+            async with _async_runtime_operation(hass, config_entry_id):
+                return await _async_resume_queue_response(hass, config_entry_id)
 
         hass.services.async_register(
             DOMAIN,
@@ -323,10 +329,9 @@ def async_register_services(hass: HomeAssistant) -> None:
     if not hass.services.has_service(DOMAIN, SERVICE_START_QUEUE):
 
         async def _async_start_queue(call: ServiceCall) -> ServiceResponse:
-            return await _async_start_queue_response(
-                hass,
-                call.data[CONF_CONFIG_ENTRY_ID],
-            )
+            config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
+            async with _async_runtime_operation(hass, config_entry_id):
+                return await _async_start_queue_response(hass, config_entry_id)
 
         hass.services.async_register(
             DOMAIN,
@@ -341,12 +346,14 @@ def async_register_services(hass: HomeAssistant) -> None:
         async def _async_update_queue_item_overrides(
             call: ServiceCall,
         ) -> ServiceResponse:
-            return _update_queue_item_overrides_response(
-                hass,
-                call.data[CONF_CONFIG_ENTRY_ID],
-                item_id=call.data[CONF_ITEM_ID],
-                overrides=call.data[CONF_OVERRIDES],
-            )
+            config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
+            async with _async_runtime_operation(hass, config_entry_id):
+                return _update_queue_item_overrides_response(
+                    hass,
+                    config_entry_id,
+                    item_id=call.data[CONF_ITEM_ID],
+                    overrides=call.data[CONF_OVERRIDES],
+                )
 
         hass.services.async_register(
             DOMAIN,
@@ -361,12 +368,14 @@ def async_register_services(hass: HomeAssistant) -> None:
         async def _async_update_running_override(
             call: ServiceCall,
         ) -> ServiceResponse:
-            return await _async_update_running_override_response(
-                hass,
-                call.data[CONF_CONFIG_ENTRY_ID],
-                field=call.data[CONF_FIELD],
-                value=call.data[CONF_VALUE],
-            )
+            config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
+            async with _async_runtime_operation(hass, config_entry_id):
+                return await _async_update_running_override_response(
+                    hass,
+                    config_entry_id,
+                    field=call.data[CONF_FIELD],
+                    value=call.data[CONF_VALUE],
+                )
 
         hass.services.async_register(
             DOMAIN,
@@ -401,6 +410,24 @@ def _runtime_entry(hass: HomeAssistant, config_entry_id: str) -> ConfigEntry:
     if entry is None or not hasattr(entry, "runtime_data"):
         raise HomeAssistantError(f"HA Dreame entry is not loaded: {config_entry_id}")
     return entry
+
+
+@asynccontextmanager
+async def _async_runtime_operation(
+    hass: HomeAssistant,
+    config_entry_id: str,
+) -> AsyncIterator[None]:
+    """Serialize one queue mutation or robot command for a loaded entry."""
+    entry = _runtime_entry(hass, config_entry_id)
+    runtime_data = entry.runtime_data
+    async with runtime_data.operation_lock:
+        if (
+            hass.data.get(DOMAIN, {}).get(config_entry_id) is not entry
+            or getattr(entry, "runtime_data", None) is not runtime_data
+            or runtime_data.unload_requested.is_set()
+        ):
+            raise HomeAssistantError(f"HA Dreame entry is not loaded: {config_entry_id}")
+        yield
 
 
 def _add_queue_room_response(
@@ -588,6 +615,7 @@ async def _async_resume_queue_response(
             active_room_mismatch_streak=0,
             dispatch_retry_count=0,
             last_command_at=datetime.now(UTC).isoformat(),
+            post_run_maintenance_seen=False,
         )
     )
     return {
@@ -975,6 +1003,7 @@ def _reconcile_observation_response(
         "is_dock_prep_paused": observation.is_dock_prep_paused,
         "is_dock_prep_state": observation.is_dock_prep_state,
         "is_mop_maintenance_state": observation.is_mop_maintenance_state,
+        "is_post_run_maintenance_state": observation.is_post_run_maintenance_state,
         "is_returning_state": observation.is_returning_state,
         "observed_room_id": observation.observed_room_id,
         "observed_room_name": observation.observed_room_name,
@@ -1011,6 +1040,10 @@ def _reconcile_decision_response(
         "reset_dispatch_retry_count": decision.reset_dispatch_retry_count,
         "resume_current_room": decision.resume_current_room,
         "retry_current_room": decision.retry_current_room,
+        "set_active_room_confirmed_since_dispatch": (
+            decision.set_active_room_confirmed_since_dispatch
+        ),
+        "set_post_run_maintenance_seen": decision.set_post_run_maintenance_seen,
         "set_task_status_cleared_since_dispatch": decision.set_task_status_cleared_since_dispatch,
     }
 
@@ -1056,10 +1089,14 @@ def _run_tracking_response(run_tracking: QueueRunTracking | None) -> dict[str, A
         return None
 
     return {
+        ATTR_ACTIVE_ROOM_CONFIRMED_SINCE_DISPATCH: (
+            run_tracking.active_room_confirmed_since_dispatch
+        ),
         ATTR_ACTIVE_ROOM_MISMATCH_STREAK: run_tracking.active_room_mismatch_streak,
         ATTR_CURRENT_ITEM_ID: run_tracking.current_item_id,
         ATTR_DISPATCH_RETRY_COUNT: run_tracking.dispatch_retry_count,
         ATTR_LAST_COMMAND_AT: run_tracking.last_command_at,
+        ATTR_POST_RUN_MAINTENANCE_SEEN: run_tracking.post_run_maintenance_seen,
         ATTR_RUN_ID: run_tracking.run_id,
         ATTR_TASK_STATUS_CLEARED_SINCE_DISPATCH: (run_tracking.task_status_cleared_since_dispatch),
     }

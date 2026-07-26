@@ -29,6 +29,7 @@ class RuntimeReconcileObservation:
     is_dock_prep_paused: bool = False
     dock_prep_resume_ready: bool = False
     is_mop_maintenance_state: bool = False
+    is_post_run_maintenance_state: bool = False
     pause_waiting_seen: bool = False
     is_returning_state: bool = False
     force_retry_after_recovery: bool = False
@@ -128,6 +129,17 @@ def evaluate_runtime_reconcile_observation(
         active_room_mismatch_max_progress=settings.active_room_mismatch_max_progress,
         dock_prep_resume_ready=observation.dock_prep_resume_ready,
         is_mop_maintenance_state=observation.is_mop_maintenance_state,
+        is_post_run_maintenance_state=observation.is_post_run_maintenance_state,
+        post_run_maintenance_seen=(
+            run_tracking.post_run_maintenance_seen
+            if awaiting_completion_event and run_tracking is not None
+            else False
+        ),
+        active_room_confirmed_since_dispatch=(
+            run_tracking.active_room_confirmed_since_dispatch
+            if awaiting_completion_event and run_tracking is not None
+            else False
+        ),
     )
 
     return RuntimeReconcileEvaluation(

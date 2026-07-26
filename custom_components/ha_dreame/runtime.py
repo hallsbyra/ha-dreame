@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -18,8 +19,10 @@ class HaDreameRuntimeData:
     auto_reconcile_enabled: bool
     commands_enabled: bool
     observation_entity_ids: RuntimeObservationEntityIds
+    operation_lock: asyncio.Lock
     queue_coordinator: DataUpdateCoordinator[QueueState]
     run_tracking_coordinator: DataUpdateCoordinator[QueueRunTracking | None]
+    unload_requested: asyncio.Event
     vacuum_entity_id: str
 
     @property
