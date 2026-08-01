@@ -509,6 +509,12 @@ async def _async_cancel_queue_response(
 
     await hass.services.async_call(
         VACUUM_DOMAIN,
+        "stop",
+        {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
+        blocking=True,
+    )
+    await hass.services.async_call(
+        VACUUM_DOMAIN,
         "return_to_base",
         {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
         blocking=True,
@@ -736,6 +742,14 @@ async def _async_start_queue_response(
 
     if not runtime_data.commands_enabled:
         raise HomeAssistantError("HA Dreame robot commands are disabled")
+
+    observation = build_runtime_reconcile_observation(
+        hass,
+        vacuum_entity_id=runtime_data.vacuum_entity_id,
+        entity_ids=runtime_data.observation_entity_ids,
+    )
+    if observation.task_status and observation.task_status.lower() != "completed":
+        raise HomeAssistantError("Cannot start queue while a previous robot task is still active")
 
     try:
         queue_state = start_run(runtime_data.queue_state)

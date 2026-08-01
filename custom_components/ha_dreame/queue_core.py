@@ -328,6 +328,21 @@ def evaluate_reconcile_tick(
                         event_reasons + ["task_status_completed_after_manual_pause_returning"]
                     ),
                 )
+            _, completed_room_mismatch = _room_match_state(
+                expected_room_id=expected_room_id,
+                observed_room_id=observed_room_id,
+                normalized_expected_room_name=normalized_expected_room_name,
+                normalized_observed_room_name=normalized_observed_room_name,
+            )
+            if completed_room_mismatch and not active_room_confirmed_since_dispatch:
+                return ReconcileDecision(
+                    mark_out_of_sync_reason=(
+                        "task_completed_unconfirmed_room:"
+                        f"expected_{expected_room_id}:observed_{observed_room_id}"
+                    ),
+                    set_task_status_cleared_since_dispatch=(set_task_status_cleared_since_dispatch),
+                    event_reasons=tuple(event_reasons + ["task_status_completed_unconfirmed_room"]),
+                )
             return ReconcileDecision(
                 complete_current_room=True,
                 set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
@@ -439,6 +454,7 @@ def evaluate_reconcile_tick(
             seconds_since_last_command=seconds_since_last_command,
             dispatch_retry_interval_sec=dispatch_retry_interval_sec,
             dispatch_retry_count=dispatch_retry_count,
+            dispatch_retry_max=dispatch_retry_max,
             active_room_confirmed_since_dispatch=(active_room_confirmed_since_dispatch),
         )
 
@@ -501,17 +517,18 @@ def _evaluate_active_reconcile(
     seconds_since_last_command: float | None,
     dispatch_retry_interval_sec: int,
     dispatch_retry_count: int,
+    dispatch_retry_max: int,
     active_room_confirmed_since_dispatch: bool,
 ) -> ReconcileDecision:
-    room_mismatch = False
-    room_match = False
-    if normalized_vacuum == "cleaning" and not is_dock_prep_state:
-        if normalized_expected_room_name and normalized_observed_room_name:
-            room_match = normalized_expected_room_name == normalized_observed_room_name
-            room_mismatch = not room_match
-        elif expected_room_id is not None and observed_room_id is not None:
-            room_match = expected_room_id == observed_room_id
-            room_mismatch = not room_match
+    room_match, room_mismatch = _room_match_state(
+        expected_room_id=expected_room_id,
+        observed_room_id=observed_room_id,
+        normalized_expected_room_name=normalized_expected_room_name,
+        normalized_observed_room_name=normalized_observed_room_name,
+    )
+    if normalized_vacuum != "cleaning" or is_dock_prep_state:
+        room_match = False
+        room_mismatch = False
 
     if not room_mismatch:
         reset_dispatch_retry_count = room_match and dispatch_retry_count > 0
@@ -544,6 +561,22 @@ def _evaluate_active_reconcile(
         and active_room_mismatch_max_progress is not None
         and cleaning_progress >= active_room_mismatch_max_progress
     ):
+        if not active_room_confirmed_since_dispatch:
+            reason = (
+                "active_room_mismatch_unconfirmed_near_completion:"
+                f"expected_{expected_room_id}:observed_{observed_room_id}"
+            )
+            return ReconcileDecision(
+                mark_out_of_sync_reason=reason,
+                set_task_status_cleared_since_dispatch=(set_task_status_cleared_since_dispatch),
+                event_reasons=tuple(
+                    event_reasons
+                    + [
+                        f"{reason}:progress_{cleaning_progress}:"
+                        f"max_{active_room_mismatch_max_progress}"
+                    ]
+                ),
+            )
         event_reasons.append(
             (
                 "active_room_mismatch_waiting_near_completion:"
@@ -568,6 +601,16 @@ def _evaluate_active_reconcile(
         return ReconcileDecision(
             set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
             event_reasons=tuple(event_reasons),
+        )
+
+    if dispatch_retry_count >= dispatch_retry_max:
+        return ReconcileDecision(
+            mark_out_of_sync_reason=(
+                "active_room_mismatch_retry_exhausted:"
+                f"expected_{expected_room_id}:observed_{observed_room_id}"
+            ),
+            set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+            event_reasons=tuple(event_reasons + ["active_room_mismatch_retry_exhausted"]),
         )
 
     if (
@@ -598,6 +641,23 @@ def _evaluate_active_reconcile(
         set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
         event_reasons=tuple(event_reasons),
     )
+
+
+def _room_match_state(
+    *,
+    expected_room_id: int | None,
+    observed_room_id: int | None,
+    normalized_expected_room_name: str,
+    normalized_observed_room_name: str,
+) -> tuple[bool, bool]:
+    """Return explicit room match and mismatch observations."""
+    if normalized_expected_room_name and normalized_observed_room_name:
+        room_match = normalized_expected_room_name == normalized_observed_room_name
+        return room_match, not room_match
+    if expected_room_id is not None and observed_room_id is not None:
+        room_match = expected_room_id == observed_room_id
+        return room_match, not room_match
+    return False, False
 
 
 def _finish_current_room(
