@@ -160,9 +160,24 @@ examples only.
 - Confidence: `Observed`
 - Behavior: `current_room` can flip near completion even while the robot is finishing the intended
   work.
-- Controller implication: suppress room-mismatch redispatch near completion to avoid restarting an
-  almost finished room.
-- Test implication: cover high-progress mismatch as non-redispatch behavior.
+- Controller implication: suppress room-mismatch redispatch near completion only after the queued
+  room was confirmed active. If the queued room was never confirmed, high progress in another room
+  is takeover evidence and the queue must become `out_of_sync` rather than claim completion.
+- Test implication: cover confirmed late flips as non-redispatch behavior and unconfirmed
+  high-progress mismatches as `out_of_sync`.
+
+### Cancel During Dock Preparation May Not Stop The Pending Task
+
+- Confidence: `Observed`
+- Behavior: `vacuum.return_to_base` can report success while the robot is already docked preparing a
+  room task, yet that canceled task can leave the dock and continue seconds later.
+- Controller implication: cancellation must explicitly stop the active/pending task before sending
+  the robot to base. A new queue must not dispatch while the previous task status remains active.
+- Controller implication: active wrong-room redispatch must respect the normal retry budget, and a
+  completed task may complete a queued room only when the observed room matches or the queued room
+  was confirmed active earlier in the run.
+- Test implication: cover stop-before-return cancellation, active-task start rejection, bounded
+  wrong-room retries, and unconfirmed wrong-room completion.
 
 ### Progress Is Job-Level And Secondary
 
@@ -339,6 +354,30 @@ When running a planned manual test, record:
 - Follow-up tests: cover outage recovery, a completion pulse between ticks, auto-emptying with stale
   pause attributes, and simultaneous completion-event/interval reconciliation with exactly one next
   room dispatch.
+
+### 2026-08-01 - Canceled Dock-Prep Task Continued Into The Next Queue
+
+- Confidence: `Observed`
+- Setup: one room task was canceled during dock preparation; a different room was queued shortly
+  afterward with robot commands and automatic reconciliation enabled.
+- Expected: the canceled task stops, then the new room is dispatched and confirmed active.
+- Observed timeline:
+  - t0: the first queue became `canceled` while the robot briefly reported docked.
+  - t1: roughly two seconds later, before the second room was queued, the robot resumed the first
+    room task.
+  - t2: the second queue dispatched while the previous task still reported room cleaning. Its target
+    segment changed to the second room, but physical position and cleaning remained in the first.
+  - t3: automatic reconciliation redispatched the second room every retry interval; progress reset
+    repeatedly and the retry count exceeded the configured maximum.
+  - t4: at high progress, the late-flip guard held the mismatch. Completion then falsely completed
+    the second queue even though its room had never been confirmed active.
+- Outcome: the map simultaneously showed the requested second room highlighted and the robot path
+  in the first room; the queue credited the wrong room.
+- Controller implication: stop before return-to-base on cancel, reject a new start until the prior
+  task settles, cap active mismatch retries, distinguish confirmed late flips from unconfirmed
+  wrong-room runs, and reject unconfirmed mismatched completion.
+- Follow-up tests: retain end-to-end coverage for the cancel/start race and each independent safety
+  gate so later reconciliation tuning cannot reintroduce false room completion.
 
 ## Open Questions
 
