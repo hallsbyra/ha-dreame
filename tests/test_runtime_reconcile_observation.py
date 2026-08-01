@@ -190,6 +190,7 @@ def test_evaluate_observation_late_room_mismatch_uses_default_completion_guard()
         state,
         _tracking(
             state,
+            active_room_confirmed_since_dispatch=True,
             active_room_mismatch_streak=1,
             last_command_at=(NOW - timedelta(seconds=30)).isoformat(),
         ),

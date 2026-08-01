@@ -234,6 +234,7 @@ async def test_auto_reconcile_logs_late_room_mismatch_as_debug_hold(
     queue_state = _running_state()
     run_tracking = _tracking(
         queue_state,
+        active_room_confirmed_since_dispatch=True,
         task_status_cleared_since_dispatch=True,
     )
     entry.runtime_data.set_queue_state(queue_state)
@@ -828,12 +829,16 @@ async def test_cancel_waits_for_inflight_reconcile_and_cannot_be_overwritten(
     async def _record_return_to_base(call: ServiceCall) -> None:
         return_calls.append(dict(call.data))
 
+    async def _record_stop(call: ServiceCall) -> None:
+        return None
+
     hass.services.async_register(
         DREAME_VACUUM_DOMAIN,
         "vacuum_clean_segment",
         _record_clean_segment,
     )
     hass.services.async_register("vacuum", "return_to_base", _record_return_to_base)
+    hass.services.async_register("vacuum", "stop", _record_stop)
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=True,
@@ -890,12 +895,16 @@ async def test_completion_waiting_behind_cancel_cannot_resurrect_queue(
         cancel_started.set()
         await release_cancel.wait()
 
+    async def _record_stop(call: ServiceCall) -> None:
+        return None
+
     hass.services.async_register(
         DREAME_VACUUM_DOMAIN,
         "vacuum_clean_segment",
         _record_clean_segment,
     )
     hass.services.async_register("vacuum", "return_to_base", _hold_return_to_base)
+    hass.services.async_register("vacuum", "stop", _record_stop)
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=True,

@@ -475,12 +475,16 @@ async def test_queue_status_sensor_updates_when_cancel_queue_service_runs(
     async def _return_to_base(call: ServiceCall) -> None:
         return None
 
+    async def _stop(call: ServiceCall) -> None:
+        return None
+
     hass.services.async_register(
         DREAME_VACUUM_DOMAIN,
         "vacuum_clean_segment",
         _clean_segment,
     )
     hass.services.async_register("vacuum", "return_to_base", _return_to_base)
+    hass.services.async_register("vacuum", "stop", _stop)
     entry = MockConfigEntry(
         domain=DOMAIN,
         title=TITLE,

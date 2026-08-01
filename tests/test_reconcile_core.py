@@ -551,8 +551,7 @@ def test_reconcile_unconfirmed_late_room_mismatch_marks_out_of_sync() -> None:
         "active_room_mismatch_unconfirmed_near_completion:expected_1:observed_7"
     )
     assert decision.event_reasons == (
-        "active_room_mismatch_unconfirmed_near_completion:"
-        "expected_1:observed_7:progress_95:max_90",
+        "active_room_mismatch_unconfirmed_near_completion:expected_1:observed_7:progress_95:max_90",
     )
 
 
