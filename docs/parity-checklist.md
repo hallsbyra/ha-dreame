@@ -58,7 +58,8 @@ target is now the standalone HACS integration.
 | Recoverable robot errors | `Ported` | behavior knowledge and reconciliation tests treat recovery as hold state | Runtime observation during refill/tank cases |
 | Dock wash pause recovery | `Ported` | companion states plus durable vacuum pause attributes cover transient low-water pause signals | Validate the fixed refill sequence after installing alpha.6 |
 | Current-room transition noise | `Ported` | early mismatch and low-progress mismatch tests avoid false redispatch | Runtime observation |
-| Late room flips near completion | `Ported` | high-progress mismatch tests suppress redispatch near completion | Runtime observation |
+| Late room flips near completion | `Runtime validated` | confirmed high-progress flips remain holds; unconfirmed wrong-room runs become out of sync | Continue runtime observation |
+| Cancel/start task isolation | `Ported` | stop-before-return, active-task start gate, bounded mismatch retries, and unconfirmed completion tests | Validate after installing the next alpha |
 | Mop remove/install maintenance | `Ported` | regression coverage from observed legacy failure treats these states as wait states | Runtime observation when maintenance transition occurs |
 | Manual app takeover | `Deferred` | pure reconciliation can surface out-of-sync drift, but full operator workflow needs runtime proof | Include in beta parity runbook |
 | Restart/reload during active run | `Deferred` | runtime data/unload tests exist, but active-run resume after HA restart needs a deliberate scenario | Decide before RC |
