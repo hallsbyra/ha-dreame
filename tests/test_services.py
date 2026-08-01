@@ -943,6 +943,51 @@ async def test_start_queue_service_dispatches_first_room_and_updates_runtime_sta
     )
 
 
+async def test_start_queue_service_rejects_previous_active_room_task(
+    hass: HomeAssistant,
+) -> None:
+    """Test a stale robot task must settle before a new queue can start."""
+    calls: list[dict[str, object]] = []
+
+    async def _record_clean_segment(call: ServiceCall) -> None:
+        calls.append(dict(call.data))
+
+    hass.services.async_register(
+        DREAME_VACUUM_DOMAIN,
+        "vacuum_clean_segment",
+        _record_clean_segment,
+    )
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    await _call_add_queue_room_service(
+        hass,
+        entry.entry_id,
+        room_id=3,
+        room_name="Room 3",
+    )
+    hass.states.async_set(vacuum_entity_id, "cleaning", {"running": True})
+    hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning")
+
+    with pytest.raises(
+        HomeAssistantError,
+        match="previous robot task is still active",
+    ):
+        await _call_start_queue_service(hass, entry.entry_id)
+
+    assert calls == []
+    assert entry.runtime_data.queue_state.run_state == "idle"
+    assert entry.runtime_data.queue_state.items[0].status == "pending"
+    assert entry.runtime_data.run_tracking is None
+
+
 async def test_start_queue_service_leaves_queue_idle_when_dispatch_fails(
     hass: HomeAssistant,
 ) -> None:
@@ -1220,13 +1265,16 @@ async def test_cancel_queue_service_returns_vacuum_to_base_and_cancels_run(
 ) -> None:
     """Test cancel queue sends the robot home and clears active runtime state."""
     clean_calls: list[dict[str, object]] = []
-    dock_calls: list[dict[str, object]] = []
+    robot_calls: list[tuple[str, dict[str, object]]] = []
 
     async def _record_clean_segment(call: ServiceCall) -> None:
         clean_calls.append(dict(call.data))
 
     async def _record_return_to_base(call: ServiceCall) -> None:
-        dock_calls.append(dict(call.data))
+        robot_calls.append(("return_to_base", dict(call.data)))
+
+    async def _record_stop(call: ServiceCall) -> None:
+        robot_calls.append(("stop", dict(call.data)))
 
     hass.services.async_register(
         DREAME_VACUUM_DOMAIN,
@@ -1234,6 +1282,7 @@ async def test_cancel_queue_service_returns_vacuum_to_base_and_cancels_run(
         _record_clean_segment,
     )
     hass.services.async_register("vacuum", "return_to_base", _record_return_to_base)
+    hass.services.async_register("vacuum", "stop", _record_stop)
     vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
     entry = mock_entry(
         {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
@@ -1262,7 +1311,10 @@ async def test_cancel_queue_service_returns_vacuum_to_base_and_cancels_run(
 
     queue_state = entry.runtime_data.queue_state
     assert clean_calls == [{"entity_id": vacuum_entity_id, "segments": [7]}]
-    assert dock_calls == [{"entity_id": vacuum_entity_id}]
+    assert robot_calls == [
+        ("stop", {"entity_id": vacuum_entity_id}),
+        ("return_to_base", {"entity_id": vacuum_entity_id}),
+    ]
     assert queue_state.run_state == "canceled"
     assert queue_state.current_item_id is None
     assert [item.status for item in queue_state.items] == ["canceled", "canceled"]
@@ -1313,12 +1365,16 @@ async def test_cancel_queue_service_preserves_runtime_state_when_dock_command_fa
         dock_calls.append(dict(call.data))
         raise HomeAssistantError("dock command failed")
 
+    async def _record_stop(call: ServiceCall) -> None:
+        return None
+
     hass.services.async_register(
         DREAME_VACUUM_DOMAIN,
         "vacuum_clean_segment",
         _record_clean_segment,
     )
     hass.services.async_register("vacuum", "return_to_base", _raise_return_to_base)
+    hass.services.async_register("vacuum", "stop", _record_stop)
     vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
     entry = mock_entry(
         {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},

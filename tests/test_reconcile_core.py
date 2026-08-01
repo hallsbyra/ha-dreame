@@ -75,6 +75,27 @@ def test_reconcile_completed_after_status_cleared_completes_room() -> None:
     assert decision.event_reasons == ("task_status_completed",)
 
 
+def test_reconcile_completed_unconfirmed_wrong_room_marks_out_of_sync() -> None:
+    """Test a completed foreign task cannot complete the queued room."""
+    decision = _decision(
+        vacuum_state="idle",
+        task_status="completed",
+        task_status_cleared_since_dispatch=True,
+        expected_room_id=3,
+        observed_room_id=1,
+        expected_room_name="Dining Room",
+        observed_room_name="Porch",
+        active_room_confirmed_since_dispatch=False,
+    )
+
+    assert decision.complete_current_room is False
+    assert decision.retry_current_room is False
+    assert decision.mark_out_of_sync_reason == (
+        "task_completed_unconfirmed_room:expected_3:observed_1"
+    )
+    assert decision.event_reasons == ("task_status_completed_unconfirmed_room",)
+
+
 def test_reconcile_completed_after_manual_pause_return_marks_out_of_sync() -> None:
     """Test manual pause followed by return does not complete the room."""
     decision = _decision(
@@ -494,6 +515,7 @@ def test_reconcile_early_room_mismatch_waits_for_min_progress() -> None:
     """Test early room mismatch is treated as transition noise."""
     decision = _decision(
         vacuum_state="cleaning",
+        observed_room_id=7,
         expected_room_name="Kitchen",
         observed_room_name="Hall",
         cleaning_progress=0,
@@ -508,8 +530,34 @@ def test_reconcile_early_room_mismatch_waits_for_min_progress() -> None:
     )
 
 
-def test_reconcile_late_room_mismatch_waits_near_completion() -> None:
-    """Test near-completion room mismatch does not restart an almost-finished room."""
+def test_reconcile_unconfirmed_late_room_mismatch_marks_out_of_sync() -> None:
+    """Test an unconfirmed wrong-room run cannot hide behind high progress."""
+    decision = _decision(
+        vacuum_state="cleaning",
+        observed_room_id=7,
+        expected_room_name="Kitchen",
+        observed_room_name="Hall",
+        cleaning_progress=95,
+        active_room_mismatch_min_progress=5,
+        active_room_mismatch_max_progress=90,
+        active_room_mismatch_streak=3,
+        active_room_mismatch_required_streak=2,
+        active_room_confirmed_since_dispatch=False,
+        seconds_since_last_command=120,
+    )
+
+    assert decision.retry_current_room is False
+    assert decision.mark_out_of_sync_reason == (
+        "active_room_mismatch_unconfirmed_near_completion:expected_1:observed_7"
+    )
+    assert decision.event_reasons == (
+        "active_room_mismatch_unconfirmed_near_completion:"
+        "expected_1:observed_7:progress_95:max_90",
+    )
+
+
+def test_reconcile_confirmed_late_room_mismatch_waits_near_completion() -> None:
+    """Test a late room flip is tolerated after the target room was confirmed."""
     decision = _decision(
         vacuum_state="cleaning",
         expected_room_name="Kitchen",
@@ -519,10 +567,12 @@ def test_reconcile_late_room_mismatch_waits_near_completion() -> None:
         active_room_mismatch_max_progress=90,
         active_room_mismatch_streak=3,
         active_room_mismatch_required_streak=2,
+        active_room_confirmed_since_dispatch=True,
         seconds_since_last_command=120,
     )
 
     assert decision.retry_current_room is False
+    assert decision.mark_out_of_sync_reason is None
     assert any(
         reason.startswith("active_room_mismatch_waiting_near_completion:")
         for reason in decision.event_reasons
@@ -587,6 +637,29 @@ def test_reconcile_room_mismatch_retries_after_streak_and_interval() -> None:
     assert any(
         reason.startswith("active_room_mismatch_retry:2:") for reason in decision.event_reasons
     )
+
+
+def test_reconcile_room_mismatch_exhausts_retry_budget() -> None:
+    """Test active wrong-room cleaning cannot redispatch without a limit."""
+    decision = _decision(
+        vacuum_state="cleaning",
+        expected_room_id=3,
+        observed_room_id=1,
+        expected_room_name="Dining Room",
+        observed_room_name="Porch",
+        cleaning_progress=50,
+        active_room_mismatch_streak=3,
+        active_room_mismatch_required_streak=2,
+        dispatch_retry_count=2,
+        dispatch_retry_max=2,
+        seconds_since_last_command=120,
+    )
+
+    assert decision.retry_current_room is False
+    assert decision.mark_out_of_sync_reason == (
+        "active_room_mismatch_retry_exhausted:expected_3:observed_1"
+    )
+    assert decision.event_reasons == ("active_room_mismatch_retry_exhausted",)
 
 
 def test_reconcile_non_active_state_retries_after_interval() -> None:
