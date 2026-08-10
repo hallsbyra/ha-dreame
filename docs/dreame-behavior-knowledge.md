@@ -204,6 +204,17 @@ examples only.
   room.
 - Test implication: cover add-room behavior after each terminal run state.
 
+### Queue Editing Preserves Visible And Previous Settings
+
+- Confidence: `Observed`
+- Behavior: an override control with no stored value still displays its field fallback. Its first
+  click advances from that displayed value. A room added to a non-terminal queue inherits the
+  previous queue item's overrides unless explicit overrides are supplied.
+- Controller implication: cycle controls from their resolved display value and copy the latest
+  item's overrides when appending a room. Do not carry overrides across a terminal queue reset.
+- Test implication: cover the first click for missing overrides, inherited overrides for appended
+  rooms, explicit empty overrides, and fresh queues after terminal states.
+
 ### Mop Remove/Install Transitions Are In-Run Maintenance
 
 - Confidence: `Observed`

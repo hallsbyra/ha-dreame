@@ -88,6 +88,20 @@ def test_add_room_without_overrides_inherits_previous_room_settings() -> None:
     assert state.items[1].overrides is not state.items[0].overrides
 
 
+def test_add_room_with_explicit_empty_overrides_does_not_inherit() -> None:
+    """Test an explicit empty override set opts out of inheritance."""
+    state = add_room(
+        new_state(),
+        room_id=11,
+        room_name="Living room",
+        overrides={"repeats": 2, "water_volume": 1},
+    )
+
+    state = add_room(state, room_id=12, room_name="Dining room", overrides={})
+
+    assert state.items[1].overrides == {}
+
+
 @pytest.mark.parametrize("terminal_state", ["completed", "canceled", "out_of_sync", "blocked"])
 def test_add_room_after_terminal_run_starts_fresh_pending_queue(
     terminal_state: str,

@@ -103,7 +103,7 @@ export function cycledOverrides(
 ): OverridesDict {
   const merged = baseMergedOverrides(overrides, defaults);
   const options = FIELD_OPTIONS[field];
-  const current = toIntOrNull(merged[field]);
+  const current = toIntOrNull(merged[field]) ?? FIELD_FALLBACK_VALUE[field];
   const currentIndex = options.findIndex((option) => option.value === current);
   const nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % options.length;
   merged[field] = options[nextIndex].value;

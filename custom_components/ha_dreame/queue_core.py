@@ -84,15 +84,18 @@ def add_room(
     room_name: str,
     overrides: dict[str, Any] | None = None,
 ) -> QueueState:
-    """Append one pending room to the queue."""
+    """Append one pending room, inheriting the previous item's overrides by default."""
     if state.run_state in TERMINAL_RUN_STATES:
         state = QueueState()
+
+    if overrides is None:
+        overrides = state.items[-1].overrides if state.items else {}
 
     item = QueueItem(
         item_id=uuid4().hex,
         room_id=room_id,
         room_name=room_name,
-        overrides=dict(overrides or {}),
+        overrides=dict(overrides),
     )
     return replace(state, items=(*state.items, item))
 
