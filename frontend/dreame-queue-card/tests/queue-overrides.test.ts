@@ -96,4 +96,11 @@ describe("HA Dreame queue override helpers", () => {
     expect(cycledOverrides("repeats", { repeats: 2 }, defaults).repeats).toBe(3);
     expect(cycledOverrides("repeats", { repeats: 3 }, defaults).repeats).toBe(1);
   });
+
+  it("cycles from the displayed fallback when a field is missing", () => {
+    expect(overrideLabel("repeats", {}, {})).toBe("x1");
+    expect(cycledOverrides("repeats", {}, {}).repeats).toBe(2);
+    expect(cycledOverrides("water_volume", {}, {}).water_volume).toBe(3);
+    expect(cycledOverrides("suction_level", {}, {}).suction_level).toBe(2);
+  });
 });

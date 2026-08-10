@@ -73,6 +73,21 @@ def test_add_room_appends_pending_item_and_copies_overrides() -> None:
     assert state.items[0].overrides == {"suction_level": "turbo"}
 
 
+def test_add_room_without_overrides_inherits_previous_room_settings() -> None:
+    """Test a new room inherits an independent copy of the preceding settings."""
+    state = add_room(
+        new_state(),
+        room_id=11,
+        room_name="Living room",
+        overrides={"repeats": 2, "suction_level": 3, "water_volume": 1},
+    )
+
+    state = add_room(state, room_id=12, room_name="Dining room")
+
+    assert state.items[1].overrides == state.items[0].overrides
+    assert state.items[1].overrides is not state.items[0].overrides
+
+
 @pytest.mark.parametrize("terminal_state", ["completed", "canceled", "out_of_sync", "blocked"])
 def test_add_room_after_terminal_run_starts_fresh_pending_queue(
     terminal_state: str,
@@ -88,6 +103,7 @@ def test_add_room_after_terminal_run_starts_fresh_pending_queue(
                 room_id=1,
                 room_name="Kitchen",
                 status="completed",
+                overrides={"repeats": 3, "water_volume": 1},
             ),
         ),
     )
@@ -100,6 +116,7 @@ def test_add_room_after_terminal_run_starts_fresh_pending_queue(
     assert [(item.room_id, item.room_name, item.status) for item in state.items] == [
         (7, "Hall", "pending")
     ]
+    assert state.items[0].overrides == {}
 
 
 def test_start_run_sets_run_state_and_first_room_running() -> None:

@@ -482,6 +482,37 @@ describe("ha-dreame-queue-card", () => {
     });
   });
 
+  it("increments missing repeat overrides on the first click", async () => {
+    const callService = vi.fn();
+    const element = document.createElement(CARD_ELEMENT_TAG) as any;
+    element.setConfig({
+      entity: "sensor.robot_queue_status",
+      title: "Robot queue",
+    });
+    element.hass = { ...hass, callService };
+    document.body.append(element);
+
+    await element.updateComplete;
+
+    const repeats = element.shadowRoot?.querySelector(
+      'button[aria-label="Cycle Office repeats"]',
+    ) as HTMLButtonElement | null;
+
+    expect(repeats).not.toBeNull();
+    expect(repeats!.textContent).toContain("x1");
+    repeats!.click();
+
+    expect(callService).toHaveBeenCalledWith(
+      "ha_dreame",
+      "update_queue_item_overrides",
+      {
+        config_entry_id: "config-entry-1",
+        item_id: "item-3",
+        overrides: { repeats: 2 },
+      },
+    );
+  });
+
   it("starts an idle queue through the command-gated ha_dreame queue service", async () => {
     const callService = vi.fn();
     const element = document.createElement(CARD_ELEMENT_TAG) as any;

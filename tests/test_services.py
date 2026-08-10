@@ -476,6 +476,43 @@ async def test_add_queue_room_service_updates_runtime_queue_state(
     }
 
 
+async def test_add_queue_room_service_inherits_previous_room_overrides(
+    hass: HomeAssistant,
+) -> None:
+    """Test adding a room copies the preceding queue item's settings."""
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    first_response = await _call_add_queue_room_service(
+        hass,
+        entry.entry_id,
+        room_id=41,
+        room_name="Room 41",
+    )
+    first_item_id = first_response[ATTR_QUEUE_ITEMS][0][ATTR_ITEM_ID]
+    overrides = {"repeats": 2, "suction_level": 3, "water_volume": 1}
+    await _call_update_queue_item_overrides_service(
+        hass,
+        entry.entry_id,
+        item_id=first_item_id,
+        overrides=overrides,
+    )
+
+    response = await _call_add_queue_room_service(
+        hass,
+        entry.entry_id,
+        room_id=42,
+        room_name="Room 42",
+    )
+
+    assert entry.runtime_data.queue_state.items[1].overrides == overrides
+    assert response[ATTR_QUEUE_ITEMS][1][ATTR_OVERRIDES] == overrides
+
+
 async def test_add_queue_room_service_rejects_unknown_entry(
     hass: HomeAssistant,
 ) -> None:
