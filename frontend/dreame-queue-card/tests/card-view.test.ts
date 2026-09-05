@@ -76,6 +76,21 @@ const hass = {
 };
 
 describe("card view model", () => {
+  it("shows docked paused drying as paused and blocks Continue for a dirty tank", () => {
+    const view = buildCardViewModel({ states: {
+      ...hass.states,
+      "vacuum.robot": {state: "docked", attributes: {status: "Paused", drying: true}},
+      "sensor.robot_state": {state: "drying", attributes: {}},
+      "sensor.robot_status": {state: "paused", attributes: {}},
+      "sensor.robot_dirty_water_tank_status": {state: "not_installed_or_full", attributes: {}},
+    }}, {entity: "sensor.robot_queue_status"});
+    expect(view.activity?.phase).toBe("paused");
+    expect(view.activity?.label).toContain("dirty water tank");
+    expect(view.rows[0].statusLabel).toBe("Paused");
+    expect(view.activeControls.find(control => control.service === "resume_queue")?.disabled).toBe(true);
+    expect(view.activeControls.find(control => control.service === "cancel_queue")?.disabled).not.toBe(true);
+  });
+
   it("requires an explicit ha_dreame queue entity", () => {
     expect(buildCardViewModel(hass, {})).toEqual({
       title: "HA Dreame Queue",

@@ -1,11 +1,38 @@
 """Tests for extracting runtime observations from Home Assistant state."""
 
 from homeassistant.core import HomeAssistant
+import pytest
 
 from custom_components.ha_dreame.runtime_observation import (
     RuntimeObservationEntityIds,
     build_runtime_reconcile_observation,
 )
+
+
+@pytest.mark.parametrize("tank_status", ["not_installed_or_full", "unknown", "unavailable"])
+def test_dirty_tank_blocks_resume_after_error_clears(hass: HomeAssistant, tank_status: str) -> None:
+    hass.states.async_set("vacuum.dreame_robot", "docked", {"status": "Paused", "drying": True})
+    hass.states.async_set("sensor.dreame_robot_status", "paused")
+    hass.states.async_set("sensor.dreame_robot_error", "no_error")
+    hass.states.async_set("sensor.dreame_robot_self_wash_base_status", "drying")
+    hass.states.async_set("sensor.dreame_robot_clean_water_tank_status", "installed")
+    hass.states.async_set("sensor.dreame_robot_dirty_water_tank_status", tank_status)
+    observation = build_runtime_reconcile_observation(hass, vacuum_entity_id="vacuum.dreame_robot")
+    assert observation.robot_paused
+    assert observation.is_drying_state
+    assert observation.water_tank_block_reason == "dirty_water_tank_not_ready"
+    assert not observation.dock_prep_resume_ready
+
+
+def test_emptying_dirty_tank_restores_washing_resume_readiness(hass: HomeAssistant) -> None:
+    hass.states.async_set("vacuum.dreame_robot", "cleaning", {"paused": True, "running": False})
+    hass.states.async_set("sensor.dreame_robot_state", "washing")
+    hass.states.async_set("sensor.dreame_robot_clean_water_tank_status", "installed")
+    hass.states.async_set("sensor.dreame_robot_dirty_water_tank_status", "installed")
+    observation = build_runtime_reconcile_observation(hass, vacuum_entity_id="vacuum.dreame_robot")
+    assert observation.is_dock_prep_paused
+    assert observation.dock_prep_resume_ready
+    assert observation.water_tank_block_reason == ""
 
 
 def test_observation_reads_vacuum_state_without_companion_sensors(

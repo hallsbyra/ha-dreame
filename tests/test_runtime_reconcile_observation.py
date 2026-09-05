@@ -19,6 +19,32 @@ from custom_components.ha_dreame.runtime_state import QueueRunTracking
 NOW = datetime(2026, 5, 17, 8, 0, tzinfo=timezone.utc)
 
 
+def test_paused_drying_never_automatically_resumes_after_tank_recovery() -> None:
+    state = _running_state()
+    decision = evaluate_runtime_reconcile_observation(
+        state, _tracking(state, last_command_at=(NOW - timedelta(minutes=10)).isoformat()),
+        RuntimeReconcileObservation(vacuum_state="docked", task_status="room_cleaning",
+            robot_paused=True, is_drying_state=True, is_dock_prep_state=True,
+            is_dock_prep_paused=True, dock_prep_resume_ready=True), now=NOW,
+    ).decision
+    assert not decision.retry_current_room
+    assert not decision.resume_current_room
+    assert not decision.complete_current_room
+    assert "vacuum_paused_waiting" in decision.event_reasons
+
+
+def test_dirty_tank_blocks_automatic_dispatch_retry() -> None:
+    state = _running_state()
+    decision = evaluate_runtime_reconcile_observation(
+        state, _tracking(state, last_command_at=(NOW - timedelta(minutes=10)).isoformat()),
+        RuntimeReconcileObservation(vacuum_state="idle", task_status="room_cleaning",
+            water_tank_block_reason="dirty_water_tank_not_ready"), now=NOW,
+    ).decision
+    assert not decision.retry_current_room
+    assert not decision.resume_current_room
+    assert "dirty_water_tank_not_ready" in decision.event_reasons
+
+
 def _seed_rooms(*rooms: tuple[int, str]) -> QueueState:
     state = QueueState()
     for room_id, room_name in rooms:
