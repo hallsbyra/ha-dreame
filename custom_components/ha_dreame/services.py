@@ -29,7 +29,6 @@ from .const import (
     ATTR_RUN_ID,
     ATTR_RUN_TRACKING,
     ATTR_RUNNING_ITEMS,
-    ATTR_START_REQUESTED,
     ATTR_TASK_STATUS_CLEARED_SINCE_DISPATCH,
     ATTR_TOTAL_ITEMS,
     CONF_ALLOW_ROBOT_COMMANDS,
@@ -66,13 +65,11 @@ from .queue_core import (
     QueueError,
     QueueState,
     add_room,
-    cancel_start_request,
     cancel_run,
     clear_pending,
     current_item,
     move_item,
     remove_item,
-    request_start,
     skip_current_room,
     start_run,
     update_item_overrides,
@@ -746,36 +743,13 @@ async def _async_start_queue_response(
     if not runtime_data.commands_enabled:
         raise HomeAssistantError("HA Dreame robot commands are disabled")
 
-    await async_start_queue_or_defer(hass, runtime_data)
-    response = _queue_status_response(entry)
-    if runtime_data.queue_state.start_requested:
-        response[ATTR_START_REQUESTED] = True
-    return response
-
-
-async def async_start_queue_or_defer(
-    hass: HomeAssistant,
-    runtime_data: HaDreameRuntimeData,
-) -> bool:
-    """Start a queue now or retain one explicit start until the robot is ready."""
     observation = build_runtime_reconcile_observation(
         hass,
         vacuum_entity_id=runtime_data.vacuum_entity_id,
         entity_ids=runtime_data.observation_entity_ids,
     )
     if observation.task_status and observation.task_status.lower() != "completed":
-        try:
-            queue_state = request_start(runtime_data.queue_state)
-        except QueueError as err:
-            raise HomeAssistantError(str(err)) from err
-        if not runtime_data.queue_state.start_requested:
-            runtime_data.set_queue_state(queue_state)
-            _LOGGER.info(
-                "HA Dreame queue start deferred vacuum=%s task_status=%s",
-                runtime_data.vacuum_entity_id,
-                observation.task_status,
-            )
-        return False
+        raise HomeAssistantError("Cannot start queue while a previous robot task is still active")
 
     try:
         queue_state = start_run(runtime_data.queue_state)
@@ -789,16 +763,11 @@ async def async_start_queue_or_defer(
     except QueueError as err:
         raise HomeAssistantError(str(err)) from err
 
-    try:
-        await async_execute_dispatch_plan(
-            hass,
-            plan,
-            commands_enabled=runtime_data.commands_enabled,
-        )
-    except Exception:
-        if runtime_data.queue_state.start_requested:
-            runtime_data.set_queue_state(cancel_start_request(runtime_data.queue_state))
-        raise
+    await async_execute_dispatch_plan(
+        hass,
+        plan,
+        commands_enabled=runtime_data.commands_enabled,
+    )
 
     runtime_data.set_queue_state(queue_state)
     runtime_data.set_run_tracking(_new_run_tracking(queue_state))
@@ -810,7 +779,7 @@ async def async_start_queue_or_defer(
         item.room_id,
         item.room_name,
     )
-    return True
+    return _queue_status_response(entry)
 
 
 def _running_override_service_call(

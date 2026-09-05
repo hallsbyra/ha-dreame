@@ -395,8 +395,8 @@ When running a planned manual test, record:
 - Confidence: `Observed`
 - Setup: a room remained pending in an idle queue after repeated start attempts near the end of an
   earlier robot task.
-- Expected: the user's explicit start intent is retained while the previous task finishes, the card
-  shows that the room is waiting to start, and the room is dispatched exactly once when ready.
+- Expected: the card clearly distinguishes queued rooms from an active run and prevents Start while
+  the robot is still occupied by the previous task.
 - Observed timeline:
   - t0: the queue was idle with one pending room while the vacuum was returning and task status
     still indicated room cleaning.
@@ -405,12 +405,12 @@ When running a planned manual test, record:
   - t3: after the robot docked, task status became completed and the control window became ready.
 - Outcome: no duplicate robot command was sent, but every rejected click discarded the user's start
   intent. The pending queue then looked like an accepted run even though nothing would start it.
-- Controller implication: an explicit start while the previous task is active must arm the idle
-  queue instead of failing. Dispatch it on the completed task-status event, with the 20-second tick
-  as a missed-event fallback. Consume the intent before dispatch so command errors cannot create an
-  unbounded retry loop. Expose the armed state and label its pending item `Waiting to start`.
-- Follow-up tests: retain backend coverage for event-driven start, interval fallback, and no replay
-  after dispatch failure, plus frontend coverage for returning, unavailable, ready, and armed states.
+- Controller implication: do not retain a deferred start intent. Keep Start disabled while the
+  previous task is active or the robot is unavailable, then enable it when the robot is ready. A
+  pending room remains editable and is labeled `Queued`; it must never imply that a later start has
+  already been authorized. Rooms can still be appended while this integration's queue is running.
+- Follow-up tests: retain backend rejection coverage and frontend coverage for returning,
+  unavailable, ready, and queued states.
 
 ## Open Questions
 

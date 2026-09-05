@@ -39,7 +39,6 @@ class QueueState:
     run_id: str | None = None
     items: tuple[QueueItem, ...] = ()
     current_item_id: str | None = None
-    start_requested: bool = False
 
 
 @dataclass(frozen=True)
@@ -113,10 +112,7 @@ def remove_item(state: QueueState, *, item_id: str) -> QueueState:
         raise InvalidOperation("Only pending rooms can be removed")
 
     del items[item_index]
-    start_requested = state.start_requested and any(
-        queued_item.status == "pending" for queued_item in items
-    )
-    return replace(state, items=tuple(items), start_requested=start_requested)
+    return replace(state, items=tuple(items))
 
 
 def move_item(state: QueueState, *, item_id: str, new_position: int) -> QueueState:
@@ -171,20 +167,6 @@ def clear_pending(state: QueueState) -> QueueState:
     return new_state()
 
 
-def request_start(state: QueueState) -> QueueState:
-    """Record an explicit request to start once the robot is ready."""
-    if state.run_state == "running":
-        raise InvalidOperation("Queue is already running")
-    if not any(item.status == "pending" for item in state.items):
-        raise InvalidOperation("No pending rooms to start")
-    return replace(state, start_requested=True)
-
-
-def cancel_start_request(state: QueueState) -> QueueState:
-    """Clear a deferred start request without changing queued rooms."""
-    return replace(state, start_requested=False)
-
-
 def start_run(state: QueueState) -> QueueState:
     """Start queue execution from the first pending room."""
     if state.run_state == "running":
@@ -205,7 +187,6 @@ def start_run(state: QueueState) -> QueueState:
         run_id=uuid4().hex,
         items=tuple(items),
         current_item_id=first_item.item_id,
-        start_requested=False,
     )
 
 
