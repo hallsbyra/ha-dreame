@@ -42,7 +42,7 @@ from .runtime_reconcile_runner import (
     async_evaluate_and_apply_runtime_reconcile_under_lock,
 )
 from .runtime_state import QueueRunTracking
-from .services import async_register_services, async_remove_services, async_start_queue_or_defer
+from .services import async_register_services, async_remove_services
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.SENSOR]
@@ -158,9 +158,9 @@ def _build_runtime_data(hass: HomeAssistant, entry: ConfigEntry) -> HaDreameRunt
 
 
 def _register_auto_reconcile_interval(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Register periodic reconciliation and deferred-start recovery."""
+    """Register automatic runtime reconciliation for explicitly enabled entries."""
     runtime_data = entry.runtime_data
-    if not runtime_data.commands_enabled:
+    if not runtime_data.commands_enabled or not runtime_data.auto_reconcile_enabled:
         return
 
     @callback
@@ -184,9 +184,9 @@ def _register_task_status_listener(
     hass: HomeAssistant,
     entry: ConfigEntry,
 ) -> None:
-    """Capture Dreame task lifecycle changes and release deferred starts."""
+    """Capture Dreame task lifecycle changes between interval ticks."""
     runtime_data = entry.runtime_data
-    if not runtime_data.commands_enabled:
+    if not runtime_data.commands_enabled or not runtime_data.auto_reconcile_enabled:
         return
 
     task_status_entity_id = (
@@ -201,16 +201,6 @@ def _register_task_status_listener(
         old_status = _normalized_task_status(old_state.state if old_state is not None else "")
         new_status = _normalized_task_status(new_state.state if new_state is not None else "")
         if new_status == old_status or new_status in _ABSENT_TASK_STATUS_STATES:
-            return
-
-        if new_status == "completed" and _has_deferred_start(runtime_data):
-            entry.async_create_task(
-                hass,
-                _async_auto_reconcile_tick(hass, entry),
-                name=f"{DOMAIN} deferred queue start",
-            )
-            return
-        if not runtime_data.auto_reconcile_enabled:
             return
 
         context = _active_reconcile_context(runtime_data)
@@ -265,16 +255,6 @@ def _active_reconcile_context(runtime_data: HaDreameRuntimeData) -> tuple[str, s
     return queue_state.run_id, queue_state.current_item_id
 
 
-def _has_deferred_start(runtime_data: HaDreameRuntimeData) -> bool:
-    """Return whether an idle queue has an explicit start waiting to run."""
-    queue_state = runtime_data.queue_state
-    return (
-        queue_state.run_state == "idle"
-        and queue_state.start_requested
-        and any(item.status == "pending" for item in queue_state.items)
-    )
-
-
 async def _async_auto_reconcile_tick(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -293,6 +273,7 @@ async def _async_auto_reconcile_tick(
             hass.data.get(DOMAIN, {}).get(entry.entry_id) is not entry
             or getattr(entry, "runtime_data", None) is not runtime_data
             or not runtime_data.commands_enabled
+            or not runtime_data.auto_reconcile_enabled
             or runtime_data.unload_requested.is_set()
         ):
             return
@@ -304,11 +285,6 @@ async def _async_auto_reconcile_tick(
                 return
 
         try:
-            if _has_deferred_start(runtime_data):
-                await async_start_queue_or_defer(hass, runtime_data)
-                return
-            if not runtime_data.auto_reconcile_enabled:
-                return
             await async_evaluate_and_apply_runtime_reconcile_under_lock(
                 hass,
                 runtime_data,

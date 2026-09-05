@@ -221,10 +221,7 @@ function cardQueueRows(
     queuePosition: index,
     roomName: item.roomName,
     status: item.status,
-    statusLabel:
-      item.status === "pending" && snapshot.startRequested
-        ? "Waiting to start"
-        : queueRunStateLabel(item.status),
+    statusLabel: item.status === "pending" ? "Queued" : queueRunStateLabel(item.status),
     ...(item.status === "running" && activeProgress !== null ? { progress: activeProgress } : {}),
     overrides: { ...item.overrides },
     canRemove: item.status === "pending",
@@ -388,19 +385,6 @@ function buildStartBlock(
     return null;
   }
 
-  if (snapshot.startRequested) {
-    return {
-      control: {
-        ariaLabel: "Queue is waiting to start",
-        disabled: true,
-        disabledReason: "Start already requested",
-        label: "Waiting",
-        service: "start_queue",
-      },
-      summary: "Start requested. Waiting for the robot to become ready.",
-    };
-  }
-
   const vacuumEntityId = snapshot.vacuumEntityId;
   if (!vacuumEntityId) {
     return null;
@@ -432,14 +416,16 @@ function buildStartBlock(
   if (taskStatus && taskStatus !== "completed") {
     return {
       control: {
-        ariaLabel: "Start queue when ready",
-        label: "Start when ready",
+        ariaLabel: "Start queue",
+        disabled: true,
+        disabledReason: "Waiting for the previous robot task to finish",
+        label: "Start",
         service: "start_queue",
       },
       summary:
         vacuumState === "returning"
-          ? "Robot is returning to base. Start will wait until it is ready."
-          : "Robot is finishing a previous task. Start will wait until it is ready.",
+          ? "Robot is returning to base before the queue can start."
+          : "Robot is finishing a previous task before the queue can start.",
     };
   }
 
