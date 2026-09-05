@@ -11,6 +11,7 @@ from homeassistant.exceptions import HomeAssistantError
 
 from .const import VACUUM_DOMAIN
 from .dispatch_executor import async_execute_dispatch_plan
+from .audit import async_call_robot_service
 from .dispatch_plan import build_room_dispatch_plan
 from .queue_core import QueueError, QueueState, current_item
 from .runtime import HaDreameRuntimeData
@@ -110,7 +111,8 @@ async def _async_resume_current_room_intent(
     ):
         raise HomeAssistantError("Runtime reconcile resume requires matching run tracking")
 
-    await hass.services.async_call(
+    await async_call_robot_service(
+        hass,
         VACUUM_DOMAIN,
         "start",
         {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},

@@ -1,4 +1,4 @@
-import { deriveRunActivity, sensorEntityIdForVacuum, type RunActivity } from "./activity";
+import { deriveRunActivity, sensorEntityIdForVacuum, waterTankBlockReason, type RunActivity } from "./activity";
 import {
   nextRunningOverrideServiceCall,
   runningOverrideEntityId,
@@ -158,7 +158,7 @@ export function buildCardViewModel(
     activeControls: buildActiveControls(snapshot, activity, startBlock),
     canClearPending: snapshot.pendingItems > 0,
     rooms,
-    rows: cardQueueRows(hass, snapshot),
+    rows: cardQueueRows(hass, snapshot, activity),
   };
 }
 
@@ -197,18 +197,29 @@ function buildActivity(
     return null;
   }
 
+  const rawAttributes = hass.states[vacuumEntityId]?.attributes;
+  const attributes: Record<string, unknown> = rawAttributes && typeof rawAttributes === "object"
+    ? rawAttributes as Record<string, unknown> : {};
+
   return deriveRunActivity({
     queueRunState: snapshot.runState,
     vacuumState: stateValue(hass, vacuumEntityId),
     robotState: stateValue(hass, sensorEntityIdForVacuum(vacuumEntityId, "state")),
     taskStatus: stateValue(hass, sensorEntityIdForVacuum(vacuumEntityId, "task_status")),
     errorCode: stateValue(hass, sensorEntityIdForVacuum(vacuumEntityId, "error")),
+    robotStatus: stateValue(hass, sensorEntityIdForVacuum(vacuumEntityId, "status"))
+      ?? attributes.status,
+    paused: attributes.paused,
+    running: attributes.running,
+    dirtyWaterTankStatus: stateValue(hass, sensorEntityIdForVacuum(vacuumEntityId, "dirty_water_tank_status")),
+    cleanWaterTankStatus: stateValue(hass, sensorEntityIdForVacuum(vacuumEntityId, "clean_water_tank_status")),
   });
 }
 
 function cardQueueRows(
   hass: HomeAssistantLike | undefined,
   snapshot: QueueSnapshot,
+  activity: RunActivity | null,
 ): CardQueueRow[] {
   const items = snapshot.items;
   const activeProgress = runningCleaningProgress(hass, snapshot);
@@ -221,7 +232,10 @@ function cardQueueRows(
     queuePosition: index,
     roomName: item.roomName,
     status: item.status,
-    statusLabel: item.status === "pending" ? "Queued" : queueRunStateLabel(item.status),
+    statusLabel: item.status === "pending" ? "Queued"
+      : item.status === "running" && activity?.phase === "paused" ? "Paused"
+      : item.status === "running" && activity?.phase === "error" ? "Problem"
+      : queueRunStateLabel(item.status),
     ...(item.status === "running" && activeProgress !== null ? { progress: activeProgress } : {}),
     overrides: { ...item.overrides },
     canRemove: item.status === "pending",
@@ -288,6 +302,7 @@ function buildActiveControls(
           label: "Continue",
           service: "resume_queue",
           ...disabledState,
+          ...(activity.resumeBlockedReason ? {disabled: true, disabledReason: activity.resumeBlockedReason} : {}),
         },
         {
           ariaLabel: "End robot run",
@@ -391,6 +406,14 @@ function buildStartBlock(
   }
 
   const vacuumState = normalizedString(stateValue(hass, vacuumEntityId)).toLowerCase();
+  const tankBlock = waterTankBlockReason(
+    stateValue(hass, sensorEntityIdForVacuum(vacuumEntityId, "dirty_water_tank_status")),
+    stateValue(hass, sensorEntityIdForVacuum(vacuumEntityId, "clean_water_tank_status")),
+  );
+  if (tankBlock) {
+    return {control: {ariaLabel: "Start queue", disabled: true, disabledReason: tankBlock,
+      label: "Start", service: "start_queue"}, summary: tankBlock};
+  }
   const taskStatus = normalizedString(
     stateValue(hass, sensorEntityIdForVacuum(vacuumEntityId, "task_status")),
   ).toLowerCase();

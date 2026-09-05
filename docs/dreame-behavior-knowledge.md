@@ -46,6 +46,37 @@ examples only.
 
 ## Observed Behavior Rules
 
+### Paused Tasks Hidden By Docked/Drying State (2026-09-05)
+
+- Confidence: `Observed`.
+- A robot can report `vacuum=docked`, dock phase `drying`, task `room_cleaning`,
+  and `sensor.<robot>_status=paused` simultaneously. The vacuum `paused` attribute
+  can be false even while the status sensor and vacuum `status` attribute say paused.
+- `sensor.<robot>_error` can clear to `no_error` while the dirty-water tank still
+  reports `not_installed_or_full`. The persistent tank sensor must block start,
+  manual resume and automatic recovery. Present but unavailable tank sensors also
+  block; an absent optional sensor remains compatible with existing installations.
+- Paused drying requires explicit continuation. It must not be treated as paused
+  washing that automatically resumes after a refill. The card shows `Paused` and
+  the tank problem instead of claiming that a room is being cleaned.
+- Regression coverage exercises the combined signals, tank recovery and command gates.
+
+### Start Provenance
+
+- Confidence: `Observed`: queue history alone cannot identify who requested a start.
+- `get_runtime_status.recent_activity` retains the last 100 audit entries until
+  integration reload/restart. Entries correlate queue mutations, robot commands,
+  reconcile decisions and observed task transitions with context/user/parent IDs.
+- `accepted` means the HA service returned successfully, not that cleaning started.
+  Direct HA robot calls with explicit entity targets are recorded as `observed_request`.
+  User context, parent context and automatic reconcile are distinguished without
+  assuming that every parent context is an automation. Use parent IDs with HA traces.
+- Physical buttons and vendor-app calls do not produce HA service events. Task
+  observations reveal the transition but cannot establish its source.
+- To retain audit entries in HA logs across restarts, configure
+  `logger.logs.custom_components.ha_dreame.audit: info`. No arbitrary command payloads
+  or exception messages are recorded. Context/user IDs are local diagnostic metadata.
+
 ### Stale Completion Status After Dispatch
 
 - Confidence: `Observed`

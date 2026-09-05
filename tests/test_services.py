@@ -62,16 +62,24 @@ from .helpers import mock_entry, register_entity
 pytestmark = pytest.mark.usefixtures("mock_dreame_vacuum_dependency")
 
 
-async def test_docked_paused_tank_problem_blocks_commands_and_records_caller(hass: HomeAssistant) -> None:
+async def test_docked_paused_tank_problem_blocks_commands_and_records_caller(
+    hass: HomeAssistant,
+) -> None:
     vacuum_id = register_entity(hass, "vacuum.dreame_robot")
-    entry = mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_id}, options={CONF_ALLOW_ROBOT_COMMANDS: True})
+    entry = mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_id}, options={CONF_ALLOW_ROBOT_COMMANDS: True}
+    )
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     context = Context(user_id="test-user", parent_id="test-parent")
-    await hass.services.async_call(DOMAIN, SERVICE_ADD_QUEUE_ROOM,
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_ADD_QUEUE_ROOM,
         {CONF_CONFIG_ENTRY_ID: entry.entry_id, CONF_ROOM_ID: 1, CONF_ROOM_NAME: "Room 1"},
-        blocking=True, context=context)
+        blocking=True,
+        context=context,
+    )
     hass.states.async_set(vacuum_id, "docked", {"status": "Paused", "drying": True})
     hass.states.async_set("sensor.dreame_robot_status", "paused")
     hass.states.async_set("sensor.dreame_robot_dirty_water_tank_status", "not_installed_or_full")
@@ -79,8 +87,13 @@ async def test_docked_paused_tank_problem_blocks_commands_and_records_caller(has
         await _call_start_queue_service(hass, entry.entry_id)
     queue = start_run(entry.runtime_data.queue_state)
     entry.runtime_data.set_queue_state(queue)
-    entry.runtime_data.set_run_tracking(QueueRunTracking(run_id=queue.run_id,
-        current_item_id=queue.current_item_id, last_command_at="2026-01-01T00:00:00+00:00"))
+    entry.runtime_data.set_run_tracking(
+        QueueRunTracking(
+            run_id=queue.run_id,
+            current_item_id=queue.current_item_id,
+            last_command_at="2026-01-01T00:00:00+00:00",
+        )
+    )
     with pytest.raises(HomeAssistantError, match="dirty_water_tank_not_ready"):
         await _call_resume_queue_service(hass, entry.entry_id)
     readiness = await _call_control_readiness_service(hass, entry.entry_id)
@@ -88,13 +101,19 @@ async def test_docked_paused_tank_problem_blocks_commands_and_records_caller(has
     assert SERVICE_RESUME_QUEUE not in readiness["available_actions"]
     status = await _call_runtime_status_service(hass, entry.entry_id)
     events = status["recent_activity"]
-    added = next(event for event in events if event["action"] == "add_queue_room" and event["outcome"] == "accepted")
+    added = next(
+        event
+        for event in events
+        if event["action"] == "add_queue_room" and event["outcome"] == "accepted"
+    )
     assert added["context_id"] == context.id
     assert added["user_id"] == "test-user"
     assert added["parent_id"] == "test-parent"
     assert added["room_id"] == 1
     assert added["item_id"] == queue.current_item_id
-    assert any(event["action"] == "resume_queue" and event["outcome"] == "rejected" for event in events)
+    assert any(
+        event["action"] == "resume_queue" and event["outcome"] == "rejected" for event in events
+    )
 
 
 async def _call_runtime_status_service(
@@ -1939,6 +1958,7 @@ async def test_runtime_status_service_returns_entry_runtime_data(
         CONF_ALLOW_ROBOT_COMMANDS: True,
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
         ATTR_RUN_TRACKING: None,
+        "recent_activity": [],
         "robot_status": {
             "error_code": "",
             "interruption_reasons": [],
@@ -1972,6 +1992,7 @@ async def test_runtime_status_service_reflects_reloaded_command_gate(
         CONF_ALLOW_ROBOT_COMMANDS: True,
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
         ATTR_RUN_TRACKING: None,
+        "recent_activity": [],
         "robot_status": {
             "error_code": "",
             "interruption_reasons": [],
