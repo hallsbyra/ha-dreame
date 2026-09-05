@@ -40,7 +40,6 @@ describe("HA Dreame queue helpers", () => {
     total_items: 2,
     allow_robot_commands: true,
     auto_reconcile_enabled: false,
-    start_requested: true,
     config_entry_id: "config-entry-1",
     vacuum_entity_id: "vacuum.robot",
   };
@@ -86,7 +85,6 @@ describe("HA Dreame queue helpers", () => {
       runState: "running",
       allowRobotCommands: true,
       autoReconcileEnabled: false,
-      startRequested: true,
       configEntryId: "config-entry-1",
       vacuumEntityId: "vacuum.robot",
       pendingItems: 1,

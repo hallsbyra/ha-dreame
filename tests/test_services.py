@@ -980,10 +980,10 @@ async def test_start_queue_service_dispatches_first_room_and_updates_runtime_sta
     )
 
 
-async def test_start_queue_service_defers_while_previous_room_task_is_active(
+async def test_start_queue_service_rejects_previous_active_room_task(
     hass: HomeAssistant,
 ) -> None:
-    """Test an explicit start waits safely for the previous robot task to settle."""
+    """Test a stale robot task must settle before a new queue can start."""
     calls: list[dict[str, object]] = []
 
     async def _record_clean_segment(call: ServiceCall) -> None:
@@ -1013,12 +1013,14 @@ async def test_start_queue_service_defers_while_previous_room_task_is_active(
     hass.states.async_set(vacuum_entity_id, "cleaning", {"running": True})
     hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning")
 
-    response = await _call_start_queue_service(hass, entry.entry_id)
+    with pytest.raises(
+        HomeAssistantError,
+        match="previous robot task is still active",
+    ):
+        await _call_start_queue_service(hass, entry.entry_id)
 
     assert calls == []
-    assert response["start_requested"] is True
     assert entry.runtime_data.queue_state.run_state == "idle"
-    assert entry.runtime_data.queue_state.start_requested is True
     assert entry.runtime_data.queue_state.items[0].status == "pending"
     assert entry.runtime_data.run_tracking is None
 

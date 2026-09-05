@@ -255,7 +255,7 @@ describe("ha-dreame-queue-card", () => {
     ).toBeNull();
   });
 
-  it("offers a deferred start while the previous robot task finishes", async () => {
+  it("renders a disabled start control while the previous robot task finishes", async () => {
     const callService = vi.fn();
     const element = document.createElement(CARD_ELEMENT_TAG) as any;
     element.setConfig({
@@ -269,17 +269,16 @@ describe("ha-dreame-queue-card", () => {
 
     const shadowRoot = element.shadowRoot as ShadowRoot | null;
     const startQueue = shadowRoot?.querySelector<HTMLButtonElement>(
-      'button[aria-label="Start queue when ready"]',
+      'button[aria-label="Start queue"]',
     );
     expect(element.shadowRoot?.textContent).toContain(
-      "Robot is returning to base. Start will wait until it is ready.",
+      "Robot is returning to base before the queue can start.",
     );
-    expect(startQueue?.disabled).toBe(false);
+    expect(startQueue?.disabled).toBe(true);
+    expect(startQueue?.title).toBe("Waiting for the previous robot task to finish");
 
     startQueue?.click();
-    expect(callService).toHaveBeenCalledWith("ha_dreame", "start_queue", {
-      config_entry_id: "config-entry-1",
-    });
+    expect(callService).not.toHaveBeenCalled();
   });
 
   it("adds an available room through the ha_dreame queue service", async () => {

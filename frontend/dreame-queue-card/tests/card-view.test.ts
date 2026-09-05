@@ -116,7 +116,6 @@ describe("card view model", () => {
         runState: "running",
         allowRobotCommands: null,
         autoReconcileEnabled: null,
-        startRequested: false,
         configEntryId: "config-entry-1",
         vacuumEntityId: "vacuum.robot",
         pendingItems: 2,
@@ -218,7 +217,7 @@ describe("card view model", () => {
           queuePosition: 1,
           roomName: "Hallway",
           status: "pending",
-          statusLabel: "Pending",
+          statusLabel: "Queued",
           overrides: {
             repeats: 2,
             suction_level: 1,
@@ -253,7 +252,7 @@ describe("card view model", () => {
           queuePosition: 2,
           roomName: "Office",
           status: "pending",
-          statusLabel: "Pending",
+          statusLabel: "Queued",
           overrides: {},
           canRemove: true,
           canMoveUp: true,
@@ -312,6 +311,7 @@ describe("card view model", () => {
     );
 
     expect(view.summary).toBe("Ready to start 1 room.");
+    expect(view.rows[0].statusLabel).toBe("Queued");
     expect(view.activeControls).toEqual([
       {
         ariaLabel: "Start queue",
@@ -321,7 +321,7 @@ describe("card view model", () => {
     ]);
   });
 
-  it("offers a deferred start while the robot finishes a previous task", () => {
+  it("disables start while the robot finishes a previous task", () => {
     const idleQueue = hassWithQueueState("idle", {
       queue_items: [queueAttributes.queue_items[1]],
       pending_items: 1,
@@ -342,36 +342,13 @@ describe("card view model", () => {
       { entity: "sensor.robot_queue_status" },
     );
 
-    expect(view.summary).toBe("Robot is returning to base. Start will wait until it is ready.");
+    expect(view.summary).toBe("Robot is returning to base before the queue can start.");
     expect(view.activeControls).toEqual([
       {
-        ariaLabel: "Start queue when ready",
-        label: "Start when ready",
-        service: "start_queue",
-      },
-    ]);
-  });
-
-  it("shows an accepted deferred start instead of an unexplained pending room", () => {
-    const waitingQueue = hassWithQueueState("idle", {
-      queue_items: [queueAttributes.queue_items[1]],
-      pending_items: 1,
-      running_items: 0,
-      start_requested: true,
-      total_items: 1,
-    });
-    const view = buildCardViewModel(waitingQueue, {
-      entity: "sensor.robot_queue_status",
-    });
-
-    expect(view.summary).toBe("Start requested. Waiting for the robot to become ready.");
-    expect(view.rows[0].statusLabel).toBe("Waiting to start");
-    expect(view.activeControls).toEqual([
-      {
-        ariaLabel: "Queue is waiting to start",
+        ariaLabel: "Start queue",
         disabled: true,
-        disabledReason: "Start already requested",
-        label: "Waiting",
+        disabledReason: "Waiting for the previous robot task to finish",
+        label: "Start",
         service: "start_queue",
       },
     ]);
