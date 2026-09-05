@@ -390,6 +390,28 @@ When running a planned manual test, record:
 - Follow-up tests: retain end-to-end coverage for the cancel/start race and each independent safety
   gate so later reconciliation tuning cannot reintroduce false room completion.
 
+### 2026-09-05 - Idle Queue While Previous Robot Task Was Returning
+
+- Confidence: `Observed`
+- Setup: a room remained pending in an idle queue after repeated start attempts near the end of an
+  earlier robot task.
+- Expected: the user's explicit start intent is retained while the previous task finishes, the card
+  shows that the room is waiting to start, and the room is dispatched exactly once when ready.
+- Observed timeline:
+  - t0: the queue was idle with one pending room while the vacuum was returning and task status
+    still indicated room cleaning.
+  - t1: the card presented the queue as ready and left Start enabled.
+  - t2: each click reached the backend safety guard and failed before any robot command was sent.
+  - t3: after the robot docked, task status became completed and the control window became ready.
+- Outcome: no duplicate robot command was sent, but every rejected click discarded the user's start
+  intent. The pending queue then looked like an accepted run even though nothing would start it.
+- Controller implication: an explicit start while the previous task is active must arm the idle
+  queue instead of failing. Dispatch it on the completed task-status event, with the 20-second tick
+  as a missed-event fallback. Consume the intent before dispatch so command errors cannot create an
+  unbounded retry loop. Expose the armed state and label its pending item `Waiting to start`.
+- Follow-up tests: retain backend coverage for event-driven start, interval fallback, and no replay
+  after dispatch failure, plus frontend coverage for returning, unavailable, ready, and armed states.
+
 ## Open Questions
 
 1. Under what conditions does a multi-room app run return for a mid-job wash?

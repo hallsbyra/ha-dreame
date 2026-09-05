@@ -16,6 +16,7 @@ class HaDreameQueueCard extends LitElement {
   static properties = {
     hass: { attribute: false },
     _config: { state: true },
+    _serviceError: { state: true },
   };
 
   static styles = css`
@@ -325,6 +326,7 @@ class HaDreameQueueCard extends LitElement {
 
   hass?: HomeAssistantLike;
   private _config: HaDreameQueueCardConfig = {};
+  private _serviceError: string | null = null;
 
   static async getConfigElement(): Promise<HTMLElement> {
     await import("./ha-dreame-queue-card-editor");
@@ -373,6 +375,10 @@ class HaDreameQueueCard extends LitElement {
               : nothing}
           </div>
         </div>
+
+        ${this._serviceError
+          ? html`<div class="message service-error">${this._serviceError}</div>`
+          : nothing}
 
         ${view.message
           ? html`<div class="message">${view.message}</div>`
@@ -716,17 +722,25 @@ class HaDreameQueueCard extends LitElement {
     });
   }
 
-  private _callQueueService(
+  private async _callQueueService(
     configEntryId: string | null | undefined,
     service: ActiveQueueService,
-  ): void {
+  ): Promise<void> {
     if (!configEntryId || !this.hass?.callService) {
       return;
     }
 
-    void this.hass.callService("ha_dreame", service, {
-      config_entry_id: configEntryId,
-    });
+    this._serviceError = null;
+    try {
+      await this.hass.callService("ha_dreame", service, {
+        config_entry_id: configEntryId,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error ?? "");
+      this._serviceError = message.includes("previous robot task is still active")
+        ? "Robot is still finishing a previous task. Try again when it is ready."
+        : "The queue command failed. Check Home Assistant for details.";
+    }
   }
 
   private _updateOverrides(
