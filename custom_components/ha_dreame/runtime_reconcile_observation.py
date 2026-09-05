@@ -22,6 +22,9 @@ class RuntimeReconcileObservation:
     vacuum_state: str = ""
     task_status: str = ""
     vacuum_error_code: str = ""
+    robot_paused: bool = False
+    is_drying_state: bool = False
+    water_tank_block_reason: str = ""
     observed_room_id: int | None = None
     observed_room_name: str | None = None
     cleaning_progress: int | None = None
@@ -90,7 +93,11 @@ def evaluate_runtime_reconcile_observation(
     )
 
     decision = evaluate_reconcile_tick(
-        vacuum_state=observation.vacuum_state,
+        vacuum_state=(
+            "paused"
+            if observation.robot_paused and observation.vacuum_state != "error"
+            else observation.vacuum_state
+        ),
         task_status=observation.task_status,
         vacuum_error_code=observation.vacuum_error_code,
         awaiting_completion_event=awaiting_completion_event,
@@ -111,7 +118,7 @@ def evaluate_runtime_reconcile_observation(
         active_states=set(settings.active_states),
         dispatch_retry_interval_sec=settings.dispatch_retry_interval_sec,
         dispatch_retry_max=settings.dispatch_retry_max,
-        is_dock_prep_paused=observation.is_dock_prep_paused,
+        is_dock_prep_paused=(observation.is_dock_prep_paused and not observation.is_drying_state),
         force_retry_after_recovery=observation.force_retry_after_recovery,
         non_fatal_error_codes=set(settings.non_fatal_error_codes),
         pause_waiting_seen=observation.pause_waiting_seen,
@@ -128,6 +135,7 @@ def evaluate_runtime_reconcile_observation(
         active_room_mismatch_min_progress=settings.active_room_mismatch_min_progress,
         active_room_mismatch_max_progress=settings.active_room_mismatch_max_progress,
         dock_prep_resume_ready=observation.dock_prep_resume_ready,
+        water_tank_block_reason=observation.water_tank_block_reason,
         is_mop_maintenance_state=observation.is_mop_maintenance_state,
         is_post_run_maintenance_state=observation.is_post_run_maintenance_state,
         post_run_maintenance_seen=(

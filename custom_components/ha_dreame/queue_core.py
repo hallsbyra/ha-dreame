@@ -263,6 +263,7 @@ def evaluate_reconcile_tick(
     active_room_mismatch_min_progress: int = 1,
     active_room_mismatch_max_progress: int | None = None,
     dock_prep_resume_ready: bool = False,
+    water_tank_block_reason: str = "",
     is_mop_maintenance_state: bool = False,
     is_post_run_maintenance_state: bool = False,
     post_run_maintenance_seen: bool = False,
@@ -389,6 +390,12 @@ def evaluate_reconcile_tick(
         return ReconcileDecision(
             set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
             event_reasons=tuple(event_reasons + ["mop_maintenance_waiting"]),
+        )
+
+    if water_tank_block_reason:
+        return ReconcileDecision(
+            set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+            event_reasons=tuple(event_reasons + [water_tank_block_reason]),
         )
 
     if is_dock_prep_state and is_dock_prep_paused and not normalized_task.endswith("_paused"):

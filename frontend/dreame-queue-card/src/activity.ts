@@ -10,6 +10,7 @@ export type RunActivityPhase =
 export type RunActivity = {
   phase: RunActivityPhase;
   label: string;
+  resumeBlockedReason?: string;
 };
 
 export type RobotSignals = {
@@ -18,6 +19,11 @@ export type RobotSignals = {
   robotState?: unknown;
   taskStatus?: unknown;
   errorCode?: unknown;
+  robotStatus?: unknown;
+  paused?: unknown;
+  running?: unknown;
+  dirtyWaterTankStatus?: unknown;
+  cleanWaterTankStatus?: unknown;
 };
 
 const PREPARING_ROBOT_STATES = new Set([
@@ -48,6 +54,17 @@ const ERROR_CODE_LABELS: Record<string, string> = {
 
 function normalize(value: unknown): string {
   return String(value ?? "").trim().toLowerCase();
+}
+
+export function waterTankBlockReason(dirty: unknown, clean: unknown): string | null {
+  const ready = new Set(["installed", "normal", "ok", "ready", "available"]);
+  if (dirty != null && !ready.has(normalize(dirty))) {
+    return "Check dirty water tank (full, missing or unavailable)";
+  }
+  if (clean != null && !ready.has(normalize(clean))) {
+    return "Check clean water tank (empty, missing or unavailable)";
+  }
+  return null;
 }
 
 function humanize(value: unknown): string {
@@ -89,16 +106,23 @@ export function deriveRunActivity(signals: RobotSignals): RunActivity | null {
   const robotState = normalize(signals.robotState);
   const taskStatus = normalize(signals.taskStatus);
   const errorDescription = describeDreameError(signals.errorCode);
+  const tankBlock = waterTankBlockReason(signals.dirtyWaterTankStatus, signals.cleanWaterTankStatus);
 
   if (vacuumState === "error") {
-    return { phase: "error", label: errorDescription ?? "Error" };
+    return { phase: "error", label: tankBlock ?? errorDescription ?? "Error",
+      ...(tankBlock ? {resumeBlockedReason: tankBlock} : {}) };
   }
 
   if (taskStatus === "completed") {
     return { phase: "finishing", label: "Finishing step" };
   }
 
-  if (vacuumState === "paused") {
+  if (tankBlock) {
+    return { phase: "paused", label: tankBlock, resumeBlockedReason: tankBlock };
+  }
+
+  if (vacuumState === "paused" || normalize(signals.robotStatus) === "paused"
+      || (signals.paused === true && signals.running === false) || taskStatus.endsWith("_paused")) {
     return {
       phase: "paused",
       label: errorDescription ? `Paused (${errorDescription})` : "Paused",
@@ -145,7 +169,7 @@ export function deriveRunActivity(signals: RobotSignals): RunActivity | null {
 
 export function sensorEntityIdForVacuum(
   vacuumEntityId: string,
-  suffix: "state" | "task_status" | "error" | "cleaning_progress",
+  suffix: "state" | "status" | "task_status" | "error" | "cleaning_progress" | "dirty_water_tank_status" | "clean_water_tank_status",
 ): string | null {
   const normalized = String(vacuumEntityId || "").trim();
   if (!normalized.startsWith("vacuum.")) {

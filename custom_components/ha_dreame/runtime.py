@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, field
+from typing import Any
 
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
@@ -24,6 +26,7 @@ class HaDreameRuntimeData:
     run_tracking_coordinator: DataUpdateCoordinator[QueueRunTracking | None]
     unload_requested: asyncio.Event
     vacuum_entity_id: str
+    recent_activity: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=100))
 
     @property
     def queue_state(self) -> QueueState:

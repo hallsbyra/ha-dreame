@@ -6,6 +6,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
 from .dispatch_plan import DispatchServiceCall, RoomDispatchPlan
+from .audit import async_call_robot_service
 
 
 async def async_execute_dispatch_plan(
@@ -20,7 +21,8 @@ async def async_execute_dispatch_plan(
 
     executed: list[DispatchServiceCall] = []
     for planned_call in plan.service_calls:
-        await hass.services.async_call(
+        await async_call_robot_service(
+            hass,
             planned_call.domain,
             planned_call.service,
             dict(planned_call.data),

@@ -36,6 +36,7 @@ from .const import (
     VACUUM_DOMAIN,
 )
 from .queue_core import QueueState, new_state
+from .audit import automatic_audit, register_external_command_audit
 from .runtime import HaDreameRuntimeData
 from .runtime_observation import RuntimeObservationEntityIds
 from .runtime_reconcile_runner import (
@@ -70,6 +71,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await _async_register_frontend_static_path(hass)
     async_register_services(hass)
     entry.runtime_data = runtime_data
+    entry.async_on_unload(register_external_command_audit(hass, runtime_data))
     hass.data[DOMAIN][entry.entry_id] = entry
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     _register_auto_reconcile_interval(hass, entry)
@@ -285,11 +287,12 @@ async def _async_auto_reconcile_tick(
                 return
 
         try:
-            await async_evaluate_and_apply_runtime_reconcile_under_lock(
-                hass,
-                runtime_data,
-                task_status_override=task_status_override,
-            )
+            with automatic_audit():
+                await async_evaluate_and_apply_runtime_reconcile_under_lock(
+                    hass,
+                    runtime_data,
+                    task_status_override=task_status_override,
+                )
         except Exception:
             _LOGGER.exception(
                 "Automatic %s reconcile failed for config entry %s",

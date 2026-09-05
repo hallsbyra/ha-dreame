@@ -100,12 +100,44 @@ def build_runtime_reconcile_observation(
             suffix="clean_water_tank_status",
         )
     )
+    dirty_tank = hass.states.get(
+        _conventional_sensor_entity_id(vacuum_entity_id, "dirty_water_tank_status")
+    )
+    clean_tank = _get_companion_state(
+        hass,
+        vacuum_entity_id,
+        explicit_entity_id=resolved_entity_ids.clean_water_tank_status_entity_id,
+        suffix="clean_water_tank_status",
+    )
+    water_tank_block_reason = ""
+    # Missing optional sensors remain compatible; present but unknown sensors block recovery.
+    if dirty_tank is not None and _state_value(dirty_tank).lower() not in READY_WATER_TANK_STATES:
+        water_tank_block_reason = "dirty_water_tank_not_ready"
+    elif clean_tank is not None and clean_water_tank_status.lower() not in READY_WATER_TANK_STATES:
+        water_tank_block_reason = "clean_water_tank_not_ready"
+    status = _state_value(
+        hass.states.get(_conventional_sensor_entity_id(vacuum_entity_id, "status"))
+    )
+    robot_paused = (
+        _normalize_signal(status) == "paused"
+        or (
+            vacuum is not None
+            and _normalize_signal(str(vacuum.attributes.get("status", ""))) == "paused"
+        )
+        or _vacuum_attributes_report_paused(vacuum)
+    )
+    is_drying_state = "drying" in f"{robot_state} {self_wash_base_status}".lower() or (
+        vacuum is not None and vacuum.attributes.get("drying") is True
+    )
     observed_room_id, observed_room_name = _current_room(current_room_state)
 
     return RuntimeReconcileObservation(
         vacuum_state=vacuum_state,
         task_status=task_status,
         vacuum_error_code=error_code,
+        robot_paused=robot_paused,
+        is_drying_state=is_drying_state,
+        water_tank_block_reason=water_tank_block_reason,
         observed_room_id=observed_room_id,
         observed_room_name=observed_room_name,
         cleaning_progress=cleaning_progress,
@@ -115,7 +147,9 @@ def build_runtime_reconcile_observation(
             self_wash_base_status,
             vacuum,
         ),
-        dock_prep_resume_ready=_is_dock_prep_resume_ready(clean_water_tank_status),
+        dock_prep_resume_ready=(
+            _is_dock_prep_resume_ready(clean_water_tank_status) and not water_tank_block_reason
+        ),
         is_mop_maintenance_state=_is_mop_maintenance_state(task_status, robot_state),
         is_post_run_maintenance_state=_is_post_run_maintenance_state(
             robot_state,

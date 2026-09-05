@@ -6,10 +6,11 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import logging
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Context, HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
 from .queue_core import QueueError
+from .audit import record_activity
 from .runtime import HaDreameRuntimeData
 from .runtime_observation import build_runtime_reconcile_observation
 from .runtime_reconcile import RuntimeReconcileResult, apply_reconcile_decision
@@ -91,6 +92,16 @@ async def async_evaluate_and_apply_runtime_reconcile_under_lock(
     except QueueError as err:
         raise HomeAssistantError(str(err)) from err
 
+    if result.command_intent:
+        record_activity(
+            runtime_data,
+            result.command_intent,
+            "decision",
+            context=Context(),
+            source="reconcile",
+            room_id=evaluation.expected_room_id,
+            reason=",".join(evaluation.decision.event_reasons),
+        )
     applied_result = await async_apply_runtime_reconcile_result(
         hass,
         runtime_data,

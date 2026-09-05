@@ -60,6 +60,7 @@ from .const import (
     VACUUM_DOMAIN,
 )
 from .dispatch_executor import async_execute_dispatch_plan
+from .audit import async_call_robot_service, service_audit
 from .dispatch_plan import build_room_dispatch_plan
 from .queue_core import (
     QueueError,
@@ -153,7 +154,7 @@ def async_register_services(hass: HomeAssistant) -> None:
 
         async def _async_add_queue_room(call: ServiceCall) -> ServiceResponse:
             config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
-            async with _async_runtime_operation(hass, config_entry_id):
+            async with _async_runtime_operation(hass, config_entry_id, call):
                 return _add_queue_room_response(
                     hass,
                     config_entry_id,
@@ -172,10 +173,9 @@ def async_register_services(hass: HomeAssistant) -> None:
     if not hass.services.has_service(DOMAIN, SERVICE_APPLY_RECONCILE):
 
         async def _async_apply_reconcile(call: ServiceCall) -> ServiceResponse:
-            return await _async_apply_reconcile_response(
-                hass,
-                call.data[CONF_CONFIG_ENTRY_ID],
-            )
+            entry = _runtime_entry(hass, call.data[CONF_CONFIG_ENTRY_ID])
+            with service_audit(entry.runtime_data, call):
+                return await _async_apply_reconcile_response(hass, call.data[CONF_CONFIG_ENTRY_ID])
 
         hass.services.async_register(
             DOMAIN,
@@ -189,7 +189,7 @@ def async_register_services(hass: HomeAssistant) -> None:
 
         async def _async_cancel_queue(call: ServiceCall) -> ServiceResponse:
             config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
-            async with _async_runtime_operation(hass, config_entry_id):
+            async with _async_runtime_operation(hass, config_entry_id, call):
                 return await _async_cancel_queue_response(hass, config_entry_id)
 
         hass.services.async_register(
@@ -204,7 +204,7 @@ def async_register_services(hass: HomeAssistant) -> None:
 
         async def _async_clear_pending_queue(call: ServiceCall) -> ServiceResponse:
             config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
-            async with _async_runtime_operation(hass, config_entry_id):
+            async with _async_runtime_operation(hass, config_entry_id, call):
                 return _clear_pending_queue_response(hass, config_entry_id)
 
         hass.services.async_register(
@@ -261,7 +261,7 @@ def async_register_services(hass: HomeAssistant) -> None:
 
         async def _async_remove_queue_item(call: ServiceCall) -> ServiceResponse:
             config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
-            async with _async_runtime_operation(hass, config_entry_id):
+            async with _async_runtime_operation(hass, config_entry_id, call):
                 return _remove_queue_item_response(
                     hass,
                     config_entry_id,
@@ -280,7 +280,7 @@ def async_register_services(hass: HomeAssistant) -> None:
 
         async def _async_move_queue_item(call: ServiceCall) -> ServiceResponse:
             config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
-            async with _async_runtime_operation(hass, config_entry_id):
+            async with _async_runtime_operation(hass, config_entry_id, call):
                 return _move_queue_item_response(
                     hass,
                     config_entry_id,
@@ -300,7 +300,7 @@ def async_register_services(hass: HomeAssistant) -> None:
 
         async def _async_skip_current_room(call: ServiceCall) -> ServiceResponse:
             config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
-            async with _async_runtime_operation(hass, config_entry_id):
+            async with _async_runtime_operation(hass, config_entry_id, call):
                 return await _async_skip_current_room_response(hass, config_entry_id)
 
         hass.services.async_register(
@@ -315,7 +315,7 @@ def async_register_services(hass: HomeAssistant) -> None:
 
         async def _async_resume_queue(call: ServiceCall) -> ServiceResponse:
             config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
-            async with _async_runtime_operation(hass, config_entry_id):
+            async with _async_runtime_operation(hass, config_entry_id, call):
                 return await _async_resume_queue_response(hass, config_entry_id)
 
         hass.services.async_register(
@@ -330,7 +330,7 @@ def async_register_services(hass: HomeAssistant) -> None:
 
         async def _async_start_queue(call: ServiceCall) -> ServiceResponse:
             config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
-            async with _async_runtime_operation(hass, config_entry_id):
+            async with _async_runtime_operation(hass, config_entry_id, call):
                 return await _async_start_queue_response(hass, config_entry_id)
 
         hass.services.async_register(
@@ -347,7 +347,7 @@ def async_register_services(hass: HomeAssistant) -> None:
             call: ServiceCall,
         ) -> ServiceResponse:
             config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
-            async with _async_runtime_operation(hass, config_entry_id):
+            async with _async_runtime_operation(hass, config_entry_id, call):
                 return _update_queue_item_overrides_response(
                     hass,
                     config_entry_id,
@@ -369,7 +369,7 @@ def async_register_services(hass: HomeAssistant) -> None:
             call: ServiceCall,
         ) -> ServiceResponse:
             config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
-            async with _async_runtime_operation(hass, config_entry_id):
+            async with _async_runtime_operation(hass, config_entry_id, call):
                 return await _async_update_running_override_response(
                     hass,
                     config_entry_id,
@@ -416,6 +416,7 @@ def _runtime_entry(hass: HomeAssistant, config_entry_id: str) -> ConfigEntry:
 async def _async_runtime_operation(
     hass: HomeAssistant,
     config_entry_id: str,
+    call: ServiceCall | None = None,
 ) -> AsyncIterator[None]:
     """Serialize one queue mutation or robot command for a loaded entry."""
     entry = _runtime_entry(hass, config_entry_id)
@@ -427,7 +428,8 @@ async def _async_runtime_operation(
             or runtime_data.unload_requested.is_set()
         ):
             raise HomeAssistantError(f"HA Dreame entry is not loaded: {config_entry_id}")
-        yield
+        with service_audit(runtime_data, call):
+            yield
 
 
 def _add_queue_room_response(
@@ -507,13 +509,15 @@ async def _async_cancel_queue_response(
     if not runtime_data.commands_enabled:
         raise HomeAssistantError("HA Dreame robot commands are disabled")
 
-    await hass.services.async_call(
+    await async_call_robot_service(
+        hass,
         VACUUM_DOMAIN,
         "stop",
         {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
         blocking=True,
     )
-    await hass.services.async_call(
+    await async_call_robot_service(
+        hass,
         VACUUM_DOMAIN,
         "return_to_base",
         {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
@@ -556,7 +560,8 @@ async def _async_skip_current_room_response(
         raise HomeAssistantError(str(err)) from err
 
     if queue_state.run_state == "running":
-        await hass.services.async_call(
+        await async_call_robot_service(
+            hass,
             VACUUM_DOMAIN,
             "stop",
             {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
@@ -573,7 +578,8 @@ async def _async_skip_current_room_response(
         runtime_data.set_run_tracking(_new_run_tracking(queue_state))
         return _queue_status_response(entry)
 
-    await hass.services.async_call(
+    await async_call_robot_service(
+        hass,
         VACUUM_DOMAIN,
         "return_to_base",
         {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
@@ -606,10 +612,12 @@ async def _async_resume_queue_response(
         raise HomeAssistantError("Queue run tracking is not active")
 
     robot_status = _robot_status_response(hass, runtime_data)
+    _require_ready_water_tanks(hass, runtime_data)
     if not robot_status["interrupted"]:
         raise HomeAssistantError("Robot is not waiting for user action")
 
-    await hass.services.async_call(
+    await async_call_robot_service(
+        hass,
         VACUUM_DOMAIN,
         "start",
         {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
@@ -723,7 +731,7 @@ async def _async_update_running_override_response(
     if hass.states.get(entity_id) is None:
         raise HomeAssistantError(f"Running override entity is not available: {entity_id}")
 
-    await hass.services.async_call(domain, service, data, blocking=True)
+    await async_call_robot_service(hass, domain, service, data, blocking=True)
     return {
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
         CONF_FIELD: field,
@@ -750,6 +758,7 @@ async def _async_start_queue_response(
     )
     if observation.task_status and observation.task_status.lower() != "completed":
         raise HomeAssistantError("Cannot start queue while a previous robot task is still active")
+    _require_ready_water_tanks(hass, runtime_data)
 
     try:
         queue_state = start_run(runtime_data.queue_state)
@@ -857,15 +866,26 @@ def _control_readiness_response(
         blocking_reasons.append("robot_commands_disabled")
 
     can_offer_command_actions = runtime_data.commands_enabled and vacuum_available
+    tank_block = any(
+        reason.endswith("_tank_not_ready") for reason in robot_status["interruption_reasons"]
+    )
+    if tank_block:
+        blocking_reasons.extend(
+            reason
+            for reason in robot_status["interruption_reasons"]
+            if reason.endswith("_tank_not_ready")
+        )
     if queue_state.run_state == "idle":
-        if can_offer_command_actions and pending_items > 0:
+        if can_offer_command_actions and pending_items > 0 and not tank_block:
             available_actions.append(SERVICE_START_QUEUE)
         elif pending_items == 0:
             blocking_reasons.append("queue_has_no_pending_items")
     elif queue_state.run_state == "running":
         if can_offer_command_actions:
             if robot_status["interrupted"]:
-                available_actions.extend([SERVICE_RESUME_QUEUE, SERVICE_CANCEL_QUEUE])
+                if not tank_block:
+                    available_actions.append(SERVICE_RESUME_QUEUE)
+                available_actions.append(SERVICE_CANCEL_QUEUE)
             else:
                 available_actions.extend([SERVICE_CANCEL_QUEUE, SERVICE_SKIP_CURRENT_ROOM])
             if running_override_ready and not robot_status["interrupted"]:
@@ -942,6 +962,7 @@ def _runtime_status_response(hass: HomeAssistant, config_entry_id: str) -> dict[
         CONF_ALLOW_ROBOT_COMMANDS: runtime_data.commands_enabled,
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
         ATTR_RUN_TRACKING: _run_tracking_response(runtime_data.run_tracking),
+        "recent_activity": list(runtime_data.recent_activity),
         "robot_status": _robot_status_response(hass, runtime_data),
         CONF_VACUUM_ENTITY_ID: runtime_data.vacuum_entity_id,
     }
@@ -964,6 +985,10 @@ def _robot_status_response(
     interruption_reasons: list[str] = []
     if vacuum_state == "paused":
         interruption_reasons.append("vacuum_paused")
+    elif observation.robot_paused:
+        interruption_reasons.append("robot_paused")
+    if observation.water_tank_block_reason:
+        interruption_reasons.append(observation.water_tank_block_reason)
     if task_status.endswith("_paused"):
         interruption_reasons.append("task_status_paused")
     interruption_context = bool(interruption_reasons) or vacuum_state == "error"
@@ -981,6 +1006,16 @@ def _robot_status_response(
         "task_status": task_status,
         "vacuum_state": vacuum_state,
     }
+
+
+def _require_ready_water_tanks(hass: HomeAssistant, runtime_data: HaDreameRuntimeData) -> None:
+    observation = build_runtime_reconcile_observation(
+        hass,
+        vacuum_entity_id=runtime_data.vacuum_entity_id,
+        entity_ids=runtime_data.observation_entity_ids,
+    )
+    if observation.water_tank_block_reason:
+        raise HomeAssistantError(observation.water_tank_block_reason)
 
 
 def _normalize_status_value(value: str) -> str:
@@ -1013,6 +1048,9 @@ def _reconcile_observation_response(
     return {
         "cleaning_progress": observation.cleaning_progress,
         "dock_prep_resume_ready": observation.dock_prep_resume_ready,
+        "robot_paused": observation.robot_paused,
+        "is_drying_state": observation.is_drying_state,
+        "water_tank_block_reason": observation.water_tank_block_reason,
         "force_retry_after_recovery": observation.force_retry_after_recovery,
         "is_dock_prep_paused": observation.is_dock_prep_paused,
         "is_dock_prep_state": observation.is_dock_prep_state,
