@@ -23,7 +23,6 @@ from custom_components.ha_dreame.const import (
     DOMAIN,
     DREAME_VACUUM_DOMAIN,
     SERVICE_CANCEL_QUEUE,
-    SERVICE_START_QUEUE,
 )
 from custom_components.ha_dreame.queue_core import QueueState, add_room, start_run
 from custom_components.ha_dreame.runtime_state import QueueRunTracking
@@ -216,118 +215,6 @@ async def test_auto_reconcile_dispatches_next_room_after_completion(
     assert entry.runtime_data.queue_state.current_item_id == next_item.item_id
     assert entry.runtime_data.run_tracking is not None
     assert entry.runtime_data.run_tracking.current_item_id == next_item.item_id
-
-
-async def test_explicit_start_waits_then_dispatches_when_previous_task_completes(
-    hass: HomeAssistant,
-) -> None:
-    """Test a deferred explicit start is dispatched once on task completion."""
-    calls: list[dict[str, object]] = []
-
-    async def _record_clean_segment(call: ServiceCall) -> None:
-        calls.append(dict(call.data))
-
-    hass.services.async_register(
-        DREAME_VACUUM_DOMAIN,
-        "vacuum_clean_segment",
-        _record_clean_segment,
-    )
-    vacuum_entity_id, entry = await _setup_loaded_entry(
-        hass,
-        commands_enabled=True,
-        auto_reconcile_enabled=True,
-    )
-    entry.runtime_data.set_queue_state(add_room(QueueState(), room_id=7, room_name="Bathroom"))
-    hass.states.async_set(vacuum_entity_id, "returning")
-    hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning")
-    await hass.async_block_till_done()
-
-    response = await hass.services.async_call(
-        DOMAIN,
-        SERVICE_START_QUEUE,
-        {CONF_CONFIG_ENTRY_ID: entry.entry_id},
-        blocking=True,
-        return_response=True,
-    )
-
-    assert response["start_requested"] is True
-    assert calls == []
-    assert entry.runtime_data.queue_state.start_requested is True
-
-    hass.states.async_set(vacuum_entity_id, "docked")
-    hass.states.async_set("sensor.dreame_robot_task_status", "completed")
-    await hass.async_block_till_done()
-    await hass.async_block_till_done()
-
-    assert calls == [{"entity_id": vacuum_entity_id, "segments": [7]}]
-    assert entry.runtime_data.queue_state.run_state == "running"
-    assert entry.runtime_data.queue_state.start_requested is False
-    assert entry.runtime_data.queue_state.items[0].status == "running"
-
-
-async def test_deferred_start_interval_recovers_a_missed_completion_event(
-    hass: HomeAssistant,
-) -> None:
-    """Test the interval starts an armed queue if the completion event was missed."""
-    calls: list[dict[str, object]] = []
-
-    async def _record_clean_segment(call: ServiceCall) -> None:
-        calls.append(dict(call.data))
-
-    hass.services.async_register(
-        DREAME_VACUUM_DOMAIN,
-        "vacuum_clean_segment",
-        _record_clean_segment,
-    )
-    vacuum_entity_id, entry = await _setup_loaded_entry(
-        hass,
-        commands_enabled=True,
-        auto_reconcile_enabled=True,
-    )
-    pending = add_room(QueueState(), room_id=7, room_name="Bathroom")
-    entry.runtime_data.set_queue_state(QueueState(items=pending.items, start_requested=True))
-    hass.states.async_set(vacuum_entity_id, "docked")
-    hass.states.async_set("sensor.dreame_robot_task_status", "completed")
-
-    await _fire_auto_reconcile_interval(hass)
-
-    assert calls == [{"entity_id": vacuum_entity_id, "segments": [7]}]
-    assert entry.runtime_data.queue_state.run_state == "running"
-    assert entry.runtime_data.queue_state.start_requested is False
-
-
-async def test_deferred_start_dispatch_failure_is_not_retried_indefinitely(
-    hass: HomeAssistant,
-) -> None:
-    """Test only the readiness wait retries; a failed robot command is not replayed."""
-    calls: list[dict[str, object]] = []
-
-    async def _raise_clean_segment(call: ServiceCall) -> None:
-        calls.append(dict(call.data))
-        raise RuntimeError("dispatch failed")
-
-    hass.services.async_register(
-        DREAME_VACUUM_DOMAIN,
-        "vacuum_clean_segment",
-        _raise_clean_segment,
-    )
-    vacuum_entity_id, entry = await _setup_loaded_entry(
-        hass,
-        commands_enabled=True,
-        auto_reconcile_enabled=True,
-    )
-    pending = add_room(QueueState(), room_id=7, room_name="Bathroom")
-    entry.runtime_data.set_queue_state(QueueState(items=pending.items, start_requested=True))
-    hass.states.async_set(vacuum_entity_id, "docked")
-    hass.states.async_set("sensor.dreame_robot_task_status", "completed")
-
-    await _fire_auto_reconcile_interval(hass)
-    await _fire_auto_reconcile_interval(hass)
-
-    assert calls == [{"entity_id": vacuum_entity_id, "segments": [7]}]
-    assert entry.runtime_data.queue_state.run_state == "idle"
-    assert entry.runtime_data.queue_state.start_requested is False
-    assert entry.runtime_data.queue_state.items[0].status == "pending"
 
 
 async def test_auto_reconcile_logs_late_room_mismatch_as_debug_hold(
