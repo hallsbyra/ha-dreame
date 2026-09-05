@@ -192,6 +192,7 @@ async def test_queue_status_sensor_updates_when_add_queue_room_service_runs(
     assert state.attributes[ATTR_QUEUE_ITEMS][0][CONF_ROOM_NAME] == "Room 7"
     assert state.attributes[ATTR_QUEUE_ITEMS][0][ATTR_STATUS] == "pending"
     assert state.attributes[ATTR_QUEUE_ITEMS][0][ATTR_ITEM_ID]
+    assert state.attributes["start_requested"] is False
 
 
 async def test_queue_status_sensor_updates_when_remove_queue_item_service_runs(

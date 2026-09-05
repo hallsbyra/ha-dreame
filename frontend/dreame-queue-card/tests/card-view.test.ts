@@ -116,6 +116,7 @@ describe("card view model", () => {
         runState: "running",
         allowRobotCommands: null,
         autoReconcileEnabled: null,
+        startRequested: false,
         configEntryId: "config-entry-1",
         vacuumEntityId: "vacuum.robot",
         pendingItems: 2,
@@ -283,13 +284,27 @@ describe("card view model", () => {
   });
 
   it("offers a command-gated start control for idle queues with pending rooms", () => {
+    const readyHass = hassWithQueueState("idle", {
+      queue_items: [queueAttributes.queue_items[1]],
+      pending_items: 1,
+      running_items: 0,
+      total_items: 1,
+    });
     const view = buildCardViewModel(
-      hassWithQueueState("idle", {
-        queue_items: [queueAttributes.queue_items[1]],
-        pending_items: 1,
-        running_items: 0,
-        total_items: 1,
-      }),
+      {
+        ...readyHass,
+        states: {
+          ...readyHass.states,
+          "vacuum.robot": {
+            ...readyHass.states["vacuum.robot"],
+            state: "docked",
+          },
+          "sensor.robot_task_status": {
+            state: "completed",
+            attributes: {},
+          },
+        },
+      },
       {
         entity: "sensor.robot_queue_status",
         title: "Robot queue",
@@ -300,6 +315,99 @@ describe("card view model", () => {
     expect(view.activeControls).toEqual([
       {
         ariaLabel: "Start queue",
+        label: "Start",
+        service: "start_queue",
+      },
+    ]);
+  });
+
+  it("offers a deferred start while the robot finishes a previous task", () => {
+    const idleQueue = hassWithQueueState("idle", {
+      queue_items: [queueAttributes.queue_items[1]],
+      pending_items: 1,
+      running_items: 0,
+      total_items: 1,
+    });
+    const view = buildCardViewModel(
+      {
+        ...idleQueue,
+        states: {
+          ...idleQueue.states,
+          "vacuum.robot": {
+            ...idleQueue.states["vacuum.robot"],
+            state: "returning",
+          },
+        },
+      },
+      { entity: "sensor.robot_queue_status" },
+    );
+
+    expect(view.summary).toBe("Robot is returning to base. Start will wait until it is ready.");
+    expect(view.activeControls).toEqual([
+      {
+        ariaLabel: "Start queue when ready",
+        label: "Start when ready",
+        service: "start_queue",
+      },
+    ]);
+  });
+
+  it("shows an accepted deferred start instead of an unexplained pending room", () => {
+    const waitingQueue = hassWithQueueState("idle", {
+      queue_items: [queueAttributes.queue_items[1]],
+      pending_items: 1,
+      running_items: 0,
+      start_requested: true,
+      total_items: 1,
+    });
+    const view = buildCardViewModel(waitingQueue, {
+      entity: "sensor.robot_queue_status",
+    });
+
+    expect(view.summary).toBe("Start requested. Waiting for the robot to become ready.");
+    expect(view.rows[0].statusLabel).toBe("Waiting to start");
+    expect(view.activeControls).toEqual([
+      {
+        ariaLabel: "Queue is waiting to start",
+        disabled: true,
+        disabledReason: "Start already requested",
+        label: "Waiting",
+        service: "start_queue",
+      },
+    ]);
+  });
+
+  it("explains and disables start while the robot is unavailable", () => {
+    const idleQueue = hassWithQueueState("idle", {
+      queue_items: [queueAttributes.queue_items[1]],
+      pending_items: 1,
+      running_items: 0,
+      total_items: 1,
+    });
+    const view = buildCardViewModel(
+      {
+        ...idleQueue,
+        states: {
+          ...idleQueue.states,
+          "vacuum.robot": {
+            ...idleQueue.states["vacuum.robot"],
+            state: "unavailable",
+          },
+          "sensor.robot_task_status": {
+            state: "unavailable",
+            attributes: {},
+          },
+        },
+      },
+      { entity: "sensor.robot_queue_status" },
+    );
+
+    expect(view.summary).toBe("Robot is unavailable. Check its connection before starting.");
+    expect(view.activeControls).toEqual([
+      {
+        ariaLabel: "Start queue",
+        disabled: true,
+        disabledReason: "Robot is unavailable",
         label: "Start",
         service: "start_queue",
       },
