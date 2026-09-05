@@ -15,6 +15,7 @@ from custom_components.ha_dreame.queue_core import (
     external_takeover,
     move_item,
     new_state,
+    request_start,
     remove_item,
     skip_current_room,
     start_run,
@@ -38,7 +39,29 @@ def test_new_state_starts_idle_and_empty() -> None:
     assert state.run_id is None
     assert state.items == ()
     assert state.current_item_id is None
+    assert state.start_requested is False
     assert current_item(state) is None
+
+
+def test_request_start_arms_an_idle_pending_queue() -> None:
+    """Test an explicit start request can wait without marking a room running."""
+    state = add_room(new_state(), room_id=1, room_name="Kitchen")
+
+    waiting = request_start(state)
+
+    assert waiting.run_state == "idle"
+    assert waiting.start_requested is True
+    assert waiting.items[0].status == "pending"
+
+
+def test_start_run_consumes_a_waiting_start_request() -> None:
+    """Test dispatching a queue clears its deferred start intent."""
+    state = request_start(add_room(new_state(), room_id=1, room_name="Kitchen"))
+
+    running = start_run(state)
+
+    assert running.run_state == "running"
+    assert running.start_requested is False
 
 
 def test_current_item_returns_none_when_id_is_stale() -> None:

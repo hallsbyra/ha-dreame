@@ -108,6 +108,29 @@ const idleHass = {
         total_items: 1,
       },
     },
+    "vacuum.robot": {
+      ...hass.states["vacuum.robot"],
+      state: "docked",
+    },
+    "sensor.robot_task_status": {
+      state: "completed",
+      attributes: {},
+    },
+  },
+};
+
+const busyIdleHass = {
+  ...idleHass,
+  states: {
+    ...idleHass.states,
+    "vacuum.robot": {
+      ...idleHass.states["vacuum.robot"],
+      state: "returning",
+    },
+    "sensor.robot_task_status": {
+      state: "room_cleaning",
+      attributes: {},
+    },
   },
 };
 
@@ -230,6 +253,33 @@ describe("ha-dreame-queue-card", () => {
     expect(
       shadowRoot?.querySelector<HTMLButtonElement>('button[aria-label="Start queue"]'),
     ).toBeNull();
+  });
+
+  it("offers a deferred start while the previous robot task finishes", async () => {
+    const callService = vi.fn();
+    const element = document.createElement(CARD_ELEMENT_TAG) as any;
+    element.setConfig({
+      entity: "sensor.robot_queue_status",
+      title: "Robot queue",
+    });
+    element.hass = { ...busyIdleHass, callService };
+    document.body.append(element);
+
+    await element.updateComplete;
+
+    const shadowRoot = element.shadowRoot as ShadowRoot | null;
+    const startQueue = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Start queue when ready"]',
+    );
+    expect(element.shadowRoot?.textContent).toContain(
+      "Robot is returning to base. Start will wait until it is ready.",
+    );
+    expect(startQueue?.disabled).toBe(false);
+
+    startQueue?.click();
+    expect(callService).toHaveBeenCalledWith("ha_dreame", "start_queue", {
+      config_entry_id: "config-entry-1",
+    });
   });
 
   it("adds an available room through the ha_dreame queue service", async () => {
@@ -546,6 +596,30 @@ describe("ha-dreame-queue-card", () => {
     expect(callService).toHaveBeenCalledWith("ha_dreame", "start_queue", {
       config_entry_id: "config-entry-1",
     });
+  });
+
+  it("shows a useful inline message when a start race reaches the backend guard", async () => {
+    const callService = vi
+      .fn()
+      .mockRejectedValue(new Error("Cannot start queue while a previous robot task is still active"));
+    const element = document.createElement(CARD_ELEMENT_TAG) as any;
+    element.setConfig({
+      entity: "sensor.robot_queue_status",
+      title: "Robot queue",
+    });
+    element.hass = { ...idleHass, callService };
+    document.body.append(element);
+
+    await element.updateComplete;
+
+    const shadowRoot = element.shadowRoot as ShadowRoot | null;
+    shadowRoot?.querySelector<HTMLButtonElement>('button[aria-label="Start queue"]')?.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await element.updateComplete;
+
+    expect(element.shadowRoot?.textContent).toContain(
+      "Robot is still finishing a previous task. Try again when it is ready.",
+    );
   });
 
   it("cancels and skips a running queue through command-gated ha_dreame services", async () => {
