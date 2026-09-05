@@ -11,6 +11,7 @@ export type QueueSnapshot = {
   runState: string;
   allowRobotCommands: boolean | null;
   autoReconcileEnabled: boolean | null;
+  startRequested: boolean;
   configEntryId: string | null;
   vacuumEntityId: string | null;
   pendingItems: number;
@@ -135,6 +136,7 @@ export function parseQueueSnapshot(stateObject: HomeAssistantState | undefined):
     runState: normalizedRunState(stateObject?.state) || "unknown",
     allowRobotCommands: optionalBoolean(attrs["allow_robot_commands"]),
     autoReconcileEnabled: optionalBoolean(attrs["auto_reconcile_enabled"]),
+    startRequested: attrs["start_requested"] === true,
     configEntryId:
       typeof attrs["config_entry_id"] === "string" ? attrs["config_entry_id"] : null,
     vacuumEntityId:

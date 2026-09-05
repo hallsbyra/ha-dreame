@@ -50,6 +50,11 @@ export type CardActiveControl = {
   service: ActiveQueueService;
 };
 
+type StartBlock = {
+  control: CardActiveControl;
+  summary: string;
+};
+
 export type CardOverrideControl = {
   controlType: "pending" | "running";
   field: OverrideField;
@@ -139,6 +144,7 @@ export function buildCardViewModel(
 
   const snapshot = parseQueueSnapshot(queueState);
   const activity = buildActivity(hass, snapshot);
+  const startBlock = buildStartBlock(hass, snapshot);
   const rooms = buildRooms(hass, snapshot);
 
   return {
@@ -146,10 +152,10 @@ export function buildCardViewModel(
     status: "ready",
     entityId,
     message: null,
-    summary: buildSummary(snapshot, activity),
+    summary: buildSummary(snapshot, activity, startBlock),
     snapshot,
     activity,
-    activeControls: buildActiveControls(snapshot, activity),
+    activeControls: buildActiveControls(snapshot, activity, startBlock),
     canClearPending: snapshot.pendingItems > 0,
     rooms,
     rows: cardQueueRows(hass, snapshot),
@@ -215,7 +221,10 @@ function cardQueueRows(
     queuePosition: index,
     roomName: item.roomName,
     status: item.status,
-    statusLabel: queueRunStateLabel(item.status),
+    statusLabel:
+      item.status === "pending" && snapshot.startRequested
+        ? "Waiting to start"
+        : queueRunStateLabel(item.status),
     ...(item.status === "running" && activeProgress !== null ? { progress: activeProgress } : {}),
     overrides: { ...item.overrides },
     canRemove: item.status === "pending",
@@ -267,6 +276,7 @@ function progressPercent(value: unknown): number | null {
 function buildActiveControls(
   snapshot: QueueSnapshot,
   activity: RunActivity | null,
+  startBlock: StartBlock | null,
 ): CardActiveControl[] {
   const disabledState =
     snapshot.allowRobotCommands === false
@@ -308,11 +318,21 @@ function buildActiveControls(
   }
 
   if (snapshot.runState === "idle" && snapshot.pendingItems > 0) {
+    const startControl =
+      snapshot.allowRobotCommands === false
+        ? {
+            ariaLabel: "Start queue",
+            label: "Start",
+            service: "start_queue" as const,
+          }
+        : startBlock?.control;
     return [
       {
-        ariaLabel: "Start queue",
-        label: "Start",
-        service: "start_queue",
+        ...(startControl ?? {
+          ariaLabel: "Start queue",
+          label: "Start",
+          service: "start_queue" as const,
+        }),
         ...disabledState,
       },
     ];
@@ -321,9 +341,17 @@ function buildActiveControls(
   return [];
 }
 
-function buildSummary(snapshot: QueueSnapshot, activity: RunActivity | null): string {
+function buildSummary(
+  snapshot: QueueSnapshot,
+  activity: RunActivity | null,
+  startBlock: StartBlock | null,
+): string {
   if (activity) {
     return activity.label;
+  }
+
+  if (snapshot.runState === "idle" && snapshot.pendingItems > 0 && startBlock) {
+    return startBlock.summary;
   }
 
   switch (snapshot.runState) {
@@ -350,6 +378,72 @@ function buildSummary(snapshot: QueueSnapshot, activity: RunActivity | null): st
     default:
       return `Queue state: ${queueRunStateLabel(snapshot.runState)}.`;
   }
+}
+
+function buildStartBlock(
+  hass: HomeAssistantLike | undefined,
+  snapshot: QueueSnapshot,
+): StartBlock | null {
+  if (!hass || snapshot.runState !== "idle" || snapshot.pendingItems < 1) {
+    return null;
+  }
+
+  if (snapshot.startRequested) {
+    return {
+      control: {
+        ariaLabel: "Queue is waiting to start",
+        disabled: true,
+        disabledReason: "Start already requested",
+        label: "Waiting",
+        service: "start_queue",
+      },
+      summary: "Start requested. Waiting for the robot to become ready.",
+    };
+  }
+
+  const vacuumEntityId = snapshot.vacuumEntityId;
+  if (!vacuumEntityId) {
+    return null;
+  }
+
+  const vacuumState = normalizedString(stateValue(hass, vacuumEntityId)).toLowerCase();
+  const taskStatus = normalizedString(
+    stateValue(hass, sensorEntityIdForVacuum(vacuumEntityId, "task_status")),
+  ).toLowerCase();
+
+  if (
+    vacuumState === "unavailable" ||
+    vacuumState === "unknown" ||
+    taskStatus === "unavailable" ||
+    taskStatus === "unknown"
+  ) {
+    return {
+      control: {
+        ariaLabel: "Start queue",
+        disabled: true,
+        disabledReason: "Robot is unavailable",
+        label: "Start",
+        service: "start_queue",
+      },
+      summary: "Robot is unavailable. Check its connection before starting.",
+    };
+  }
+
+  if (taskStatus && taskStatus !== "completed") {
+    return {
+      control: {
+        ariaLabel: "Start queue when ready",
+        label: "Start when ready",
+        service: "start_queue",
+      },
+      summary:
+        vacuumState === "returning"
+          ? "Robot is returning to base. Start will wait until it is ready."
+          : "Robot is finishing a previous task. Start will wait until it is ready.",
+    };
+  }
+
+  return null;
 }
 
 function buildOverrideControls(overrides: Record<string, unknown>): CardOverrideControl[] {
