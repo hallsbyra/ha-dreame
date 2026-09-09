@@ -69,6 +69,7 @@ from .queue_core import (
     cancel_run,
     clear_pending,
     current_item,
+    external_takeover,
     move_item,
     remove_item,
     skip_current_room,
@@ -509,6 +510,11 @@ async def _async_cancel_queue_response(
     if not runtime_data.commands_enabled:
         raise HomeAssistantError("HA Dreame robot commands are disabled")
 
+    if runtime_data.queue_state.run_state == "waiting_for_tanks":
+        runtime_data.set_queue_state(cancel_run(runtime_data.queue_state))
+        runtime_data.set_run_tracking(None)
+        return _queue_status_response(entry)
+
     await async_call_robot_service(
         hass,
         VACUUM_DOMAIN,
@@ -758,8 +764,6 @@ async def _async_start_queue_response(
     )
     if observation.task_status and observation.task_status.lower() != "completed":
         raise HomeAssistantError("Cannot start queue while a previous robot task is still active")
-    _require_ready_water_tanks(hass, runtime_data)
-
     try:
         queue_state = start_run(runtime_data.queue_state)
         item = current_item(queue_state)
@@ -771,6 +775,19 @@ async def _async_start_queue_response(
         )
     except QueueError as err:
         raise HomeAssistantError(str(err)) from err
+
+    if observation.water_tank_block_reason:
+        if not _entity_available(hass, runtime_data.vacuum_entity_id):
+            raise HomeAssistantError("Robot is unavailable")
+        if not runtime_data.auto_reconcile_enabled:
+            raise HomeAssistantError(
+                "Waiting for water tanks requires automatic reconciliation; "
+                + observation.water_tank_block_reason
+            )
+        runtime_data.set_queue_state(
+            replace(runtime_data.queue_state, run_state="waiting_for_tanks")
+        )
+        return _queue_status_response(entry)
 
     await async_execute_dispatch_plan(
         hass,
@@ -789,6 +806,38 @@ async def _async_start_queue_response(
         item.room_name,
     )
     return _queue_status_response(entry)
+
+
+async def async_start_waiting_queue(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Release a tank-blocked start once, under the caller's operation lock."""
+    runtime_data = entry.runtime_data
+    if runtime_data.queue_state.run_state != "waiting_for_tanks":
+        return
+    observation = build_runtime_reconcile_observation(
+        hass,
+        vacuum_entity_id=runtime_data.vacuum_entity_id,
+        entity_ids=runtime_data.observation_entity_ids,
+    )
+    if (
+        not runtime_data.commands_enabled
+        or not runtime_data.auto_reconcile_enabled
+        or observation.water_tank_block_reason
+        or observation.vacuum_state.lower()
+        in {"", "unknown", "unavailable", "error", "paused", "cleaning", "returning"}
+        or observation.robot_paused
+        or observation.task_status.lower() != "completed"
+        or _meaningful_error(_normalize_status_value(observation.vacuum_error_code))
+    ):
+        return
+    # Disarm before dispatch: a service failure must not create an invisible retry loop.
+    runtime_data.set_queue_state(replace(runtime_data.queue_state, run_state="idle"))
+    try:
+        await _async_start_queue_response(hass, entry.entry_id)
+    except Exception:
+        runtime_data.set_queue_state(
+            external_takeover(runtime_data.queue_state, reason="deferred_start_dispatch_failed")
+        )
+        raise
 
 
 def _running_override_service_call(
@@ -876,10 +925,16 @@ def _control_readiness_response(
             if reason.endswith("_tank_not_ready")
         )
     if queue_state.run_state == "idle":
-        if can_offer_command_actions and pending_items > 0 and not tank_block:
+        if (
+            can_offer_command_actions
+            and pending_items > 0
+            and (not tank_block or runtime_data.auto_reconcile_enabled)
+        ):
             available_actions.append(SERVICE_START_QUEUE)
         elif pending_items == 0:
             blocking_reasons.append("queue_has_no_pending_items")
+    elif queue_state.run_state == "waiting_for_tanks":
+        available_actions.append(SERVICE_CANCEL_QUEUE)
     elif queue_state.run_state == "running":
         if can_offer_command_actions:
             if robot_status["interrupted"]:

@@ -232,7 +232,8 @@ function cardQueueRows(
     queuePosition: index,
     roomName: item.roomName,
     status: item.status,
-    statusLabel: item.status === "pending" ? "Queued"
+    statusLabel: item.status === "pending" && snapshot.runState === "waiting_for_tanks"
+      ? "Waiting for water tanks" : item.status === "pending" ? "Queued"
       : item.status === "running" && activity?.phase === "paused" ? "Paused"
       : item.status === "running" && activity?.phase === "error" ? "Problem"
       : queueRunStateLabel(item.status),
@@ -293,6 +294,10 @@ function buildActiveControls(
     snapshot.allowRobotCommands === false
       ? { disabled: true, disabledReason: "Robot commands disabled" }
       : {};
+
+  if (snapshot.runState === "waiting_for_tanks") {
+    return [{ariaLabel: "Cancel waiting start", label: "Cancel", service: "cancel_queue"}];
+  }
 
   if (snapshot.runState === "running") {
     if (activity?.phase === "paused" || activity?.phase === "error") {
@@ -375,6 +380,8 @@ function buildSummary(
         return `Ready to start ${snapshot.pendingItems} rooms.`;
       }
       return "Queue is empty.";
+    case "waiting_for_tanks":
+      return "Waiting for water tanks. Starts automatically when the tanks and robot are ready.";
     case "running":
       return "Queue is running.";
     case "completed":
@@ -410,10 +417,6 @@ function buildStartBlock(
     stateValue(hass, sensorEntityIdForVacuum(vacuumEntityId, "dirty_water_tank_status")),
     stateValue(hass, sensorEntityIdForVacuum(vacuumEntityId, "clean_water_tank_status")),
   );
-  if (tankBlock) {
-    return {control: {ariaLabel: "Start queue", disabled: true, disabledReason: tankBlock,
-      label: "Start", service: "start_queue"}, summary: tankBlock};
-  }
   const taskStatus = normalizedString(
     stateValue(hass, sensorEntityIdForVacuum(vacuumEntityId, "task_status")),
   ).toLowerCase();
@@ -450,6 +453,14 @@ function buildStartBlock(
           ? "Robot is returning to base before the queue can start."
           : "Robot is finishing a previous task before the queue can start.",
     };
+  }
+
+  if (tankBlock) {
+    return snapshot.autoReconcileEnabled === true
+      ? {control: {ariaLabel: "Start queue", label: "Start", service: "start_queue"},
+         summary: `${tankBlock}. Press Start to start automatically after fixing the tanks.`}
+      : {control: {ariaLabel: "Start queue", disabled: true, disabledReason: tankBlock,
+         label: "Start", service: "start_queue"}, summary: tankBlock};
   }
 
   return null;
