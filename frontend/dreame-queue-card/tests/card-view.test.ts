@@ -76,6 +76,24 @@ const hass = {
 };
 
 describe("card view model", () => {
+  it("allows an explicit Start with an empty tank and shows a cancellable tank wait", () => {
+    const states = { ...hass.states,
+      "sensor.robot_queue_status": { state: "idle", attributes: {...queueAttributes,
+        auto_reconcile_enabled: true, queue_items: [queueAttributes.queue_items[1]], pending_items: 1, running_items: 0}},
+      "vacuum.robot": {state: "docked", attributes: {}},
+      "sensor.robot_task_status": {state: "completed", attributes: {}},
+      "sensor.robot_clean_water_tank_status": {state: "low_water", attributes: {}},
+    };
+    const idle = buildCardViewModel({states}, {entity: "sensor.robot_queue_status"});
+    expect(idle.activeControls.find(control => control.service === "start_queue")?.disabled).not.toBe(true);
+    expect(idle.summary).toContain("Start");
+    states["sensor.robot_queue_status"].state = "waiting_for_tanks";
+    const waiting = buildCardViewModel({states}, {entity: "sensor.robot_queue_status"});
+    expect(waiting.summary).toContain("automatically");
+    expect(waiting.activeControls.map(control => control.service)).toEqual(["cancel_queue"]);
+    expect(waiting.rows[0].statusLabel).toBe("Waiting for water tanks");
+  });
+
   it("shows docked paused drying as paused and blocks Continue for a dirty tank", () => {
     const view = buildCardViewModel({ states: {
       ...hass.states,
