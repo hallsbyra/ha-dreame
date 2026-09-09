@@ -37,6 +37,18 @@ def record_activity(
     reason: str | None = None,
 ) -> None:
     """Record only allowlisted metadata; never arbitrary service payloads or errors."""
+    queue_item = next(
+        (
+            item
+            for item in runtime.queue_state.items
+            if item.item_id == (item_id or runtime.queue_state.current_item_id)
+        ),
+        None,
+    )
+    if queue_item is None:
+        queue_item = next(
+            (item for item in runtime.queue_state.items if item.status == "pending"), None
+        )
     event = {
         "time": datetime.now(UTC).isoformat(),
         "action": action,
@@ -46,8 +58,9 @@ def record_activity(
         "parent_id": context.parent_id,
         "user_id": context.user_id,
         "run_id": runtime.queue_state.run_id,
-        "item_id": item_id or runtime.queue_state.current_item_id,
-        "room_id": room_id,
+        "queue_state": runtime.queue_state.run_state,
+        "item_id": item_id or (queue_item.item_id if queue_item else None),
+        "room_id": room_id if room_id is not None else (queue_item.room_id if queue_item else None),
         "reason": reason,
     }
     runtime.recent_activity.append(event)

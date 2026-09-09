@@ -13,8 +13,10 @@ pytestmark = pytest.mark.usefixtures("mock_dreame_vacuum_dependency")
 
 async def setup_waiting_robot(hass: HomeAssistant, *, auto: bool = True):
     vacuum = register_entity(hass, "vacuum.dreame_robot")
-    entry = mock_entry({"vacuum_entity_id": vacuum}, options={
-        "allow_robot_commands": True, "auto_reconcile_enabled": auto})
+    entry = mock_entry(
+        {"vacuum_entity_id": vacuum},
+        options={"allow_robot_commands": True, "auto_reconcile_enabled": auto},
+    )
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
@@ -28,14 +30,23 @@ async def setup_waiting_robot(hass: HomeAssistant, *, auto: bool = True):
         calls.append(call)
 
     hass.services.async_register("dreame_vacuum", "vacuum_clean_segment", record)
-    await hass.services.async_call(DOMAIN, "add_queue_room", {
-        "config_entry_id": entry.entry_id, "room_id": 6, "room_name": "Room 6"}, blocking=True)
+    await hass.services.async_call(
+        DOMAIN,
+        "add_queue_room",
+        {"config_entry_id": entry.entry_id, "room_id": 6, "room_name": "Room 6"},
+        blocking=True,
+    )
     return entry, calls
 
 
 async def command(hass, entry, service, **data):
-    return await hass.services.async_call(DOMAIN, service,
-        {"config_entry_id": entry.entry_id, **data}, blocking=True, return_response=True)
+    return await hass.services.async_call(
+        DOMAIN,
+        service,
+        {"config_entry_id": entry.entry_id, **data},
+        blocking=True,
+        return_response=True,
+    )
 
 
 async def test_tank_wait_starts_once_only_after_both_tanks_recover(hass: HomeAssistant):
@@ -62,7 +73,9 @@ async def test_cancelled_tank_wait_cannot_start_later_added_room(hass: HomeAssis
     entry, calls = await setup_waiting_robot(hass)
     await command(hass, entry, "start_queue")
     item_id = entry.runtime_data.queue_state.items[0].item_id
-    await command(hass, entry, cancel, **({"item_id": item_id} if cancel == "remove_queue_item" else {}))
+    await command(
+        hass, entry, cancel, **({"item_id": item_id} if cancel == "remove_queue_item" else {})
+    )
     hass.states.async_set("sensor.dreame_robot_clean_water_tank_status", "installed")
     await command(hass, entry, "add_queue_room", room_id=7, room_name="Room 7")
     await _async_auto_reconcile_tick(hass, entry)

@@ -46,6 +46,30 @@ examples only.
 
 ## Observed Behavior Rules
 
+### Explicit Start While A Water Tank Needs Attention (2026-09-09)
+
+- Confidence: `Observed`: a room added with `clean_water_tank_status=low_water`
+  stayed idle after the tank was refilled. Audit history contained an add-room
+  request but no start request until a later manual Start. The disabled button
+  had prevented the user from registering their intent.
+- Controller behavior: with commands and automatic reconciliation enabled, Start
+  accepts a tank-blocked queue as `waiting_for_tanks`, leaving its rooms pending.
+  The card confirms that it will start automatically when the tanks and robot are
+  ready, and offers Cancel. Adding rooms alone never arms automatic start.
+- The existing 20-second reconcile interval releases the request once both tank
+  sensors are ready and the robot has no other active task, pause, error or loss
+  of availability. Cancel, clearing the queue, or removing its last room disarms
+  the request. Waiting cancellation sends no robot commands.
+- A failed deferred dispatch ends in `out_of_sync` rather than retrying indefinitely.
+  Like the rest of the queue, an armed request is in memory and is cleared by an
+  integration reload or HA restart. Existing busy-task and paused-drying protections
+  remain; this exception is specifically for an explicit Start with tank problems.
+- Audit entries include queue state and target item/room, linking the accepted
+  waiting request to subsequent `automatic_reconcile` robot dispatch.
+- Tests cover clean/dirty tank recovery, duplicate Start and interval ticks,
+  cancellation/removal, absent intent, disabled automatic reconciliation, other
+  robot states and failed dispatch.
+
 ### Paused Tasks Hidden By Docked/Drying State (2026-09-05)
 
 - Confidence: `Observed`.
@@ -53,7 +77,7 @@ examples only.
   and `sensor.<robot>_status=paused` simultaneously. The vacuum `paused` attribute
   can be false even while the status sensor and vacuum `status` attribute say paused.
 - `sensor.<robot>_error` can clear to `no_error` while the dirty-water tank still
-  reports `not_installed_or_full`. The persistent tank sensor must block start,
+  reports `not_installed_or_full`. The persistent tank sensor must block robot dispatch,
   manual resume and automatic recovery. Present but unavailable tank sensors also
   block; an absent optional sensor remains compatible with existing installations.
 - Paused drying requires explicit continuation. It must not be treated as paused

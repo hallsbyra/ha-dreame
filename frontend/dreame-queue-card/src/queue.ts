@@ -99,6 +99,9 @@ export function queueRunStateLabel(runState: unknown): string {
   if (normalized === "out_of_sync") {
     return "Out of sync";
   }
+  if (normalized === "waiting_for_tanks") {
+    return "Waiting for water tanks";
+  }
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 

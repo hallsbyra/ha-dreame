@@ -112,6 +112,8 @@ def remove_item(state: QueueState, *, item_id: str) -> QueueState:
         raise InvalidOperation("Only pending rooms can be removed")
 
     del items[item_index]
+    if state.run_state == "waiting_for_tanks" and not items:
+        return new_state()
     return replace(state, items=tuple(items))
 
 

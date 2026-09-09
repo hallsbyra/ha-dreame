@@ -43,7 +43,7 @@ from .runtime_reconcile_runner import (
     async_evaluate_and_apply_runtime_reconcile_under_lock,
 )
 from .runtime_state import QueueRunTracking
-from .services import async_register_services, async_remove_services
+from .services import async_register_services, async_remove_services, async_start_waiting_queue
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.SENSOR]
@@ -288,6 +288,9 @@ async def _async_auto_reconcile_tick(
 
         try:
             with automatic_audit():
+                if runtime_data.queue_state.run_state == "waiting_for_tanks":
+                    await async_start_waiting_queue(hass, entry)
+                    return
                 await async_evaluate_and_apply_runtime_reconcile_under_lock(
                     hass,
                     runtime_data,
