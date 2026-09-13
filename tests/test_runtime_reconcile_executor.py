@@ -103,11 +103,13 @@ async def test_runtime_reconcile_executor_commits_tracking_only_result(
 async def test_runtime_reconcile_executor_dispatches_next_room_after_completion(
     hass: HomeAssistant,
 ) -> None:
-    """Test next-room command intents dispatch before committing runtime state."""
+    """Test next-room dispatch exposes the new room to synchronous observers."""
     calls: list[dict[str, object]] = []
+    observed_current_items: list[str | None] = []
 
     async def _record_clean_segment(call: ServiceCall) -> None:
         calls.append(dict(call.data))
+        observed_current_items.append(entry.runtime_data.queue_state.current_item_id)
 
     hass.services.async_register(
         DREAME_VACUUM_DOMAIN,
@@ -129,6 +131,7 @@ async def test_runtime_reconcile_executor_dispatches_next_room_after_completion(
     await async_apply_runtime_reconcile_result(hass, entry.runtime_data, result)
 
     assert calls == [{"entity_id": vacuum_entity_id, "segments": [2]}]
+    assert observed_current_items == [result.command_item_id]
     assert entry.runtime_data.queue_state == result.queue_state
     run_tracking = entry.runtime_data.run_tracking
     assert run_tracking is not None

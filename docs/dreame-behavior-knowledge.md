@@ -467,6 +467,24 @@ When running a planned manual test, record:
 - Follow-up tests: retain backend rejection coverage and frontend coverage for returning,
   unavailable, ready, and queued states.
 
+### 2026-09-13 - Completion-to-Next-Room Status Race
+
+- Confidence: `Observed`
+- Setup: a two-room standalone queue completed its first room and immediately dispatched the next.
+- Observed timeline:
+  - t0: the robot reported the first room as completed.
+  - t1: the controller selected the next queued room, while the robot emitted late lifecycle
+    updates for the just-finished room during command dispatch.
+  - t2: status and command diagnostics temporarily associated those updates with the completed room,
+    making the queue appear to be cleaning the prior room while the robot prepared the next one.
+- Outcome: the next-room command targeted the correct room, but the transition was not atomically
+  visible to synchronous observers.
+- Controller implication: commit the next queue item and fresh run tracking before issuing its robot
+  command; if that command is rejected, restore the previous queue and tracking state. This keeps
+  UI, audit records, and task-status observers aligned with the command being sent.
+- Follow-up tests: verify synchronous service observers see the next item, and retain rollback
+  coverage for a rejected dispatch.
+
 ## Open Questions
 
 1. Under what conditions does a multi-room app run return for a mid-job wash?
