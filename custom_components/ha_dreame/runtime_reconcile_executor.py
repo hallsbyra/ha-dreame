@@ -85,11 +85,22 @@ async def _async_dispatch_current_room_intent(
     except QueueError as err:
         raise HomeAssistantError(str(err)) from err
 
-    await async_execute_dispatch_plan(
-        hass,
-        plan,
-        commands_enabled=runtime_data.commands_enabled,
-    )
+    # Service handlers and state observers can run synchronously while the
+    # command is in flight. Publish the post-transition queue before sending
+    # the command so they cannot attribute fresh robot activity to the room
+    # that just completed. A rejected command restores the prior state.
+    previous_queue_state = runtime_data.queue_state
+    previous_run_tracking = runtime_data.run_tracking
+    _commit_runtime_state(runtime_data, result.queue_state, run_tracking)
+    try:
+        await async_execute_dispatch_plan(
+            hass,
+            plan,
+            commands_enabled=runtime_data.commands_enabled,
+        )
+    except Exception:
+        _commit_runtime_state(runtime_data, previous_queue_state, previous_run_tracking)
+        raise
     return replace(result, run_tracking=run_tracking)
 
 
