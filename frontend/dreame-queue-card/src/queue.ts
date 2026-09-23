@@ -102,6 +102,9 @@ export function queueRunStateLabel(runState: unknown): string {
   if (normalized === "waiting_for_tanks") {
     return "Waiting for water tanks";
   }
+  if (normalized === "needs_attention") {
+    return "Needs review";
+  }
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 

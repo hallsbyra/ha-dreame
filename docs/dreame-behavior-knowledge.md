@@ -485,6 +485,26 @@ When running a planned manual test, record:
 - Follow-up tests: verify synchronous service observers see the next item, and retain rollback
   coverage for a rejected dispatch.
 
+### 2026-09-23 - Current Room Changes While Returning To Dock
+
+- Confidence: `Observed`
+- Setup: a multi-room queue completed its first room and then returned to a dock located in a
+  different room.
+- Observed timeline:
+  - t0: HA history showed the requested room while `vacuum.<robot>` was cleaning.
+  - t1: as the robot returned, the current-room sensor changed to rooms along the return route and
+    finally reported the dock's room when `task_status` became `completed`.
+  - t2: completion reconciliation compared only the final room with the requested room; the
+    in-run confirmation flag had not been latched, so the queue became `out_of_sync` and marked
+    untouched rooms canceled.
+- Controller implication: reconcile immediately on current-room sensor changes while the vacuum is
+  cleaning and latch a matching room confirmation for the active queue item. Keep that evidence
+  when the robot leaves the room. If completion remains genuinely uncertain, mark only the active
+  room `needs_attention` and leave later rooms pending behind the terminal queue stop.
+- Follow-up tests: cover room match during cleaning followed by a different room while returning,
+  terminal completion after the return, audit capture of the confirmation, and preservation of
+  untouched pending items on an out-of-sync result.
+
 ## Open Questions
 
 1. Under what conditions does a multi-room app run return for a mid-job wash?

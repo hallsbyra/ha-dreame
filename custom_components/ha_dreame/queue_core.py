@@ -56,7 +56,7 @@ class ReconcileDecision:
     event_reasons: tuple[str, ...] = ()
 
 
-TERMINAL_ITEM_STATUSES = {"completed", "skipped"}
+TERMINAL_ITEM_STATUSES = {"completed", "skipped", "needs_attention"}
 TERMINAL_RUN_STATES = {"completed", "canceled", "out_of_sync", "blocked"}
 MOP_MAINTENANCE_TASK_STATUSES = {
     "returning_to_remove_mop",
@@ -218,11 +218,25 @@ def external_takeover(
     reason: str,
     terminal_state: str | None = None,
 ) -> QueueState:
-    """Mark the queue as externally taken over by app or robot state."""
+    """Stop an uncertain run while preserving untouched queued rooms."""
+    items = list(state.items)
+    if state.current_item_id is not None:
+        try:
+            current_index = _find_index_by_id(items, state.current_item_id)
+        except ItemNotFound:
+            pass
+        else:
+            current_queue_item = items[current_index]
+            if current_queue_item.status not in TERMINAL_ITEM_STATUSES:
+                items[current_index] = replace(
+                    current_queue_item,
+                    status="needs_attention",
+                    result=reason,
+                )
     return replace(
         state,
         run_state=terminal_state or terminal_run_state_for_reason(reason),
-        items=_mark_non_terminal_items(state.items, reason=reason),
+        items=tuple(items),
         current_item_id=None,
     )
 
