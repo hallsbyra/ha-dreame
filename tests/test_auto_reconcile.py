@@ -16,6 +16,7 @@ from custom_components.ha_dreame.const import (
     CONF_ALLOW_ROBOT_COMMANDS,
     CONF_AUTO_RECONCILE_ENABLED,
     CONF_CONFIG_ENTRY_ID,
+    CONF_CURRENT_ROOM_ENTITY_ID,
     CONF_ROOM_ID,
     CONF_ROOM_NAME,
     CONF_TASK_STATUS_ENTITY_ID,
@@ -709,6 +710,59 @@ async def test_auto_reconcile_listens_to_explicit_task_status_entity(
     await hass.async_block_till_done()
 
     assert calls == [{"entity_id": vacuum_entity_id, "segments": [2]}]
+
+
+async def test_room_change_confirmation_survives_return_to_dock(
+    hass: HomeAssistant,
+) -> None:
+    """A target room seen while cleaning confirms completion after the robot returns."""
+    calls: list[dict[str, object]] = []
+    current_room_entity_id = "sensor.robot_room_now"
+
+    async def _record_clean_segment(call: ServiceCall) -> None:
+        calls.append(dict(call.data))
+
+    hass.services.async_register(
+        DREAME_VACUUM_DOMAIN,
+        "vacuum_clean_segment",
+        _record_clean_segment,
+    )
+    vacuum_entity_id, entry = await _setup_loaded_entry(
+        hass,
+        commands_enabled=True,
+        auto_reconcile_enabled=True,
+        extra_options={CONF_CURRENT_ROOM_ENTITY_ID: current_room_entity_id},
+    )
+    queue_state = _running_state()
+    hass.states.async_set(vacuum_entity_id, "cleaning")
+    hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning")
+    hass.states.async_set(current_room_entity_id, "Hall", {"room_id": 7, "room_name": "Hall"})
+    await hass.async_block_till_done()
+    entry.runtime_data.set_queue_state(queue_state)
+    entry.runtime_data.set_run_tracking(
+        _tracking(queue_state, task_status_cleared_since_dispatch=True)
+    )
+
+    hass.states.async_set(current_room_entity_id, "Kitchen", {"room_id": 1, "room_name": "Kitchen"})
+    await hass.async_block_till_done()
+    await hass.async_block_till_done()
+
+    assert entry.runtime_data.run_tracking is not None
+    assert entry.runtime_data.run_tracking.active_room_confirmed_since_dispatch is True
+    assert calls == []
+
+    hass.states.async_set(vacuum_entity_id, "returning")
+    hass.states.async_set(current_room_entity_id, "Hall", {"room_id": 7, "room_name": "Hall"})
+    await hass.async_block_till_done()
+    assert calls == []
+    hass.states.async_set(vacuum_entity_id, "docked")
+    hass.states.async_set("sensor.dreame_robot_task_status", "completed")
+    await hass.async_block_till_done()
+    await hass.async_block_till_done()
+
+    assert calls == [{"entity_id": vacuum_entity_id, "segments": [2]}]
+    assert entry.runtime_data.queue_state.items[0].status == "completed"
+    assert entry.runtime_data.queue_state.items[1].status == "running"
 
 
 async def test_queued_task_status_reconcile_stops_when_entry_unloads(

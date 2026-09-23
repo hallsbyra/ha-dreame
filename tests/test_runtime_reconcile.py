@@ -194,8 +194,8 @@ def test_apply_reconcile_out_of_sync_clears_tracking() -> None:
     assert result.queue_state.run_state == "out_of_sync"
     assert result.queue_state.current_item_id is None
     assert [item.status for item in result.queue_state.items] == [
-        "canceled",
-        "canceled",
+        "needs_attention",
+        "pending",
     ]
     assert result.run_tracking is None
     assert result.command_intent is None

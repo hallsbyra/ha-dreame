@@ -107,6 +107,20 @@ async def async_evaluate_and_apply_runtime_reconcile_under_lock(
         runtime_data,
         result,
     )
+    if evaluation.decision.set_active_room_confirmed_since_dispatch:
+        record_activity(
+            runtime_data,
+            "active_room_confirmation",
+            "confirmed",
+            context=Context(),
+            source="robot_observation",
+            room_id=evaluation.expected_room_id,
+            item_id=result.queue_state.current_item_id,
+            reason=(
+                f"observed_room_id={evaluation.observed_room_id};"
+                f"vacuum_state={observation.vacuum_state};task_status={observation.task_status}"
+            ),
+        )
     _log_reconcile_outcome(runtime_data, evaluation, applied_result)
     return RuntimeReconcileApplyOutcome(
         applied_result=applied_result,

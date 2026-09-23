@@ -205,6 +205,7 @@ class HaDreameQueueCard extends LitElement {
     }
 
     .row-status.canceled,
+    .row-status.needs_attention,
     .row-status.blocked,
     .row-status.out_of_sync {
       color: var(--error-color, #d32f2f);

@@ -125,6 +125,7 @@ describe("HA Dreame queue helpers", () => {
   it("formats run state labels for route blocks", () => {
     expect(queueRunStateLabel("blocked")).toBe("Route blocked");
     expect(queueRunStateLabel("out_of_sync")).toBe("Out of sync");
+    expect(queueRunStateLabel("needs_attention")).toBe("Needs review");
     expect(queueRunStateLabel("")).toBe("Unknown");
   });
 });

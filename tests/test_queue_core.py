@@ -326,16 +326,17 @@ def test_cancel_run_marks_non_terminal_items_canceled() -> None:
     assert state.items[2].result == "user_cancel"
 
 
-def test_external_takeover_sets_terminal_state_and_cancels_active_plan() -> None:
-    """Test external takeover cancels non-terminal queue items."""
+def test_external_takeover_marks_current_uncertain_and_preserves_pending_rooms() -> None:
+    """Test an out-of-sync run isolates its uncertain room from untouched work."""
     state = start_run(_seed_three_rooms())
 
     state = external_takeover(state, reason="stopped_from_app")
 
     assert state.run_state == "out_of_sync"
     assert state.current_item_id is None
-    assert [item.status for item in state.items] == ["canceled", "canceled", "canceled"]
-    assert all(item.result == "stopped_from_app" for item in state.items)
+    assert [item.status for item in state.items] == ["needs_attention", "pending", "pending"]
+    assert state.items[0].result == "stopped_from_app"
+    assert [item.result for item in state.items[1:]] == [None, None]
 
 
 def test_terminal_run_state_for_reason_handles_route_blocks() -> None:

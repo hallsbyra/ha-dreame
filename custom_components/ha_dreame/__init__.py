@@ -75,6 +75,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = entry
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     _register_auto_reconcile_interval(hass, entry)
+    _register_current_room_listener(hass, entry)
     _register_task_status_listener(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _LOGGER.info(
@@ -230,10 +231,68 @@ def _register_task_status_listener(
     )
 
 
+def _register_current_room_listener(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+) -> None:
+    """Capture room confirmations immediately instead of relying on interval polling."""
+    runtime_data = entry.runtime_data
+    if not runtime_data.commands_enabled or not runtime_data.auto_reconcile_enabled:
+        return
+
+    current_room_entity_id = (
+        runtime_data.observation_entity_ids.current_room_entity_id
+        or _conventional_current_room_entity_id(runtime_data.vacuum_entity_id)
+    )
+
+    @callback
+    def _schedule_current_room_reconcile(event: Event[EventStateChangedData]) -> None:
+        old_state = event.data["old_state"]
+        new_state = event.data["new_state"]
+        if new_state is None or (
+            old_state is not None
+            and old_state.state == new_state.state
+            and old_state.attributes == new_state.attributes
+        ):
+            return
+        vacuum_state = hass.states.get(runtime_data.vacuum_entity_id)
+        if vacuum_state is None or vacuum_state.state.lower() != "cleaning":
+            return
+
+        context = _active_reconcile_context(runtime_data)
+        if context is None:
+            return
+        run_id, item_id = context
+        entry.async_create_task(
+            hass,
+            _async_auto_reconcile_tick(
+                hass,
+                entry,
+                expected_run_id=run_id,
+                expected_item_id=item_id,
+            ),
+            name=f"{DOMAIN} current room reconcile",
+        )
+
+    entry.async_on_unload(
+        async_track_state_change_event(
+            hass,
+            current_room_entity_id,
+            _schedule_current_room_reconcile,
+        )
+    )
+
+
 def _conventional_task_status_entity_id(vacuum_entity_id: str) -> str:
     """Return the conventional Dreame task-status companion entity id."""
     object_id = vacuum_entity_id.split(".", maxsplit=1)[-1]
     return f"sensor.{object_id}_task_status"
+
+
+def _conventional_current_room_entity_id(vacuum_entity_id: str) -> str:
+    """Return the conventional Dreame current-room companion sensor."""
+    object_id = vacuum_entity_id.split(".", maxsplit=1)[-1]
+    return f"sensor.{object_id}_current_room"
 
 
 def _normalized_task_status(value: object) -> str:
