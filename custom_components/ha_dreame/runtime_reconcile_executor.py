@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import VACUUM_DOMAIN
-from .dispatch_executor import async_execute_dispatch_plan
+from .dispatch_executor import async_execute_dispatch_plan, observed_cleaning_mode
 from .audit import async_call_robot_service
 from .dispatch_plan import build_room_dispatch_plan
 from .queue_core import QueueError, QueueState, current_item
@@ -80,6 +80,7 @@ async def _async_dispatch_current_room_intent(
         plan = build_room_dispatch_plan(
             item,
             vacuum_entity_id=runtime_data.vacuum_entity_id,
+            current_cleaning_mode=observed_cleaning_mode(hass, runtime_data.vacuum_entity_id),
             retry_count=run_tracking.dispatch_retry_count,
         )
     except QueueError as err:

@@ -59,7 +59,7 @@ from .const import (
     SERVICE_UPDATE_RUNNING_OVERRIDE,
     VACUUM_DOMAIN,
 )
-from .dispatch_executor import async_execute_dispatch_plan
+from .dispatch_executor import async_execute_dispatch_plan, observed_cleaning_mode
 from .audit import async_call_robot_service, service_audit
 from .dispatch_plan import build_room_dispatch_plan
 from .queue_core import (
@@ -558,6 +558,7 @@ async def _async_skip_current_room_response(
             build_room_dispatch_plan(
                 item,
                 vacuum_entity_id=runtime_data.vacuum_entity_id,
+                current_cleaning_mode=observed_cleaning_mode(hass, runtime_data.vacuum_entity_id),
             )
             if item is not None
             else None
@@ -772,6 +773,7 @@ async def _async_start_queue_response(
         plan = build_room_dispatch_plan(
             item,
             vacuum_entity_id=runtime_data.vacuum_entity_id,
+            current_cleaning_mode=observed_cleaning_mode(hass, runtime_data.vacuum_entity_id),
         )
     except QueueError as err:
         raise HomeAssistantError(str(err)) from err
