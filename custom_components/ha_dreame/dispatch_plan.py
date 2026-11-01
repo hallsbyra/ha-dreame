@@ -17,6 +17,15 @@ ADVANCED_CUSTOM_CLEANING_KEYS = (
     "mop_pressure",
 )
 REMOVED_OVERRIDE_KEYS = {"deep_cleaning"}
+# Resolved profile mode -> dreame_vacuum cleaning-mode select options that satisfy it.
+CLEANING_MODE_OPTIONS: dict[int, tuple[str, ...]] = {
+    0: ("sweeping",),
+    1: ("mopping",),
+    2: ("sweeping_and_mopping", "mopping_after_sweeping"),
+}
+KNOWN_CLEANING_MODE_OPTIONS = frozenset(
+    option for options in CLEANING_MODE_OPTIONS.values() for option in options
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +54,7 @@ def build_room_dispatch_plan(
     vacuum_entity_id: str,
     defaults: Mapping[str, Any] | None = None,
     retry_count: int = 0,
+    current_cleaning_mode: str | None = None,
 ) -> RoomDispatchPlan:
     """Build planned Dreame service-call payloads for one queue item."""
     effective = _effective_overrides(defaults=defaults, overrides=item.overrides)
@@ -61,6 +71,21 @@ def build_room_dispatch_plan(
         raise InvalidOperation(str(err)) from err
 
     calls: list[DispatchServiceCall] = []
+    # The robot's cleaning mode is global and survives app-started runs, so a
+    # mop-only zone clean would otherwise make the next queued room mop only.
+    # An unobserved mode is absence of evidence and is left untouched.
+    observed_mode = str(current_cleaning_mode or "").strip().lower()
+    wanted_modes = CLEANING_MODE_OPTIONS[profile.cleaning_mode]
+    if observed_mode in KNOWN_CLEANING_MODE_OPTIONS and observed_mode not in wanted_modes:
+        mode_entity_id = cleaning_mode_entity_id(vacuum_entity_id)
+        calls.append(
+            DispatchServiceCall(
+                domain="select",
+                service="select_option",
+                data={"entity_id": mode_entity_id, "option": wanted_modes[0]},
+            )
+        )
+
     has_advanced_override = any(
         effective.get(key) is not None for key in ADVANCED_CUSTOM_CLEANING_KEYS
     )
@@ -116,6 +141,12 @@ def build_room_dispatch_plan(
         effective_overrides=effective,
         service_calls=tuple(calls),
     )
+
+
+def cleaning_mode_entity_id(vacuum_entity_id: str) -> str:
+    """Return the dreame_vacuum cleaning-mode select paired with a vacuum entity."""
+    object_id = str(vacuum_entity_id).split(".", maxsplit=1)[-1]
+    return f"select.{object_id}_cleaning_mode"
 
 
 def _effective_overrides(
