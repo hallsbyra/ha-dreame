@@ -142,6 +142,38 @@ async def test_runtime_reconcile_executor_dispatches_next_room_after_completion(
     datetime.fromisoformat(run_tracking.last_command_at)
 
 
+async def test_runtime_reconcile_executor_switches_mode_before_next_room(
+    hass: HomeAssistant,
+) -> None:
+    """Test next-room dispatch restores the queue cleaning mode first."""
+    calls: list[str] = []
+
+    async def _record(call: ServiceCall) -> None:
+        calls.append(f"{call.domain}.{call.service}:{call.data.get('option', '')}")
+
+    hass.services.async_register(DREAME_VACUUM_DOMAIN, "vacuum_clean_segment", _record)
+    hass.services.async_register("select", "select_option", _record)
+    entry, _vacuum_entity_id = await _setup_entry(hass)
+    hass.states.async_set("select.dreame_robot_cleaning_mode", "sweeping")
+    state = _running_two_room_state()
+    tracking = _tracking(state)
+    entry.runtime_data.set_queue_state(state)
+    entry.runtime_data.set_run_tracking(tracking)
+
+    result = apply_reconcile_decision(
+        state,
+        tracking,
+        ReconcileDecision(complete_current_room=True),
+    )
+
+    await async_apply_runtime_reconcile_result(hass, entry.runtime_data, result)
+
+    assert calls == [
+        "select.select_option:sweeping_and_mopping",
+        f"{DREAME_VACUUM_DOMAIN}.vacuum_clean_segment:",
+    ]
+
+
 async def test_runtime_reconcile_executor_preserves_retry_count_after_redispatch(
     hass: HomeAssistant,
 ) -> None:

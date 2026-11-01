@@ -188,3 +188,103 @@ def test_build_room_dispatch_plan_rejects_invalid_profiles() -> None:
 
     with pytest.raises(InvalidOperation, match="Both suction and moisture are disabled"):
         build_room_dispatch_plan(item, vacuum_entity_id="vacuum.robot")
+
+
+@pytest.mark.parametrize(
+    ("overrides", "current_mode", "expected_option"),
+    [
+        pytest.param({}, "mopping", "sweeping_and_mopping", id="default-from-mop-only"),
+        pytest.param({}, "sweeping", "sweeping_and_mopping", id="default-from-vacuum-only"),
+        pytest.param({"water_volume": 0}, "mopping", "sweeping", id="vacuum-only-from-mop-only"),
+        pytest.param(
+            {"suction_level": -1},
+            "sweeping_and_mopping",
+            "mopping",
+            id="mop-only-from-combined",
+        ),
+    ],
+)
+def test_build_room_dispatch_plan_switches_mismatched_cleaning_mode_first(
+    overrides: dict[str, object],
+    current_mode: str,
+    expected_option: str,
+) -> None:
+    """Test a robot left in another mode is switched before the room starts."""
+    item = QueueItem(
+        item_id="item-1",
+        room_id=7,
+        room_name="Room 7",
+        overrides=overrides,
+    )
+
+    plan = build_room_dispatch_plan(
+        item,
+        vacuum_entity_id="vacuum.robot",
+        current_cleaning_mode=current_mode,
+    )
+
+    assert plan.service_calls[0] == DispatchServiceCall(
+        domain="select",
+        service="select_option",
+        data={
+            "entity_id": "select.robot_cleaning_mode",
+            "option": expected_option,
+        },
+    )
+    assert plan.service_calls[-1].service == "vacuum_clean_segment"
+    assert len(plan.service_calls) == 2
+
+
+@pytest.mark.parametrize(
+    ("overrides", "current_mode"),
+    [
+        pytest.param({}, "sweeping_and_mopping", id="combined-matches"),
+        pytest.param({}, "mopping_after_sweeping", id="sequential-combined-matches"),
+        pytest.param({"water_volume": 0}, "sweeping", id="vacuum-only-matches"),
+        pytest.param({"suction_level": -1}, "mopping", id="mop-only-matches"),
+        pytest.param({}, None, id="mode-not-observed"),
+        pytest.param({}, "unavailable", id="mode-unavailable"),
+        pytest.param({}, "unknown", id="mode-unknown"),
+    ],
+)
+def test_build_room_dispatch_plan_keeps_matching_or_unobserved_cleaning_mode(
+    overrides: dict[str, object],
+    current_mode: str | None,
+) -> None:
+    """Test no mode command is planned when the robot already matches or is unobserved."""
+    item = QueueItem(
+        item_id="item-1",
+        room_id=7,
+        room_name="Room 7",
+        overrides=overrides,
+    )
+
+    plan = build_room_dispatch_plan(
+        item,
+        vacuum_entity_id="vacuum.robot",
+        current_cleaning_mode=current_mode,
+    )
+
+    assert [call.service for call in plan.service_calls] == ["vacuum_clean_segment"]
+
+
+def test_build_room_dispatch_plan_switches_mode_before_custom_cleaning() -> None:
+    """Test mode switching precedes advanced custom-cleaning updates."""
+    item = QueueItem(
+        item_id="item-1",
+        room_id=7,
+        room_name="Room 7",
+        overrides={"cleaning_route": 3, "repeats": 1},
+    )
+
+    plan = build_room_dispatch_plan(
+        item,
+        vacuum_entity_id="vacuum.robot",
+        current_cleaning_mode="mopping",
+    )
+
+    assert [call.service for call in plan.service_calls] == [
+        "select_option",
+        "vacuum_set_custom_cleaning",
+        "vacuum_clean_segment",
+    ]
