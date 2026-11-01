@@ -1034,6 +1034,57 @@ async def test_start_queue_service_dispatches_first_room_and_updates_runtime_sta
     )
 
 
+async def test_start_queue_service_restores_combined_mode_left_by_app_mop_run(
+    hass: HomeAssistant,
+) -> None:
+    """Test start queue switches a robot left in mop-only mode before dispatch."""
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _record(call: ServiceCall) -> None:
+        calls.append((f"{call.domain}.{call.service}", dict(call.data)))
+
+    hass.services.async_register(DREAME_VACUUM_DOMAIN, "vacuum_clean_segment", _record)
+    hass.services.async_register("select", "select_option", _record)
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    hass.states.async_set(
+        "select.dreame_robot_cleaning_mode",
+        "mopping",
+        {"options": ["sweeping", "mopping", "sweeping_and_mopping", "mopping_after_sweeping"]},
+    )
+    entry = mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    await _call_add_queue_room_service(
+        hass,
+        entry.entry_id,
+        room_id=7,
+        room_name="Room 7",
+    )
+
+    await _call_start_queue_service(hass, entry.entry_id)
+
+    assert calls == [
+        (
+            "select.select_option",
+            {
+                "entity_id": "select.dreame_robot_cleaning_mode",
+                "option": "sweeping_and_mopping",
+            },
+        ),
+        (
+            f"{DREAME_VACUUM_DOMAIN}.vacuum_clean_segment",
+            {"entity_id": vacuum_entity_id, "segments": [7]},
+        ),
+    ]
+    assert entry.runtime_data.queue_state.run_state == "running"
+
+
 async def test_start_queue_service_rejects_previous_active_room_task(
     hass: HomeAssistant,
 ) -> None:
