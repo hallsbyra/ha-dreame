@@ -313,6 +313,21 @@ examples only.
 - Test implication: command-planning tests should distinguish ordinary profile derivation from
   explicit advanced custom-cleaning requests.
 
+### App-Started Runs Leave The Global Cleaning Mode Behind
+
+- Confidence: `Observed`
+- Behavior: the cleaning mode (`select.<robot>_cleaning_mode`) is a global robot setting, not a
+  per-task value. A mop-only zone clean started from the Dreame app leaves it on `mopping` after
+  the run. In that mode `select.<robot>_suction_level` becomes `unavailable` and the vacuum's
+  suction level list is empty.
+- Controller implication: `vacuum_clean_segment` suction and water values do not change the mode.
+  Dispatch must switch the cleaning mode to the resolved queue profile first when the observed
+  mode does not satisfy it. `mopping_after_sweeping` satisfies a combined profile. An unavailable
+  or unknown mode is left untouched.
+- Card implication: running suction controls disappear while the suction select is unavailable.
+- Test implication: cover mode switching before segment dispatch for queue start, skip and
+  next-room reconcile paths.
+
 ## Known Pitfalls
 
 1. `task_status` alone is insufficient.
@@ -327,6 +342,7 @@ examples only.
 10. A polling interval can miss short task-status transitions; completion handling must be event-aware.
 11. Missing cloud-backed robot state is absence of evidence, not evidence that dispatch failed.
 12. Auto-emptying is post-run maintenance and must not enter resumable dock-prep logic.
+13. The robot cleaning mode is global and can be left on mop-only by an app-started run.
 
 ## Experiment Protocol
 
@@ -504,6 +520,20 @@ When running a planned manual test, record:
 - Follow-up tests: cover room match during cleaning followed by a different room while returning,
   terminal completion after the return, audit capture of the confirmation, and preservation of
   untouched pending items on an out-of-sync result.
+
+### 2026-11-01 - Queue Mopped Only After An App Mop-Only Zone Clean
+
+- Confidence: `Observed`
+- Setup: a mop-only zone clean was run three times from the Dreame app, then a combined
+  vacuum-and-mop queue was started from the HA card.
+- Observed timeline:
+  - t0: after the app runs, `select.<robot>_cleaning_mode` stayed `mopping` and
+    `select.<robot>_suction_level` was `unavailable`.
+  - t1: queue start dispatched `vacuum_clean_segment` with no mode change; `task_status` went to
+    `room_cleaning` but the robot did not vacuum.
+  - t2: the running card lost its suction control because the suction select was unavailable.
+- Controller implication: dispatch now plans a cleaning-mode select call before the room starts.
+- Follow-up tests: dispatch plan, start queue and next-room reconcile mode-switch coverage.
 
 ## Open Questions
 
