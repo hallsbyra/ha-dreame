@@ -5,7 +5,13 @@ import {
   runningOverrideValueFromState,
   type RunningOverrideField,
 } from "./live-overrides";
-import { parseQueueSnapshot, queueRunStateLabel, type QueueItem, type QueueSnapshot } from "./queue";
+import {
+  isTerminalQueueFailure,
+  parseQueueSnapshot,
+  queueRunStateLabel,
+  type QueueItem,
+  type QueueSnapshot,
+} from "./queue";
 import { overrideLabel, type OverrideField } from "./queue-overrides";
 import { extractDreameRooms, type DreameRoom } from "./rooms";
 
@@ -40,6 +46,7 @@ export type ActiveQueueService =
   | "start_queue"
   | "resume_queue"
   | "cancel_queue"
+  | "clear_pending_queue"
   | "skip_current_room";
 
 export type CardActiveControl = {
@@ -156,7 +163,7 @@ export function buildCardViewModel(
     snapshot,
     activity,
     activeControls: buildActiveControls(snapshot, activity, startBlock),
-    canClearPending: snapshot.pendingItems > 0,
+    canClearPending: snapshot.pendingItems > 0 && !isTerminalQueueFailure(snapshot.runState),
     rooms,
     rows: cardQueueRows(hass, snapshot, activity),
   };
@@ -299,6 +306,11 @@ function buildActiveControls(
     return [{ariaLabel: "Cancel waiting start", label: "Cancel", service: "cancel_queue"}];
   }
 
+  // Resetting only discards queue state; it sends no robot command, so it is not command-gated.
+  if (isTerminalQueueFailure(snapshot.runState)) {
+    return [{ariaLabel: "Reset queue", label: "Reset", service: "clear_pending_queue"}];
+  }
+
   if (snapshot.runState === "running") {
     if (activity?.phase === "paused" || activity?.phase === "error") {
       return [
@@ -389,9 +401,9 @@ function buildSummary(
     case "canceled":
       return "Queue canceled.";
     case "blocked":
-      return "Route blocked. Review room access before restarting.";
+      return "Route blocked. Review room access, then reset the queue.";
     case "out_of_sync":
-      return "Queue out of sync. Review robot state before restarting.";
+      return "Queue out of sync. Review robot state, then reset the queue.";
     case "manual_control":
       return "Manual control active.";
     default:

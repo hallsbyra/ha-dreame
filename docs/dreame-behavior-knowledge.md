@@ -259,6 +259,19 @@ examples only.
   room.
 - Test implication: cover add-room behavior after each terminal run state.
 
+### Route Error Ends The Robot Task And Leaves A Blocked Queue
+
+- Confidence: `Observed`
+- Behavior: when the robot cannot reach the dispatched room (for example a closed door), `vacuum.<robot>`
+  briefly enters `error` with error code `route`, `sensor.<robot>_task_status` turns `completed`
+  while the robot is still in another room, and the robot returns to base on its own.
+- Controller implication: the queue moves to terminal `blocked` and the current item to
+  `needs_attention`. No run controls apply, so the card must still offer a reset
+  (`clear_pending_queue`) that returns the queue to an empty `idle` state without sending a robot
+  command. Before this was added, the only way out was to add a room, which was not discoverable.
+- Test implication: failure states (`blocked`, `out_of_sync`) expose exactly one reset control,
+  which stays available when robot commands are disabled.
+
 ### Queue Editing Preserves Visible And Previous Settings
 
 - Confidence: `Observed`

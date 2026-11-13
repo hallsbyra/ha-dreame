@@ -644,6 +644,9 @@ class HaDreameQueueCard extends LitElement {
     if (service === "skip_current_room") {
       return "mdi:skip-next";
     }
+    if (service === "clear_pending_queue") {
+      return "mdi:restore";
+    }
     return "mdi:stop";
   }
 
