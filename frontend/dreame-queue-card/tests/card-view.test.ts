@@ -575,7 +575,7 @@ describe("card view model", () => {
     expect(view.activeControls).toEqual([]);
   });
 
-  it("surfaces failure states without offering unsafe active controls", () => {
+  it("offers only a queue reset in failure states", () => {
     const outOfSync = buildCardViewModel(
       hassWithQueueState("out_of_sync", {
         queue_items: [queueAttributes.queue_items[1]],
@@ -599,10 +599,37 @@ describe("card view model", () => {
       },
     );
 
-    expect(outOfSync.summary).toBe("Queue out of sync. Review robot state before restarting.");
-    expect(outOfSync.activeControls).toEqual([]);
-    expect(blocked.summary).toBe("Route blocked. Review room access before restarting.");
-    expect(blocked.activeControls).toEqual([]);
+    const resetControl = {
+      ariaLabel: "Reset queue",
+      label: "Reset",
+      service: "clear_pending_queue",
+    };
+
+    expect(outOfSync.summary).toBe("Queue out of sync. Review robot state, then reset the queue.");
+    expect(outOfSync.activeControls).toEqual([resetControl]);
+    expect(outOfSync.canClearPending).toBe(false);
+    expect(blocked.summary).toBe("Route blocked. Review room access, then reset the queue.");
+    expect(blocked.activeControls).toEqual([resetControl]);
+    expect(blocked.canClearPending).toBe(false);
+  });
+
+  it("keeps queue reset available when robot commands are disabled", () => {
+    const blocked = buildCardViewModel(
+      hassWithQueueState("blocked", {
+        allow_robot_commands: false,
+        queue_items: [queueAttributes.queue_items[1]],
+        pending_items: 0,
+        running_items: 0,
+        total_items: 1,
+      }),
+      {
+        entity: "sensor.robot_queue_status",
+      },
+    );
+
+    expect(blocked.activeControls).toEqual([
+      {ariaLabel: "Reset queue", label: "Reset", service: "clear_pending_queue"},
+    ]);
   });
 
   it("hides running override controls when companion entities are missing", () => {

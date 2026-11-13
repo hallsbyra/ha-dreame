@@ -298,6 +298,19 @@ def test_clear_pending_keeps_running_item_and_resets_non_running_queue() -> None
     assert clear_pending(inconsistent) == new_state()
 
 
+@pytest.mark.parametrize(
+    "reason",
+    ["vacuum_route_error:expected_1:observed_5", "stopped_from_app"],
+)
+def test_clear_pending_resets_failed_terminal_queue(reason: str) -> None:
+    """Test clear pending recovers a blocked or out-of-sync queue to an empty idle queue."""
+    failed = external_takeover(start_run(_seed_three_rooms()), reason=reason)
+    assert failed.run_state in {"blocked", "out_of_sync"}
+    assert any(item.status == "needs_attention" for item in failed.items)
+
+    assert clear_pending(failed) == new_state()
+
+
 def test_skip_current_marks_current_skipped_and_advances() -> None:
     """Test skipping the active room advances to the next pending room."""
     state = start_run(_seed_three_rooms())

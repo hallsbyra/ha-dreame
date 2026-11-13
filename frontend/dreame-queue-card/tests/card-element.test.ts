@@ -248,11 +248,49 @@ describe("ha-dreame-queue-card", () => {
 
     const shadowRoot = element.shadowRoot as ShadowRoot | null;
     expect(element.shadowRoot?.textContent).toContain(
-      "Queue out of sync. Review robot state before restarting.",
+      "Queue out of sync. Review robot state, then reset the queue.",
     );
     expect(
       shadowRoot?.querySelector<HTMLButtonElement>('button[aria-label="Start queue"]'),
     ).toBeNull();
+  });
+
+  it("resets a blocked queue through the ha_dreame queue service", async () => {
+    const callService = vi.fn();
+    const element = document.createElement(CARD_ELEMENT_TAG) as any;
+    element.setConfig({
+      entity: "sensor.robot_queue_status",
+      title: "Robot queue",
+    });
+    element.hass = {
+      ...hass,
+      callService,
+      states: {
+        ...hass.states,
+        "sensor.robot_queue_status": {
+          state: "blocked",
+          attributes: {
+            ...hass.states["sensor.robot_queue_status"].attributes,
+            pending_items: 0,
+            running_items: 0,
+          },
+        },
+      },
+    };
+    document.body.append(element);
+
+    await element.updateComplete;
+
+    const shadowRoot = element.shadowRoot as ShadowRoot | null;
+    const reset = shadowRoot?.querySelector<HTMLButtonElement>('button[aria-label="Reset queue"]');
+
+    expect(reset).toBeTruthy();
+    expect(reset?.disabled).toBe(false);
+    reset?.click();
+
+    expect(callService).toHaveBeenCalledWith("ha_dreame", "clear_pending_queue", {
+      config_entry_id: "config-entry-1",
+    });
   });
 
   it("renders a disabled start control while the previous robot task finishes", async () => {
