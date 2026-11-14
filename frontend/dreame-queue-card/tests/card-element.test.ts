@@ -284,6 +284,7 @@ describe("ha-dreame-queue-card", () => {
     const shadowRoot = element.shadowRoot as ShadowRoot | null;
     const reset = shadowRoot?.querySelector<HTMLButtonElement>('button[aria-label="Reset queue"]');
 
+    expect(shadowRoot?.querySelector(".state-pill")?.textContent).toBe("Route blocked");
     expect(reset).toBeTruthy();
     expect(reset?.disabled).toBe(false);
     reset?.click();

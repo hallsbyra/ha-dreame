@@ -124,14 +124,6 @@ export function getQueueItems(attributes: unknown): QueueItem[] {
   });
 }
 
-export function pendingCount(items: QueueItem[]): number {
-  return countByStatus(items, "pending");
-}
-
-export function canClearQueue(items: QueueItem[]): boolean {
-  return items.length > 0;
-}
-
 export function parseQueueSnapshot(stateObject: HomeAssistantState | undefined): QueueSnapshot {
   const attributes = stateObject?.attributes;
   const items = getQueueItems(attributes);

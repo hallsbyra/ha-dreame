@@ -481,7 +481,7 @@ function buildOverrideControls(overrides: Record<string, unknown>): CardOverride
     controlType: "pending",
     field: control.field,
     label: control.label,
-    valueLabel: overrideLabel(control.field, overrides, {}),
+    valueLabel: overrideLabel(control.field, overrides),
   }));
 }
 
@@ -521,7 +521,7 @@ function buildRunningOverrideControls(
         controlType: "running" as const,
         field: control.field,
         label: control.label,
-        valueLabel: overrideLabel(control.field, { [control.field]: currentValue }, {}),
+        valueLabel: overrideLabel(control.field, { [control.field]: currentValue }),
         value: serviceCall.data.value,
       },
     ];

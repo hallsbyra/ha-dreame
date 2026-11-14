@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  canClearQueue,
   getQueueItems,
   parseQueueSnapshot,
-  pendingCount,
   queueRunStateLabel,
 } from "../src/queue";
 
@@ -111,15 +109,6 @@ describe("HA Dreame queue helpers", () => {
     expect(snapshot.runningItems).toBe(1);
     expect(snapshot.completedItems).toBe(1);
     expect(snapshot.totalItems).toBe(3);
-  });
-
-  it("counts pending items", () => {
-    expect(pendingCount(getQueueItems(attributes))).toBe(1);
-  });
-
-  it("allows clearing when the queue has any item", () => {
-    expect(canClearQueue(getQueueItems(attributes))).toBe(true);
-    expect(canClearQueue([])).toBe(false);
   });
 
   it("formats run state labels for route blocks", () => {

@@ -48,50 +48,21 @@ function toIntOrNull(value: unknown): number | null {
   return null;
 }
 
-function baseMergedOverrides(
-  overrides: OverridesDict | undefined,
-  defaults: OverridesDict | undefined,
-): OverridesDict {
-  const merged: OverridesDict = {};
-  for (const [key, value] of Object.entries(defaults ?? {})) {
-    if (value !== null && value !== undefined) {
-      merged[key] = value;
-    }
-  }
-  for (const [key, value] of Object.entries(overrides ?? {})) {
-    if (value !== null && value !== undefined) {
-      merged[key] = value;
-    }
-  }
-  return merged;
-}
-
-export function optionsForField(field: OverrideField): OverrideOption[] {
-  return FIELD_OPTIONS[field].map((option) => ({ ...option }));
-}
-
-export function mergedOverrides(
-  overrides: OverridesDict | undefined,
-  defaults: OverridesDict | undefined,
-): OverridesDict {
-  return baseMergedOverrides(overrides, defaults);
+function definedOverrides(overrides: OverridesDict | undefined): OverridesDict {
+  return Object.fromEntries(
+    Object.entries(overrides ?? {}).filter(([, value]) => value !== null && value !== undefined),
+  );
 }
 
 export function resolvedOverrideValue(
   field: OverrideField,
   overrides: OverridesDict | undefined,
-  defaults: OverridesDict | undefined,
 ): number {
-  const merged = baseMergedOverrides(overrides, defaults);
-  return toIntOrNull(merged[field]) ?? FIELD_FALLBACK_VALUE[field];
+  return toIntOrNull(overrides?.[field]) ?? FIELD_FALLBACK_VALUE[field];
 }
 
-export function overrideLabel(
-  field: OverrideField,
-  overrides: OverridesDict | undefined,
-  defaults: OverridesDict | undefined,
-): string {
-  const value = resolvedOverrideValue(field, overrides, defaults);
+export function overrideLabel(field: OverrideField, overrides: OverridesDict | undefined): string {
+  const value = resolvedOverrideValue(field, overrides);
   const option = FIELD_OPTIONS[field].find((item) => item.value === value);
   return option ? option.label : String(value);
 }
@@ -99,13 +70,12 @@ export function overrideLabel(
 export function cycledOverrides(
   field: OverrideField,
   overrides: OverridesDict | undefined,
-  defaults: OverridesDict | undefined,
 ): OverridesDict {
-  const merged = baseMergedOverrides(overrides, defaults);
+  const next = definedOverrides(overrides);
   const options = FIELD_OPTIONS[field];
-  const current = toIntOrNull(merged[field]) ?? FIELD_FALLBACK_VALUE[field];
+  const current = resolvedOverrideValue(field, next);
   const currentIndex = options.findIndex((option) => option.value === current);
   const nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % options.length;
-  merged[field] = options[nextIndex].value;
-  return merged;
+  next[field] = options[nextIndex].value;
+  return next;
 }

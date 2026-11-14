@@ -10,6 +10,7 @@ import {
   type HaDreameQueueCardConfig,
   type HomeAssistantLike,
 } from "./card-view";
+import { queueRunStateLabel } from "./queue";
 import { cycledOverrides, type OverrideField } from "./queue-overrides";
 
 class HaDreameQueueCard extends LitElement {
@@ -371,7 +372,7 @@ class HaDreameQueueCard extends LitElement {
               : nothing}
             ${snapshot
               ? html`<span class="state-pill ${snapshot.runState}"
-                  >${this._stateLabel(snapshot.runState)}</span
+                  >${queueRunStateLabel(snapshot.runState)}</span
                 >`
               : nothing}
           </div>
@@ -506,7 +507,7 @@ class HaDreameQueueCard extends LitElement {
                 title="Clear pending queue"
                 type="button"
                 ?disabled=${!configEntryId}
-                @click=${() => this._clearPending(configEntryId)}
+                @click=${() => this._callQueueService(configEntryId, "clear_pending_queue")}
               >
                 <ha-icon icon="mdi:playlist-remove"></ha-icon>
               </button>
@@ -629,14 +630,6 @@ class HaDreameQueueCard extends LitElement {
     `;
   }
 
-  private _stateLabel(runState: string): string {
-    return runState
-      .split("_")
-      .filter((part) => part.length > 0)
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(" ");
-  }
-
   private _activeControlIcon(service: ActiveQueueService): string {
     if (service === "start_queue" || service === "resume_queue") {
       return "mdi:play";
@@ -716,16 +709,6 @@ class HaDreameQueueCard extends LitElement {
     });
   }
 
-  private _clearPending(configEntryId: string | null | undefined): void {
-    if (!configEntryId || !this.hass?.callService) {
-      return;
-    }
-
-    void this.hass.callService("ha_dreame", "clear_pending_queue", {
-      config_entry_id: configEntryId,
-    });
-  }
-
   private async _callQueueService(
     configEntryId: string | null | undefined,
     service: ActiveQueueService,
@@ -760,7 +743,7 @@ class HaDreameQueueCard extends LitElement {
     void this.hass.callService("ha_dreame", "update_queue_item_overrides", {
       config_entry_id: configEntryId,
       item_id: itemId,
-      overrides: cycledOverrides(field, overrides, {}),
+      overrides: cycledOverrides(field, overrides),
     });
   }
 
