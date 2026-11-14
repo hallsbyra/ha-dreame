@@ -88,3 +88,43 @@ async def test_audit_correlates_user_automatic_and_external_commands(hass: HomeA
     # The listener must not access an unloaded entry on subsequent robot calls.
     await hass.services.async_call("vacuum", "start", {"entity_id": vacuum}, blocking=True)
     await hass.async_block_till_done()
+
+
+async def test_audit_records_cleaning_mode_switch_before_dispatch(hass: HomeAssistant) -> None:
+    """A mode switch targets the select entity but is still a robot command."""
+    vacuum = register_entity(hass, "vacuum.dreame_robot")
+    hass.states.async_set("select.dreame_robot_cleaning_mode", "mopping")
+    entry = mock_entry({"vacuum_entity_id": vacuum}, options={"allow_robot_commands": True})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    async def record(call: ServiceCall) -> None:
+        return None
+
+    hass.services.async_register("select", "select_option", record)
+    hass.services.async_register("dreame_vacuum", "vacuum_clean_segment", record)
+    caller = Context(user_id="test-user")
+    for service, data in (
+        ("add_queue_room", {"room_id": 7, "room_name": "Room 7"}),
+        ("start_queue", {}),
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            service,
+            {"config_entry_id": entry.entry_id, **data},
+            blocking=True,
+            context=caller,
+        )
+
+    commands = [
+        (e["action"], e["outcome"], e["source"], e["context_id"])
+        for e in entry.runtime_data.recent_activity
+        if e["action"] in {"select.select_option", "dreame_vacuum.vacuum_clean_segment"}
+    ]
+    assert commands == [
+        ("select.select_option", "requested", "ha_dreame.start_queue", caller.id),
+        ("select.select_option", "accepted", "ha_dreame.start_queue", caller.id),
+        ("dreame_vacuum.vacuum_clean_segment", "requested", "ha_dreame.start_queue", caller.id),
+        ("dreame_vacuum.vacuum_clean_segment", "accepted", "ha_dreame.start_queue", caller.id),
+    ]
