@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from datetime import UTC, datetime
+import json
 
 import pytest
 
@@ -9,6 +10,7 @@ from custom_components.ha_dreame.queue_core import (
     DispatchTracking,
     InvalidOperation,
     ItemNotFound,
+    QueueError,
     QueueItem,
     QueueState,
     add_room,
@@ -19,6 +21,8 @@ from custom_components.ha_dreame.queue_core import (
     external_takeover,
     move_item,
     new_state,
+    queue_state_from_dict,
+    queue_state_to_dict,
     remove_item,
     skip_current_room,
     start_run,
@@ -472,3 +476,85 @@ def test_update_item_overrides_replaces_the_whole_dict() -> None:
     state = update_item_overrides(state, item_id=item_id, overrides={"repeats": 2})
 
     assert state.items[0].overrides == {"repeats": 2}
+
+
+def test_queue_state_round_trips_through_stored_data() -> None:
+    """Test a running queue with dispatch tracking survives serialization unchanged."""
+    state = add_room(new_state(), room_id=1, room_name="Kitchen", overrides={"repeats": 2})
+    state = add_room(state, room_id=2, room_name="Hall", overrides={"water_volume": 0})
+    state = start_run(state)
+    state = complete_current_room(state)
+    state = replace(
+        state,
+        dispatch=DispatchTracking(
+            last_command_at=datetime.fromisoformat("2026-11-01T08:30:15.250000+00:00"),
+            dispatch_retry_count=1,
+            active_room_confirmed_since_dispatch=True,
+            task_status_cleared_since_dispatch=True,
+            post_run_maintenance_seen=False,
+        ),
+    )
+
+    stored = queue_state_to_dict(state)
+
+    assert json.loads(json.dumps(stored)) == stored
+    assert stored["dispatch"]["last_command_at"] == "2026-11-01T08:30:15.250000+00:00"
+    assert queue_state_from_dict(stored) == state
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        new_state(),
+        replace(
+            add_room(new_state(), room_id=6, room_name="Room 6"), run_state="waiting_for_tanks"
+        ),
+        external_takeover(
+            start_run(add_room(new_state(), room_id=6, room_name="Room 6")),
+            reason="stopped_from_app",
+            blocked=True,
+        ),
+    ],
+)
+def test_queue_states_without_tracking_round_trip(state: QueueState) -> None:
+    assert queue_state_from_dict(queue_state_to_dict(state)) == state
+
+
+def _stored_running_queue() -> dict:
+    state = start_run(add_room(new_state(), room_id=1, room_name="Kitchen"))
+    state = replace(
+        state,
+        dispatch=DispatchTracking(last_command_at=datetime.fromisoformat("2026-11-01T08:00Z")),
+    )
+    return queue_state_to_dict(state)
+
+
+def _broken(change) -> dict:
+    stored = _stored_running_queue()
+    change(stored)
+    return stored
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        None,
+        [],
+        {},
+        _broken(lambda data: data.update(run_state="exploded")),
+        _broken(lambda data: data.update(items="Kitchen")),
+        _broken(lambda data: data["items"][0].update(status="vanished")),
+        _broken(lambda data: data["items"][0].update(room_id="one")),
+        _broken(lambda data: data["items"][0].update(overrides=[])),
+        _broken(lambda data: data["items"][0].pop("item_id")),
+        _broken(lambda data: data.update(current_item_id=7)),
+        _broken(lambda data: data["dispatch"].update(last_command_at="yesterday")),
+        _broken(lambda data: data["dispatch"].update(last_command_at="2026-11-01T08:00:00")),
+        _broken(lambda data: data["dispatch"].update(dispatch_retry_count="1")),
+        _broken(lambda data: data["dispatch"].update(post_run_maintenance_seen="no")),
+        _broken(lambda data: data.update(dispatch="soon")),
+    ],
+)
+def test_invalid_stored_queue_data_is_rejected(stored: object) -> None:
+    with pytest.raises(QueueError):
+        queue_state_from_dict(stored)
