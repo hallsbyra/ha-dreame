@@ -37,7 +37,6 @@ describe("HA Dreame queue helpers", () => {
     completed_items: 0,
     total_items: 2,
     allow_robot_commands: true,
-    auto_reconcile_enabled: false,
     config_entry_id: "config-entry-1",
     vacuum_entity_id: "vacuum.robot",
   };
@@ -82,7 +81,6 @@ describe("HA Dreame queue helpers", () => {
     expect(parseQueueSnapshot({ state: "running", attributes })).toEqual({
       runState: "running",
       allowRobotCommands: true,
-      autoReconcileEnabled: false,
       configEntryId: "config-entry-1",
       vacuumEntityId: "vacuum.robot",
       pendingItems: 1,

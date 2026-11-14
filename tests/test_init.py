@@ -2,13 +2,13 @@
 
 import pytest
 
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from _pytest.monkeypatch import MonkeyPatch
 
 from custom_components.ha_dreame import async_unload_entry
 from custom_components.ha_dreame.const import (
     CONF_ALLOW_ROBOT_COMMANDS,
-    CONF_AUTO_RECONCILE_ENABLED,
     CONF_CONFIG_ENTRY_ID,
     CONF_CURRENT_ROOM_ENTITY_ID,
     CONF_ROOM_ID,
@@ -85,21 +85,51 @@ async def test_setup_entry_reads_enabled_command_gate_from_options(
     assert entry.runtime_data.commands_enabled is True
 
 
-async def test_setup_entry_reads_auto_reconcile_option(
+@pytest.mark.parametrize("auto_reconcile_enabled", [True, False])
+async def test_setup_migrates_away_the_auto_reconcile_option(
     hass: HomeAssistant,
+    auto_reconcile_enabled: bool,
 ) -> None:
-    """Test that runtime data reflects explicit automatic reconcile enablement."""
+    """Test an entry from minor version 1 loses the removed automatic reconcile option.
+
+    Automatic reconciliation now follows `allow_robot_commands` alone, so an entry that had
+    commands allowed with automatic reconciliation off reconciles automatically after migration.
+    """
     vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
     entry = mock_entry(
         {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
-        options={CONF_AUTO_RECONCILE_ENABLED: True},
+        options={
+            CONF_ALLOW_ROBOT_COMMANDS: True,
+            "auto_reconcile_enabled": auto_reconcile_enabled,
+            CONF_TASK_STATUS_ENTITY_ID: "sensor.robot_custom_task_status",
+        },
     )
     entry.add_to_hass(hass)
+    assert (entry.version, entry.minor_version) == (1, 1)
 
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    assert entry.runtime_data.auto_reconcile_enabled is True
+    assert (entry.version, entry.minor_version) == (1, 2)
+    assert dict(entry.options) == {
+        CONF_ALLOW_ROBOT_COMMANDS: True,
+        CONF_TASK_STATUS_ENTITY_ID: "sensor.robot_custom_task_status",
+    }
+    assert not hasattr(entry.runtime_data, "auto_reconcile_enabled")
+
+
+async def test_setup_rejects_entries_from_a_newer_major_version(
+    hass: HomeAssistant,
+) -> None:
+    """Test a downgrade does not load an entry written by a newer major version."""
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id}, version=2)
+    entry.add_to_hass(hass)
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.MIGRATION_ERROR
 
 
 async def test_setup_entry_reads_observation_entity_options(

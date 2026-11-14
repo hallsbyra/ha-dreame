@@ -27,13 +27,15 @@ def test_readme_documents_alpha_install_remove_limitations() -> None:
         "HACS",
         "dreame_vacuum",
         "allow_robot_commands",
-        "auto_reconcile_enabled",
         "/ha_dreame/frontend/ha-dreame-queue-card.js",
         "custom:ha-dreame-queue-card",
         "sensor.ha_dreame_queue_status",
     ]
     for detail in required_public_details:
         assert detail in readme
+
+    for removed in ("auto_reconcile_enabled", "apply_reconcile"):
+        assert removed not in readme
 
 
 def test_readme_avoids_private_runtime_assumptions() -> None:

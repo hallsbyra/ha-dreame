@@ -16,7 +16,6 @@ from _pytest.logging import LogCaptureFixture
 from custom_components.ha_dreame import AUTO_RECONCILE_INTERVAL
 from custom_components.ha_dreame.const import (
     CONF_ALLOW_ROBOT_COMMANDS,
-    CONF_AUTO_RECONCILE_ENABLED,
     CONF_CONFIG_ENTRY_ID,
     CONF_CURRENT_ROOM_ENTITY_ID,
     CONF_ROOM_ID,
@@ -39,14 +38,10 @@ async def _setup_loaded_entry(
     hass: HomeAssistant,
     *,
     commands_enabled: bool = False,
-    auto_reconcile_enabled: bool = False,
     extra_options: dict[str, object] | None = None,
 ) -> tuple[str, object]:
     vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
-    options = {
-        CONF_ALLOW_ROBOT_COMMANDS: commands_enabled,
-        CONF_AUTO_RECONCILE_ENABLED: auto_reconcile_enabled,
-    }
+    options: dict[str, object] = {CONF_ALLOW_ROBOT_COMMANDS: commands_enabled}
     options.update(extra_options or {})
     entry = mock_entry(
         {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
@@ -97,14 +92,17 @@ async def _fire_auto_reconcile_at(hass: HomeAssistant, when) -> None:
     await hass.async_block_till_done()
 
 
-async def test_auto_reconcile_does_not_run_when_disabled(
+async def test_auto_reconcile_runs_whenever_robot_commands_are_allowed(
     hass: HomeAssistant,
 ) -> None:
-    """Test automatic reconcile is disabled by default."""
+    """Test allowing robot commands also enables automatic reconciliation.
+
+    An entry saved with the removed `auto_reconcile_enabled: false` option reconciles too.
+    """
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=True,
-        auto_reconcile_enabled=False,
+        extra_options={"auto_reconcile_enabled": False},
     )
     queue_state = _running_state()
     run_tracking = _tracking(queue_state, task_status_cleared_since_dispatch=False)
@@ -117,8 +115,9 @@ async def test_auto_reconcile_does_not_run_when_disabled(
 
     await _fire_auto_reconcile_interval(hass)
 
-    assert entry.runtime_data.queue_state == queue_state
-    assert entry.runtime_data.queue_state.dispatch == run_tracking
+    assert without_dispatch(entry.runtime_data.queue_state) == without_dispatch(queue_state)
+    assert entry.runtime_data.queue_state.dispatch is not None
+    assert entry.runtime_data.queue_state.dispatch.task_status_cleared_since_dispatch is True
 
 
 async def test_auto_reconcile_does_not_run_when_commands_disabled(
@@ -138,7 +137,6 @@ async def test_auto_reconcile_does_not_run_when_commands_disabled(
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=False,
-        auto_reconcile_enabled=True,
     )
     queue_state = _running_state()
     run_tracking = _tracking(queue_state, task_status_cleared_since_dispatch=True)
@@ -163,7 +161,6 @@ async def test_auto_reconcile_applies_tracking_only_decision(
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=True,
-        auto_reconcile_enabled=True,
     )
     queue_state = _running_state()
     entry.runtime_data.set_queue_state(queue_state)
@@ -198,7 +195,6 @@ async def test_auto_reconcile_dispatches_next_room_after_completion(
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=True,
-        auto_reconcile_enabled=True,
     )
     queue_state = _running_state()
     entry.runtime_data.set_queue_state(queue_state)
@@ -230,7 +226,6 @@ async def test_auto_reconcile_logs_late_room_mismatch_as_debug_hold(
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=True,
-        auto_reconcile_enabled=True,
     )
     queue_state = _running_state()
     run_tracking = _tracking(
@@ -284,7 +279,6 @@ async def test_auto_reconcile_logs_retry_dispatch_as_info(
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=True,
-        auto_reconcile_enabled=True,
     )
     queue_state = _running_state()
     entry.runtime_data.set_queue_state(queue_state)
@@ -324,7 +318,6 @@ async def test_auto_reconcile_logs_terminal_problem_as_warning(
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=True,
-        auto_reconcile_enabled=True,
     )
     queue_state = _running_state()
     entry.runtime_data.set_queue_state(queue_state)
@@ -371,7 +364,6 @@ async def test_auto_reconcile_dispatch_failure_preserves_runtime_state(
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=True,
-        auto_reconcile_enabled=True,
     )
     hass.states.async_set(vacuum_entity_id, "idle")
     hass.states.async_set("sensor.dreame_robot_task_status", "completed")
@@ -409,7 +401,6 @@ async def test_task_status_attribute_update_does_not_repeat_failed_dispatch(
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=True,
-        auto_reconcile_enabled=True,
     )
     hass.states.async_set(vacuum_entity_id, "docked")
     hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning")
@@ -468,7 +459,6 @@ async def test_auto_reconcile_survives_unavailable_run_and_short_completion_puls
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=True,
-        auto_reconcile_enabled=True,
     )
     queue_state = _running_state()
     entry.runtime_data.set_queue_state(queue_state)
@@ -561,7 +551,6 @@ async def test_prior_room_auto_emptying_is_not_bound_to_new_queue_item(
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=True,
-        auto_reconcile_enabled=True,
     )
     queue_state = _running_state()
     entry.runtime_data.set_queue_state(queue_state)
@@ -613,7 +602,6 @@ async def test_auto_reconcile_captures_full_task_lifecycle_between_intervals(
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=True,
-        auto_reconcile_enabled=True,
     )
     hass.states.async_set(vacuum_entity_id, "cleaning")
     hass.states.async_set("sensor.dreame_robot_task_status", "completed")
@@ -654,7 +642,6 @@ async def test_auto_reconcile_latches_completion_while_operation_lock_is_held(
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=True,
-        auto_reconcile_enabled=True,
     )
     queue_state = _running_state()
     entry.runtime_data.set_queue_state(queue_state)
@@ -695,7 +682,6 @@ async def test_auto_reconcile_listens_to_explicit_task_status_entity(
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=True,
-        auto_reconcile_enabled=True,
         extra_options={CONF_TASK_STATUS_ENTITY_ID: task_status_entity_id},
     )
     queue_state = _running_state()
@@ -736,7 +722,6 @@ async def test_room_change_confirmation_survives_return_to_dock(
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=True,
-        auto_reconcile_enabled=True,
         extra_options={CONF_CURRENT_ROOM_ENTITY_ID: current_room_entity_id},
     )
     queue_state = _running_state()
@@ -788,7 +773,6 @@ async def test_queued_task_status_reconcile_stops_when_entry_unloads(
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=True,
-        auto_reconcile_enabled=True,
     )
     queue_state = _running_state()
     entry.runtime_data.set_queue_state(queue_state)
@@ -840,7 +824,6 @@ async def test_auto_reconcile_serializes_completion_event_with_interval(
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=True,
-        auto_reconcile_enabled=True,
     )
     hass.states.async_set(vacuum_entity_id, "cleaning")
     hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning")
@@ -902,7 +885,6 @@ async def test_cancel_waits_for_inflight_reconcile_and_cannot_be_overwritten(
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=True,
-        auto_reconcile_enabled=True,
     )
     queue_state = _running_state()
     entry.runtime_data.set_queue_state(queue_state)
@@ -968,7 +950,6 @@ async def test_completion_waiting_behind_cancel_cannot_resurrect_queue(
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=True,
-        auto_reconcile_enabled=True,
     )
     queue_state = _running_state()
     entry.runtime_data.set_queue_state(queue_state)
@@ -1018,7 +999,6 @@ async def test_auto_reconcile_resumes_current_room_when_ready(
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=True,
-        auto_reconcile_enabled=True,
     )
     queue_state = _running_state()
     run_tracking = _tracking(queue_state)
@@ -1054,7 +1034,6 @@ async def test_auto_reconcile_resumes_after_transient_low_water_pause(
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
         commands_enabled=True,
-        auto_reconcile_enabled=True,
     )
     queue_state = _running_state()
     run_tracking = _tracking(queue_state)

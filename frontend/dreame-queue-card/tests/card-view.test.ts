@@ -79,7 +79,7 @@ describe("card view model", () => {
   it("allows an explicit Start with an empty tank and shows a cancellable tank wait", () => {
     const states = { ...hass.states,
       "sensor.robot_queue_status": { state: "idle", attributes: {...queueAttributes,
-        auto_reconcile_enabled: true, queue_items: [queueAttributes.queue_items[1]], pending_items: 1, running_items: 0}},
+        allow_robot_commands: true, queue_items: [queueAttributes.queue_items[1]], pending_items: 1, running_items: 0}},
       "vacuum.robot": {state: "docked", attributes: {}},
       "sensor.robot_task_status": {state: "completed", attributes: {}},
       "sensor.robot_clean_water_tank_status": {state: "low_water", attributes: {}},
@@ -148,7 +148,6 @@ describe("card view model", () => {
       snapshot: {
         runState: "running",
         allowRobotCommands: null,
-        autoReconcileEnabled: null,
         configEntryId: "config-entry-1",
         vacuumEntityId: "vacuum.robot",
         pendingItems: 2,

@@ -31,10 +31,11 @@ def register_entity(
 def mock_entry(
     data: dict[str, str],
     *,
-    options: dict[str, bool] | None = None,
+    options: dict[str, object] | None = None,
+    version: int = 1,
 ) -> MockConfigEntry:
     """Build a mock HA Dreame config entry."""
-    return MockConfigEntry(domain=DOMAIN, title=TITLE, data=data, options=options)
+    return MockConfigEntry(domain=DOMAIN, title=TITLE, data=data, options=options, version=version)
 
 
 def set_dispatch(runtime_data, dispatch) -> None:

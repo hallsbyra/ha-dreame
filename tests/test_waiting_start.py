@@ -11,11 +11,11 @@ from .helpers import mock_entry, register_entity
 pytestmark = pytest.mark.usefixtures("mock_dreame_vacuum_dependency")
 
 
-async def setup_waiting_robot(hass: HomeAssistant, *, auto: bool = True):
+async def setup_waiting_robot(hass: HomeAssistant, **extra_options: object):
     vacuum = register_entity(hass, "vacuum.dreame_robot")
     entry = mock_entry(
         {"vacuum_entity_id": vacuum},
-        options={"allow_robot_commands": True, "auto_reconcile_enabled": auto},
+        options={"allow_robot_commands": True, **extra_options},
     )
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
@@ -91,12 +91,12 @@ async def test_refill_without_a_start_request_does_not_dispatch(hass: HomeAssist
     assert entry.runtime_data.queue_state.run_state == "idle"
 
 
-async def test_tank_wait_requires_automatic_reconcile(hass: HomeAssistant):
-    entry, calls = await setup_waiting_robot(hass, auto=False)
-    with pytest.raises(HomeAssistantError, match="automatic reconciliation"):
-        await command(hass, entry, "start_queue")
+async def test_tank_wait_only_needs_robot_commands(hass: HomeAssistant):
+    """An entry saved with the removed auto_reconcile_enabled=false option can wait too."""
+    entry, calls = await setup_waiting_robot(hass, auto_reconcile_enabled=False)
+    await command(hass, entry, "start_queue")
     assert not calls
-    assert entry.runtime_data.queue_state.run_state == "idle"
+    assert entry.runtime_data.queue_state.run_state == "waiting_for_tanks"
 
 
 @pytest.mark.parametrize("obstacle", ["unavailable", "paused", "other_task"])

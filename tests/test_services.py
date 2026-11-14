@@ -30,7 +30,6 @@ from custom_components.ha_dreame.const import (
     ATTR_TASK_STATUS_CLEARED_SINCE_DISPATCH,
     ATTR_TOTAL_ITEMS,
     CONF_ALLOW_ROBOT_COMMANDS,
-    CONF_AUTO_RECONCILE_ENABLED,
     CONF_CONFIG_ENTRY_ID,
     CONF_FIELD,
     CONF_ITEM_ID,
@@ -84,8 +83,8 @@ async def test_docked_paused_tank_problem_blocks_commands_and_records_caller(
     hass.states.async_set(vacuum_id, "docked", {"status": "Paused", "drying": True})
     hass.states.async_set("sensor.dreame_robot_status", "paused")
     hass.states.async_set("sensor.dreame_robot_dirty_water_tank_status", "not_installed_or_full")
-    with pytest.raises(HomeAssistantError, match="dirty_water_tank_not_ready"):
-        await _call_start_queue_service(hass, entry.entry_id)
+    await _call_start_queue_service(hass, entry.entry_id)
+    assert entry.runtime_data.queue_state.run_state == "waiting_for_tanks"
     queue = start_run(entry.runtime_data.queue_state)
     entry.runtime_data.set_queue_state(queue)
     set_dispatch(
@@ -2080,7 +2079,6 @@ async def test_control_readiness_reports_read_only_safe_default(
 
     assert await _call_control_readiness_service(hass, entry.entry_id) == {
         CONF_ALLOW_ROBOT_COMMANDS: False,
-        CONF_AUTO_RECONCILE_ENABLED: False,
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
         CONF_VACUUM_ENTITY_ID: vacuum_entity_id,
         ATTR_PENDING_ITEMS: 0,
@@ -2150,7 +2148,6 @@ async def test_control_readiness_reports_running_override_ready(
         {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
         options={
             CONF_ALLOW_ROBOT_COMMANDS: True,
-            CONF_AUTO_RECONCILE_ENABLED: True,
         },
     )
     entry.add_to_hass(hass)
@@ -2165,7 +2162,6 @@ async def test_control_readiness_reports_running_override_ready(
 
     assert await _call_control_readiness_service(hass, entry.entry_id) == {
         CONF_ALLOW_ROBOT_COMMANDS: True,
-        CONF_AUTO_RECONCILE_ENABLED: True,
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
         CONF_VACUUM_ENTITY_ID: vacuum_entity_id,
         ATTR_PENDING_ITEMS: 0,
