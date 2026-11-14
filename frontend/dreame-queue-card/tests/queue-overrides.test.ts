@@ -16,12 +16,12 @@ describe("HA Dreame queue override helpers", () => {
     expect(overrideLabel("repeats", { repeats: 3 })).toBe("x3");
   });
 
-  it("cycles water volume through default, off, min, med, and max", () => {
-    expect(cycledOverrides("water_volume", {}).water_volume).toBe(0);
-    expect(cycledOverrides("water_volume", { water_volume: 0 }).water_volume).toBe(1);
+  it("cycles water volume through default, min, med, max, and off", () => {
+    expect(cycledOverrides("water_volume", {}).water_volume).toBe(1);
     expect(cycledOverrides("water_volume", { water_volume: 1 }).water_volume).toBe(2);
     expect(cycledOverrides("water_volume", { water_volume: 2 }).water_volume).toBe(3);
-    expect(cycledOverrides("water_volume", { water_volume: 3 })).toEqual({});
+    expect(cycledOverrides("water_volume", { water_volume: 3 }).water_volume).toBe(0);
+    expect(cycledOverrides("water_volume", { water_volume: 0 })).toEqual({});
   });
 
   it("cycles a field without dropping unrelated override values", () => {
@@ -36,12 +36,12 @@ describe("HA Dreame queue override helpers", () => {
     expect(next).toEqual({ water_volume: 3, repeats: 2, suction_level: 1, cleaning_route: 0 });
   });
 
-  it("cycles suction through default, off, min, med, max, and turbo", () => {
-    expect(cycledOverrides("suction_level", {}).suction_level).toBe(-1);
-    expect(cycledOverrides("suction_level", { suction_level: -1 }).suction_level).toBe(0);
+  it("cycles suction through default, min, med, max, turbo, and off", () => {
+    expect(cycledOverrides("suction_level", {}).suction_level).toBe(0);
     expect(cycledOverrides("suction_level", { suction_level: 0 }).suction_level).toBe(1);
     expect(cycledOverrides("suction_level", { suction_level: 2 }).suction_level).toBe(3);
-    expect(cycledOverrides("suction_level", { suction_level: 3, repeats: 2 })).toEqual({
+    expect(cycledOverrides("suction_level", { suction_level: 3 }).suction_level).toBe(-1);
+    expect(cycledOverrides("suction_level", { suction_level: -1, repeats: 2 })).toEqual({
       repeats: 2,
     });
   });
