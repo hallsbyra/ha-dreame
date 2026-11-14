@@ -37,6 +37,8 @@ describe("HA Dreame queue helpers", () => {
     completed_items: 0,
     total_items: 2,
     allow_robot_commands: true,
+    allowed_actions: ["skip_current_room", "cancel_queue"],
+    blocked_reasons: { start_queue: "run_active", resume_queue: "not_interrupted" },
     config_entry_id: "config-entry-1",
     vacuum_entity_id: "vacuum.robot",
   };
@@ -81,6 +83,8 @@ describe("HA Dreame queue helpers", () => {
     expect(parseQueueSnapshot({ state: "running", attributes })).toEqual({
       runState: "running",
       allowRobotCommands: true,
+      allowedActions: ["skip_current_room", "cancel_queue"],
+      blockedReasons: { start_queue: "run_active", resume_queue: "not_interrupted" },
       configEntryId: "config-entry-1",
       vacuumEntityId: "vacuum.robot",
       pendingItems: 1,
@@ -89,6 +93,16 @@ describe("HA Dreame queue helpers", () => {
       totalItems: 2,
       items: getQueueItems(attributes),
     });
+  });
+
+  it("reports missing or malformed control state as unknown", () => {
+    const snapshot = parseQueueSnapshot({
+      state: "idle",
+      attributes: { queue_items: [], allowed_actions: "start_queue", blocked_reasons: { a: 1 } },
+    });
+
+    expect(snapshot.allowedActions).toBeNull();
+    expect(snapshot.blockedReasons).toBeNull();
   });
 
   it("falls back to parsed item counts when numeric attributes are unavailable", () => {

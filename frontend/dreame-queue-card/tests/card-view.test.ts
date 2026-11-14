@@ -34,6 +34,8 @@ const queueAttributes = {
   total_items: 3,
   config_entry_id: "config-entry-1",
   vacuum_entity_id: "vacuum.robot",
+  allowed_actions: ["skip_current_room", "cancel_queue"],
+  blocked_reasons: { start_queue: "run_active", resume_queue: "not_interrupted" },
 };
 
 const hass = {
@@ -79,7 +81,8 @@ describe("card view model", () => {
   it("allows an explicit Start with an empty tank and shows a cancellable tank wait", () => {
     const states = { ...hass.states,
       "sensor.robot_queue_status": { state: "idle", attributes: {...queueAttributes,
-        allow_robot_commands: true, queue_items: [queueAttributes.queue_items[1]], pending_items: 1, running_items: 0}},
+        allow_robot_commands: true, queue_items: [queueAttributes.queue_items[1]], pending_items: 1, running_items: 0,
+        allowed_actions: ["start_queue"], blocked_reasons: {}}},
       "vacuum.robot": {state: "docked", attributes: {}},
       "sensor.robot_task_status": {state: "completed", attributes: {}},
       "sensor.robot_clean_water_tank_status": {state: "low_water", attributes: {}},
@@ -87,16 +90,21 @@ describe("card view model", () => {
     const idle = buildCardViewModel({states}, {entity: "sensor.robot_queue_status"});
     expect(idle.activeControls.find(control => control.service === "start_queue")?.disabled).not.toBe(true);
     expect(idle.summary).toContain("Start");
-    states["sensor.robot_queue_status"].state = "waiting_for_tanks";
+    states["sensor.robot_queue_status"] = {state: "waiting_for_tanks", attributes: {
+      ...states["sensor.robot_queue_status"].attributes, allowed_actions: ["start_queue", "cancel_queue"]}};
     const waiting = buildCardViewModel({states}, {entity: "sensor.robot_queue_status"});
     expect(waiting.summary).toContain("automatically");
     expect(waiting.activeControls.map(control => control.service)).toEqual(["cancel_queue"]);
+    expect(waiting.activeControls[0].disabled).not.toBe(true);
     expect(waiting.rows[0].statusLabel).toBe("Waiting for water tanks");
   });
 
   it("shows docked paused drying as paused and blocks Continue for a dirty tank", () => {
     const view = buildCardViewModel({ states: {
       ...hass.states,
+      "sensor.robot_queue_status": {state: "running", attributes: {...queueAttributes,
+        allowed_actions: ["skip_current_room", "cancel_queue"],
+        blocked_reasons: {start_queue: "run_active", resume_queue: "tank_attention"}}},
       "vacuum.robot": {state: "docked", attributes: {status: "Paused", drying: true}},
       "sensor.robot_state": {state: "drying", attributes: {}},
       "sensor.robot_status": {state: "paused", attributes: {}},
@@ -106,6 +114,8 @@ describe("card view model", () => {
     expect(view.activity?.label).toContain("dirty water tank");
     expect(view.rows[0].statusLabel).toBe("Paused");
     expect(view.activeControls.find(control => control.service === "resume_queue")?.disabled).toBe(true);
+    expect(view.activeControls.find(control => control.service === "resume_queue")?.disabledReason)
+      .toContain("dirty water tank");
     expect(view.activeControls.find(control => control.service === "cancel_queue")?.disabled).not.toBe(true);
   });
 
@@ -148,6 +158,8 @@ describe("card view model", () => {
       snapshot: {
         runState: "running",
         allowRobotCommands: null,
+        allowedActions: ["skip_current_room", "cancel_queue"],
+        blockedReasons: { start_queue: "run_active", resume_queue: "not_interrupted" },
         configEntryId: "config-entry-1",
         vacuumEntityId: "vacuum.robot",
         pendingItems: 2,
@@ -320,6 +332,8 @@ describe("card view model", () => {
       pending_items: 1,
       running_items: 0,
       total_items: 1,
+      allowed_actions: ["start_queue"],
+      blocked_reasons: notRunning,
     });
     const view = buildCardViewModel(
       {
@@ -359,6 +373,8 @@ describe("card view model", () => {
       pending_items: 1,
       running_items: 0,
       total_items: 1,
+      allowed_actions: [],
+      blocked_reasons: { ...notRunning, start_queue: "robot_busy" },
     });
     const view = buildCardViewModel(
       {
@@ -392,6 +408,8 @@ describe("card view model", () => {
       pending_items: 1,
       running_items: 0,
       total_items: 1,
+      allowed_actions: [],
+      blocked_reasons: { ...notRunning, start_queue: "robot_unavailable" },
     });
     const view = buildCardViewModel(
       {
@@ -484,6 +502,8 @@ describe("card view model", () => {
             attributes: {
               ...queueAttributes,
               allow_robot_commands: true,
+              allowed_actions: ["resume_queue", "skip_current_room", "cancel_queue"],
+              blocked_reasons: { start_queue: "run_active" },
             },
           },
           "vacuum.robot": {
@@ -532,6 +552,8 @@ describe("card view model", () => {
         pending_items: 1,
         running_items: 0,
         total_items: 1,
+        allowed_actions: [],
+        blocked_reasons: { ...notRunning, start_queue: "commands_disabled" },
       }),
       {
         entity: "sensor.robot_queue_status",
@@ -649,7 +671,87 @@ describe("card view model", () => {
     expect(view.rows[0].status).toBe("running");
     expect(view.rows[0].overrideControls).toEqual([]);
   });
+  it("takes Start permission from the backend instead of deriving it from robot sensors", () => {
+    const view = buildCardViewModel(
+      idleWithOneRoom({ allowed_actions: ["start_queue"], blocked_reasons: notRunning }),
+      { entity: "sensor.robot_queue_status" },
+    );
+
+    expect(view.activeControls).toEqual([
+      { ariaLabel: "Start queue", label: "Start", service: "start_queue" },
+    ]);
+  });
+
+  it("explains a robot error that blocks Start", () => {
+    const view = buildCardViewModel(
+      idleWithOneRoom({
+        allowed_actions: [],
+        blocked_reasons: { ...notRunning, start_queue: "robot_error" },
+      }),
+      { entity: "sensor.robot_queue_status" },
+    );
+
+    expect(view.summary).toBe("Robot reports an error. Check it before starting.");
+    expect(view.activeControls[0]).toMatchObject({
+      disabled: true,
+      disabledReason: "Robot reports an error",
+    });
+  });
+
+  it("shows an unknown reason code as a neutral blocked control", () => {
+    const view = buildCardViewModel(
+      idleWithOneRoom({
+        allowed_actions: [],
+        blocked_reasons: { ...notRunning, start_queue: "something_new" },
+      }),
+      { entity: "sensor.robot_queue_status" },
+    );
+
+    expect(view.activeControls[0]).toMatchObject({
+      disabled: true,
+      disabledReason: "Not available right now",
+    });
+  });
+
+  it("fails safe with disabled controls when the backend publishes no control state", () => {
+    const attributes: Record<string, unknown> = { ...queueAttributes };
+    delete attributes["allowed_actions"];
+    delete attributes["blocked_reasons"];
+    const view = buildCardViewModel(
+      { ...hass, states: { ...hass.states,
+        "sensor.robot_queue_status": { state: "running", attributes } } },
+      { entity: "sensor.robot_queue_status" },
+    );
+
+    expect(view.snapshot?.allowedActions).toBeNull();
+    expect(view.activeControls.map((control) => control.service)).toEqual([
+      "cancel_queue",
+      "skip_current_room",
+    ]);
+    for (const control of view.activeControls) {
+      expect(control).toMatchObject({
+        disabled: true,
+        disabledReason: "Queue controls are unavailable",
+      });
+    }
+  });
 });
+
+const notRunning = {
+  resume_queue: "not_running",
+  skip_current_room: "not_running",
+  cancel_queue: "not_running",
+};
+
+function idleWithOneRoom(controls: Record<string, unknown>): typeof hass {
+  return hassWithQueueState("idle", {
+    queue_items: [queueAttributes.queue_items[1]],
+    pending_items: 1,
+    running_items: 0,
+    total_items: 1,
+    ...controls,
+  });
+}
 
 function hassWithQueueState(
   state: string,

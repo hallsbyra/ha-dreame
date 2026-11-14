@@ -109,6 +109,7 @@ async def test_audit_records_cleaning_mode_switch_before_dispatch(hass: HomeAssi
 
     hass.services.async_register("select", "select_option", record)
     hass.services.async_register("dreame_vacuum", "vacuum_clean_segment", record)
+    hass.states.async_set(vacuum, "docked")
     caller = Context(user_id="test-user")
     for service, data in (
         ("add_queue_room", {"room_id": 7, "room_name": "Room 7"}),

@@ -51,6 +51,8 @@ const hass = {
         total_items: 3,
         config_entry_id: "config-entry-1",
         vacuum_entity_id: "vacuum.robot",
+        allowed_actions: ["skip_current_room", "cancel_queue"],
+        blocked_reasons: { start_queue: "run_active", resume_queue: "not_interrupted" },
       },
     },
     "vacuum.robot": {
@@ -106,6 +108,12 @@ const idleHass = {
         running_items: 0,
         completed_items: 0,
         total_items: 1,
+        allowed_actions: ["start_queue"],
+        blocked_reasons: {
+          resume_queue: "not_running",
+          skip_current_room: "not_running",
+          cancel_queue: "not_running",
+        },
       },
     },
     "vacuum.robot": {
@@ -123,6 +131,14 @@ const busyIdleHass = {
   ...idleHass,
   states: {
     ...idleHass.states,
+    "sensor.robot_queue_status": {
+      ...idleHass.states["sensor.robot_queue_status"],
+      attributes: {
+        ...idleHass.states["sensor.robot_queue_status"].attributes,
+        allowed_actions: [],
+        blocked_reasons: { start_queue: "robot_busy" },
+      },
+    },
     "vacuum.robot": {
       ...idleHass.states["vacuum.robot"],
       state: "returning",
@@ -645,6 +661,33 @@ describe("ha-dreame-queue-card", () => {
   });
 
   it("shows a useful inline message when a start race reaches the backend guard", async () => {
+    const callService = vi.fn().mockRejectedValue({
+      code: "home_assistant_error",
+      message: "Cannot start queue while a previous robot task is still active",
+      translation_domain: "ha_dreame",
+      translation_key: "robot_busy",
+    });
+    const element = document.createElement(CARD_ELEMENT_TAG) as any;
+    element.setConfig({
+      entity: "sensor.robot_queue_status",
+      title: "Robot queue",
+    });
+    element.hass = { ...idleHass, callService };
+    document.body.append(element);
+
+    await element.updateComplete;
+
+    const shadowRoot = element.shadowRoot as ShadowRoot | null;
+    shadowRoot?.querySelector<HTMLButtonElement>('button[aria-label="Start queue"]')?.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await element.updateComplete;
+
+    expect(element.shadowRoot?.textContent).toContain(
+      "Robot is still finishing a previous task. Try again when it is ready.",
+    );
+  });
+
+  it("does not interpret backend error text without a reason code", async () => {
     const callService = vi
       .fn()
       .mockRejectedValue(new Error("Cannot start queue while a previous robot task is still active"));
@@ -664,7 +707,7 @@ describe("ha-dreame-queue-card", () => {
     await element.updateComplete;
 
     expect(element.shadowRoot?.textContent).toContain(
-      "Robot is still finishing a previous task. Try again when it is ready.",
+      "The queue command failed. Check Home Assistant for details.",
     );
   });
 
@@ -726,6 +769,8 @@ describe("ha-dreame-queue-card", () => {
           attributes: {
             ...hass.states["sensor.robot_queue_status"].attributes,
             allow_robot_commands: true,
+            allowed_actions: ["resume_queue", "skip_current_room", "cancel_queue"],
+            blocked_reasons: { start_queue: "run_active" },
           },
         },
         "vacuum.robot": {

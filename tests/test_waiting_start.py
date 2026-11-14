@@ -128,3 +128,25 @@ async def test_failed_deferred_dispatch_does_not_retry_indefinitely(hass: HomeAs
     await _async_auto_reconcile_tick(hass, entry)
     assert len(calls) == 1
     assert entry.runtime_data.queue_state.run_state != "waiting_for_tanks"
+
+
+async def test_tank_wait_releases_without_a_task_status_sensor(hass: HomeAssistant):
+    """Start and its release agree that a missing task status is no active task."""
+    entry, calls = await setup_waiting_robot(hass)
+    hass.states.async_remove("sensor.dreame_robot_task_status")
+    await command(hass, entry, "start_queue")
+    assert entry.runtime_data.queue_state.run_state == "waiting_for_tanks"
+    hass.states.async_set("sensor.dreame_robot_clean_water_tank_status", "installed")
+    await _async_auto_reconcile_tick(hass, entry)
+    assert len(calls) == 1
+    assert entry.runtime_data.queue_state.run_state == "running"
+
+
+async def test_tank_wait_can_be_canceled_after_commands_are_disabled(hass: HomeAssistant):
+    """Canceling a waiting start sends no robot command, so it needs no command gate."""
+    entry, calls = await setup_waiting_robot(hass)
+    await command(hass, entry, "start_queue")
+    object.__setattr__(entry.runtime_data, "commands_enabled", False)
+    await command(hass, entry, "cancel_queue")
+    assert not calls
+    assert entry.runtime_data.queue_state.run_state == "canceled"

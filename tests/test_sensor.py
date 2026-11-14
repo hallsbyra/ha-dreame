@@ -2,10 +2,10 @@
 
 import pytest
 
-from homeassistant.const import ATTR_FRIENDLY_NAME, STATE_UNAVAILABLE
+from homeassistant.const import ATTR_FRIENDLY_NAME, EVENT_STATE_CHANGED, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_capture_events
 
 from custom_components.ha_dreame.const import (
     ATTR_COMPLETED_ITEMS,
@@ -85,6 +85,13 @@ async def test_queue_status_sensor_exposes_initial_queue_state(
     assert state.attributes[ATTR_COMPLETED_ITEMS] == 0
     assert state.attributes[ATTR_TOTAL_ITEMS] == 0
     assert state.attributes[ATTR_QUEUE_ITEMS] == []
+    assert state.attributes["allowed_actions"] == []
+    assert state.attributes["blocked_reasons"] == {
+        SERVICE_START_QUEUE: "queue_empty",
+        "resume_queue": "not_running",
+        SERVICE_SKIP_CURRENT_ROOM: "not_running",
+        SERVICE_CANCEL_QUEUE: "not_running",
+    }
 
 
 async def test_queue_status_sensor_has_stable_unique_id(
@@ -430,6 +437,7 @@ async def test_queue_status_sensor_updates_when_start_queue_service_runs(
 
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
+    hass.states.async_set(vacuum_entity_id, "docked")
 
     await hass.services.async_call(
         DOMAIN,
@@ -494,6 +502,7 @@ async def test_queue_status_sensor_updates_when_cancel_queue_service_runs(
 
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
+    hass.states.async_set(vacuum_entity_id, "docked")
 
     await hass.services.async_call(
         DOMAIN,
@@ -559,6 +568,7 @@ async def test_queue_status_sensor_updates_when_skip_current_room_service_runs(
 
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
+    hass.states.async_set(vacuum_entity_id, "docked")
 
     for room_id, room_name in ((7, "Room 7"), (8, "Room 8")):
         await hass.services.async_call(
@@ -621,3 +631,98 @@ async def test_unload_entry_marks_queue_status_sensor_unavailable(
     await hass.async_block_till_done()
 
     assert hass.states.get("sensor.ha_dreame_queue_status").state == STATE_UNAVAILABLE
+
+
+async def _setup_commanded_entry_with_room(
+    hass: HomeAssistant, options: dict[str, object] | None = None
+) -> tuple[str, MockConfigEntry]:
+    vacuum_entity_id = _register_vacuum(hass)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=TITLE,
+        data={CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_ALLOW_ROBOT_COMMANDS: True, **(options or {})},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    hass.states.async_set(vacuum_entity_id, "docked")
+    hass.states.async_set("sensor.dreame_robot_task_status", "completed")
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_ADD_QUEUE_ROOM,
+        {CONF_CONFIG_ENTRY_ID: entry.entry_id, CONF_ROOM_ID: 7, CONF_ROOM_NAME: "Room 7"},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+    return vacuum_entity_id, entry
+
+
+async def test_queue_status_sensor_publishes_what_the_user_may_do_now(
+    hass: HomeAssistant,
+) -> None:
+    """Test the sensor recomputes allowed actions when the robot changes, not only the queue."""
+    vacuum_entity_id, _ = await _setup_commanded_entry_with_room(hass)
+
+    state = hass.states.get("sensor.ha_dreame_queue_status")
+    assert state.attributes["allowed_actions"] == [SERVICE_START_QUEUE]
+    assert SERVICE_START_QUEUE not in state.attributes["blocked_reasons"]
+
+    hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning")
+    await hass.async_block_till_done()
+    state = hass.states.get("sensor.ha_dreame_queue_status")
+    assert state.attributes["allowed_actions"] == []
+    assert state.attributes["blocked_reasons"][SERVICE_START_QUEUE] == "robot_busy"
+
+    hass.states.async_set("sensor.dreame_robot_task_status", "completed")
+    hass.states.async_set(vacuum_entity_id, STATE_UNAVAILABLE)
+    await hass.async_block_till_done()
+    state = hass.states.get("sensor.ha_dreame_queue_status")
+    assert state.attributes["blocked_reasons"][SERVICE_START_QUEUE] == "robot_unavailable"
+
+    hass.states.async_set(vacuum_entity_id, "docked")
+    hass.states.async_set("sensor.dreame_robot_clean_water_tank_status", "low_water")
+    await hass.async_block_till_done()
+    state = hass.states.get("sensor.ha_dreame_queue_status")
+    assert state.attributes["allowed_actions"] == [SERVICE_START_QUEUE]
+
+
+async def test_queue_status_sensor_follows_configured_observation_entities(
+    hass: HomeAssistant,
+) -> None:
+    """Test the sensor listens to explicitly configured companion sensors."""
+    await _setup_commanded_entry_with_room(
+        hass, {"task_status_entity_id": "sensor.robot_custom_task_status"}
+    )
+
+    hass.states.async_set("sensor.robot_custom_task_status", "room_cleaning")
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.ha_dreame_queue_status")
+    assert state.attributes["blocked_reasons"][SERVICE_START_QUEUE] == "robot_busy"
+
+
+async def test_queue_status_sensor_writes_only_when_allowed_actions_change(
+    hass: HomeAssistant,
+) -> None:
+    """Test robot state noise that does not change what is allowed does not write state."""
+    vacuum_entity_id, _ = await _setup_commanded_entry_with_room(hass)
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+
+    hass.states.async_set("sensor.dreame_robot_cleaning_progress", "12")
+    hass.states.async_set(vacuum_entity_id, "idle")
+    hass.states.async_set("sensor.dreame_robot_current_room", "Hall", {"room_id": 2})
+    await hass.async_block_till_done()
+
+    assert [
+        event for event in events if event.data["entity_id"] == "sensor.ha_dreame_queue_status"
+    ] == []
+
+    hass.states.async_set(vacuum_entity_id, "returning")
+    await hass.async_block_till_done()
+
+    assert [
+        event.data["new_state"].attributes["blocked_reasons"][SERVICE_START_QUEUE]
+        for event in events
+        if event.data["entity_id"] == "sensor.ha_dreame_queue_status"
+    ] == ["robot_busy"]

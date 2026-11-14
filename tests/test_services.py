@@ -93,8 +93,9 @@ async def test_docked_paused_tank_problem_blocks_commands_and_records_caller(
             last_command_at=datetime.fromisoformat("2026-01-01T00:00:00+00:00"),
         ),
     )
-    with pytest.raises(HomeAssistantError, match="dirty_water_tank_not_ready"):
+    with pytest.raises(HomeAssistantError) as err:
         await _call_resume_queue_service(hass, entry.entry_id)
+    assert err.value.translation_key == "tank_attention"
     readiness = await _call_control_readiness_service(hass, entry.entry_id)
     assert readiness["robot_status"]["interrupted"]
     assert SERVICE_RESUME_QUEUE not in readiness["available_actions"]
@@ -938,8 +939,9 @@ async def test_start_queue_service_rejects_empty_queue(
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    with pytest.raises(HomeAssistantError, match="Queue is empty"):
+    with pytest.raises(HomeAssistantError, match="no pending rooms") as err:
         await _call_start_queue_service(hass, entry.entry_id)
+    assert err.value.translation_key == "queue_empty"
 
     assert entry.runtime_data.queue_state.run_state == "idle"
     assert entry.runtime_data.queue_state.items == ()
@@ -979,6 +981,7 @@ async def test_start_queue_service_dispatches_first_room_and_updates_runtime_sta
         room_name="Room 7",
     )
 
+    hass.states.async_set(vacuum_entity_id, "docked")
     response = await _call_start_queue_service(hass, entry.entry_id)
 
     queue_state = entry.runtime_data.queue_state
@@ -1063,6 +1066,7 @@ async def test_start_queue_service_restores_combined_mode_left_by_app_mop_run(
         room_name="Room 7",
     )
 
+    hass.states.async_set(vacuum_entity_id, "docked")
     await _call_start_queue_service(hass, entry.entry_id)
 
     assert calls == [
@@ -1117,13 +1121,86 @@ async def test_start_queue_service_rejects_previous_active_room_task(
     with pytest.raises(
         HomeAssistantError,
         match="previous robot task is still active",
-    ):
+    ) as err:
         await _call_start_queue_service(hass, entry.entry_id)
+    assert err.value.translation_key == "robot_busy"
+    readiness = await _call_control_readiness_service(hass, entry.entry_id)
+    assert readiness["allowed_actions"] == []
+    assert readiness["blocked_reasons"][SERVICE_START_QUEUE] == "robot_busy"
+    assert readiness["blocking_reasons"] == ["robot_busy"]
 
     assert calls == []
     assert entry.runtime_data.queue_state.run_state == "idle"
     assert entry.runtime_data.queue_state.items[0].status == "pending"
     assert entry.runtime_data.queue_state.dispatch is None
+
+
+@pytest.mark.parametrize("vacuum_state", [None, "unavailable", "unknown"])
+async def test_start_queue_service_rejects_unavailable_robot_without_tank_problem(
+    hass: HomeAssistant,
+    vacuum_state: str | None,
+) -> None:
+    """Test Start needs an available vacuum even when no tank needs attention."""
+    calls: list[dict[str, object]] = []
+
+    async def _record_clean_segment(call: ServiceCall) -> None:
+        calls.append(dict(call.data))
+
+    hass.services.async_register(
+        DREAME_VACUUM_DOMAIN, "vacuum_clean_segment", _record_clean_segment
+    )
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    await _call_add_queue_room_service(hass, entry.entry_id)
+    if vacuum_state is not None:
+        hass.states.async_set(vacuum_entity_id, vacuum_state)
+    hass.states.async_set("sensor.dreame_robot_task_status", "completed")
+
+    with pytest.raises(HomeAssistantError, match="Robot is unavailable") as err:
+        await _call_start_queue_service(hass, entry.entry_id)
+
+    assert err.value.translation_key == "robot_unavailable"
+    assert calls == []
+    assert entry.runtime_data.queue_state.run_state == "idle"
+    readiness = await _call_control_readiness_service(hass, entry.entry_id)
+    assert readiness["blocked_reasons"][SERVICE_START_QUEUE] == "robot_unavailable"
+
+
+async def test_cancel_queue_service_rejects_a_queue_without_a_run(
+    hass: HomeAssistant,
+) -> None:
+    """Test cancel only applies to a running or waiting queue and sends nothing otherwise."""
+    calls: list[str] = []
+
+    async def _record(call: ServiceCall) -> None:
+        calls.append(call.service)
+
+    hass.services.async_register("vacuum", "stop", _record)
+    hass.services.async_register("vacuum", "return_to_base", _record)
+    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry(
+        {CONF_VACUUM_ENTITY_ID: vacuum_entity_id},
+        options={CONF_ALLOW_ROBOT_COMMANDS: True},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    hass.states.async_set(vacuum_entity_id, "docked")
+    await _call_add_queue_room_service(hass, entry.entry_id)
+    queue_state = entry.runtime_data.queue_state
+
+    with pytest.raises(HomeAssistantError, match="Queue is not running") as err:
+        await _call_cancel_queue_service(hass, entry.entry_id)
+
+    assert err.value.translation_key == "not_running"
+    assert calls == []
+    assert entry.runtime_data.queue_state == queue_state
 
 
 async def test_start_queue_service_leaves_queue_idle_when_dispatch_fails(
@@ -1159,6 +1236,7 @@ async def test_start_queue_service_leaves_queue_idle_when_dispatch_fails(
     )
 
     with pytest.raises(HomeAssistantError, match="dispatch failed"):
+        hass.states.async_set(vacuum_entity_id, "docked")
         await _call_start_queue_service(hass, entry.entry_id)
 
     assert calls == [{"entity_id": vacuum_entity_id, "segments": [7]}]
@@ -1442,6 +1520,7 @@ async def test_cancel_queue_service_returns_vacuum_to_base_and_cancels_run(
         room_id=8,
         room_name="Room 8",
     )
+    hass.states.async_set(vacuum_entity_id, "docked")
     await _call_start_queue_service(hass, entry.entry_id)
 
     response = await _call_cancel_queue_service(hass, entry.entry_id)
@@ -1523,6 +1602,7 @@ async def test_cancel_queue_service_preserves_runtime_state_when_dock_command_fa
     await hass.async_block_till_done()
 
     await _call_add_queue_room_service(hass, entry.entry_id)
+    hass.states.async_set(vacuum_entity_id, "docked")
     await _call_start_queue_service(hass, entry.entry_id)
     queue_state = entry.runtime_data.queue_state
     run_tracking = entry.runtime_data.queue_state.dispatch
@@ -1810,6 +1890,7 @@ async def test_skip_current_room_service_advances_and_dispatches_next_room(
         room_id=8,
         room_name="Room 8",
     )
+    hass.states.async_set(vacuum_entity_id, "docked")
     await _call_start_queue_service(hass, entry.entry_id)
     first_item_id = entry.runtime_data.queue_state.items[0].item_id
 
@@ -1902,6 +1983,7 @@ async def test_skip_current_room_service_sends_final_skipped_room_home(
         room_id=7,
         room_name="Room 7",
     )
+    hass.states.async_set(vacuum_entity_id, "docked")
     await _call_start_queue_service(hass, entry.entry_id)
 
     response = await _call_skip_current_room_service(hass, entry.entry_id)
@@ -1973,6 +2055,7 @@ async def test_skip_current_room_service_preserves_runtime_state_when_stop_fails
         room_id=2,
         room_name="Room 2",
     )
+    hass.states.async_set(vacuum_entity_id, "docked")
     await _call_start_queue_service(hass, entry.entry_id)
     queue_state = entry.runtime_data.queue_state
     run_tracking = entry.runtime_data.queue_state.dispatch
@@ -2083,11 +2166,15 @@ async def test_control_readiness_reports_read_only_safe_default(
         CONF_VACUUM_ENTITY_ID: vacuum_entity_id,
         ATTR_PENDING_ITEMS: 0,
         ATTR_RUNNING_ITEMS: 0,
+        "allowed_actions": [],
         "available_actions": [],
-        "blocking_reasons": [
-            "robot_commands_disabled",
-            "queue_has_no_pending_items",
-        ],
+        "blocked_reasons": {
+            SERVICE_START_QUEUE: "queue_empty",
+            SERVICE_RESUME_QUEUE: "not_running",
+            SERVICE_SKIP_CURRENT_ROOM: "not_running",
+            SERVICE_CANCEL_QUEUE: "not_running",
+        },
+        "blocking_reasons": ["queue_empty"],
         "companion_entities": {
             "suction_level": {
                 "available": False,
@@ -2158,7 +2245,14 @@ async def test_control_readiness_reports_running_override_ready(
     hass.states.async_set("select.dreame_robot_suction_level", "quiet")
     hass.states.async_set("number.dreame_robot_wetness_level", "8")
     await _call_add_queue_room_service(hass, entry.entry_id)
-    entry.runtime_data.set_queue_state(start_run(entry.runtime_data.queue_state))
+    entry.runtime_data.set_queue_state(
+        replace(
+            start_run(entry.runtime_data.queue_state),
+            dispatch=DispatchTracking(
+                last_command_at=datetime.fromisoformat("2026-01-01T00:00:00+00:00")
+            ),
+        )
+    )
 
     assert await _call_control_readiness_service(hass, entry.entry_id) == {
         CONF_ALLOW_ROBOT_COMMANDS: True,
@@ -2166,11 +2260,16 @@ async def test_control_readiness_reports_running_override_ready(
         CONF_VACUUM_ENTITY_ID: vacuum_entity_id,
         ATTR_PENDING_ITEMS: 0,
         ATTR_RUNNING_ITEMS: 1,
+        "allowed_actions": [SERVICE_SKIP_CURRENT_ROOM, SERVICE_CANCEL_QUEUE],
         "available_actions": [
-            SERVICE_CANCEL_QUEUE,
             SERVICE_SKIP_CURRENT_ROOM,
+            SERVICE_CANCEL_QUEUE,
             SERVICE_UPDATE_RUNNING_OVERRIDE,
         ],
+        "blocked_reasons": {
+            SERVICE_START_QUEUE: "run_active",
+            SERVICE_RESUME_QUEUE: "not_interrupted",
+        },
         "blocking_reasons": [],
         "companion_entities": {
             "suction_level": {
@@ -2214,12 +2313,20 @@ async def test_control_readiness_reports_resume_for_interrupted_running_queue(
     hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning_paused")
     hass.states.async_set("sensor.dreame_robot_error", "slippery_floor")
     await _call_add_queue_room_service(hass, entry.entry_id)
-    entry.runtime_data.set_queue_state(start_run(entry.runtime_data.queue_state))
+    entry.runtime_data.set_queue_state(
+        replace(
+            start_run(entry.runtime_data.queue_state),
+            dispatch=DispatchTracking(
+                last_command_at=datetime.fromisoformat("2026-01-01T00:00:00+00:00")
+            ),
+        )
+    )
 
     response = await _call_control_readiness_service(hass, entry.entry_id)
 
     assert response["available_actions"] == [
         SERVICE_RESUME_QUEUE,
+        SERVICE_SKIP_CURRENT_ROOM,
         SERVICE_CANCEL_QUEUE,
     ]
     assert response["ready_for_control_window"] is True
@@ -2257,8 +2364,8 @@ async def test_control_readiness_reports_missing_running_override_entities(
 
     assert response["ready_for_control_window"] is True
     assert response["available_actions"] == [
-        SERVICE_CANCEL_QUEUE,
         SERVICE_SKIP_CURRENT_ROOM,
+        SERVICE_CANCEL_QUEUE,
     ]
     assert response["running_override_ready"] is False
     assert response["blocking_reasons"] == [
