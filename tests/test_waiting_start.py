@@ -147,7 +147,10 @@ async def test_tank_wait_can_be_canceled_after_commands_are_disabled(hass: HomeA
     """Canceling a waiting start sends no robot command, so it needs no command gate."""
     entry, calls = await setup_waiting_robot(hass)
     await command(hass, entry, "start_queue")
-    object.__setattr__(entry.runtime_data, "commands_enabled", False)
+    hass.config_entries.async_update_entry(entry, options={"allow_robot_commands": False})
+    await hass.async_block_till_done()
+    assert entry.runtime_data.commands_enabled is False
+    assert entry.runtime_data.queue_state.run_state == "waiting_for_tanks"
     await command(hass, entry, "cancel_queue")
     assert not calls
     assert entry.runtime_data.queue_state.run_state == "canceled"
