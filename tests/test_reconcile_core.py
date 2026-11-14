@@ -8,9 +8,6 @@ from custom_components.ha_dreame.queue_core import (
 )
 
 
-ACTIVE_STATES = {"cleaning", "returning"}
-
-
 def _decision(**overrides: object) -> ReconcileDecision:
     kwargs = {
         "vacuum_state": "cleaning",
@@ -22,9 +19,6 @@ def _decision(**overrides: object) -> ReconcileDecision:
         "expected_room_id": 1,
         "observed_room_id": 1,
         "is_dock_prep_state": False,
-        "active_states": ACTIVE_STATES,
-        "dispatch_retry_interval_sec": 20,
-        "dispatch_retry_max": 2,
     }
     kwargs.update(overrides)
     return evaluate_reconcile_tick(**kwargs)
@@ -111,7 +105,6 @@ def test_reconcile_completed_unconfirmed_wrong_room_right_after_dispatch_waits()
         observed_room_name="Hall",
         active_room_confirmed_since_dispatch=False,
         seconds_since_last_command=3,
-        dispatch_retry_interval_sec=20,
     )
 
     assert decision.complete_current_room is False
@@ -129,7 +122,6 @@ def test_reconcile_unconfirmed_completion_with_unknown_room_right_after_dispatch
         observed_room_id=None,
         active_room_confirmed_since_dispatch=False,
         seconds_since_last_command=3,
-        dispatch_retry_interval_sec=20,
     )
 
     assert decision.complete_current_room is False
@@ -146,7 +138,6 @@ def test_reconcile_unconfirmed_completion_with_unknown_room_completes_after_inte
         observed_room_id=None,
         active_room_confirmed_since_dispatch=False,
         seconds_since_last_command=30,
-        dispatch_retry_interval_sec=20,
     )
 
     assert decision.complete_current_room is True
@@ -165,9 +156,6 @@ def test_reconcile_room_flip_after_confirmation_never_redispatches(
         active_room_confirmed_since_dispatch=True,
         cleaning_progress=cleaning_progress,
         seconds_since_last_command=300,
-        active_room_mismatch_required_streak=1,
-        active_room_mismatch_min_progress=1,
-        active_room_mismatch_max_progress=90,
     )
 
     assert decision.retry_current_room is False
@@ -177,22 +165,6 @@ def test_reconcile_room_flip_after_confirmation_never_redispatches(
     )
 
 
-def test_reconcile_completed_after_manual_pause_return_marks_out_of_sync() -> None:
-    """Test manual pause followed by return does not complete the room."""
-    decision = _decision(
-        vacuum_state="returning",
-        task_status="completed",
-        pause_waiting_seen=True,
-        is_returning_state=True,
-        seconds_since_last_command=30,
-    )
-
-    assert decision.complete_current_room is False
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason == "manual_return_to_dock_after_pause"
-    assert decision.event_reasons == ("task_status_completed_after_manual_pause_returning",)
-
-
 def test_reconcile_stale_completed_status_retries_after_interval() -> None:
     """Test stale completed status falls through to retry recovery."""
     decision = _decision(
@@ -200,7 +172,6 @@ def test_reconcile_stale_completed_status_retries_after_interval() -> None:
         task_status="completed",
         task_status_cleared_since_dispatch=False,
         seconds_since_last_command=30,
-        dispatch_retry_interval_sec=20,
     )
 
     assert decision.complete_current_room is False
@@ -220,7 +191,6 @@ def test_reconcile_stale_completed_status_escalates_after_retry_budget() -> None
         task_status_cleared_since_dispatch=False,
         seconds_since_last_command=30,
         dispatch_retry_count=2,
-        dispatch_retry_max=2,
         expected_room_id=1,
         observed_room_id=7,
     )
@@ -325,54 +295,6 @@ def test_reconcile_recoverable_error_waits_and_resets_retry_count() -> None:
     assert decision.event_reasons == ("vacuum_error_waiting_user_action",)
 
 
-def test_reconcile_non_fatal_error_reports_non_fatal_reason() -> None:
-    """Test configured non-fatal errors are surfaced without failing the run."""
-    decision = _decision(
-        vacuum_state="error",
-        task_status="room_cleaning",
-        vacuum_error_code="remove_mop",
-        non_fatal_error_codes={"remove_mop"},
-        seconds_since_last_command=120,
-    )
-
-    assert decision.complete_current_room is False
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.reset_dispatch_retry_count is True
-    assert decision.event_reasons == ("vacuum_error_non_fatal:remove_mop",)
-
-
-def test_reconcile_force_retry_after_error_recovery_ignores_interval_and_budget() -> None:
-    """Test recovery retry bypasses normal interval and exhausted retry budget."""
-    decision = _decision(
-        vacuum_state="docked",
-        task_status="room_cleaning",
-        seconds_since_last_command=1,
-        dispatch_retry_count=2,
-        dispatch_retry_max=2,
-        force_retry_after_recovery=True,
-    )
-
-    assert decision.complete_current_room is False
-    assert decision.retry_current_room is True
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.event_reasons == ("retry_dispatch_after_error_recovery",)
-
-
-def test_reconcile_force_retry_after_error_recovery_noops_when_active() -> None:
-    """Test recovery retry does nothing once robot is already active."""
-    decision = _decision(
-        vacuum_state="cleaning",
-        task_status="room_cleaning",
-        force_retry_after_recovery=True,
-    )
-
-    assert decision.complete_current_room is False
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.event_reasons == ()
-
-
 def test_reconcile_dock_prep_pause_waits_for_resume_ready() -> None:
     """Test dock-prep pause does not retry while resume prerequisites are missing."""
     decision = _decision(
@@ -408,25 +330,6 @@ def test_reconcile_dock_prep_pause_with_blocking_error_waits_for_user_action() -
     assert decision.event_reasons == ("vacuum_error_waiting_user_action",)
 
 
-def test_reconcile_dock_prep_pause_reports_non_fatal_error() -> None:
-    """Test non-fatal error names are preserved during dock-prep pause."""
-    decision = _decision(
-        vacuum_state="cleaning",
-        task_status="room_cleaning",
-        vacuum_error_code="remove_mop",
-        non_fatal_error_codes={"remove_mop"},
-        is_dock_prep_state=True,
-        is_dock_prep_paused=True,
-        dock_prep_resume_ready=True,
-        seconds_since_last_command=120,
-    )
-
-    assert decision.retry_current_room is False
-    assert decision.resume_current_room is False
-    assert decision.reset_dispatch_retry_count is True
-    assert decision.event_reasons == ("vacuum_error_non_fatal:remove_mop",)
-
-
 def test_reconcile_dock_prep_pause_waits_for_retry_interval() -> None:
     """Test dock-prep resume waits for the retry interval."""
     decision = _decision(
@@ -436,7 +339,6 @@ def test_reconcile_dock_prep_pause_waits_for_retry_interval() -> None:
         is_dock_prep_paused=True,
         dock_prep_resume_ready=True,
         seconds_since_last_command=10,
-        dispatch_retry_interval_sec=20,
     )
 
     assert decision.retry_current_room is False
@@ -459,8 +361,6 @@ def test_reconcile_mop_remove_transition_waits_without_retry_or_out_of_sync() ->
         observed_room_name="Hall",
         cleaning_progress=68,
         is_dock_prep_state=False,
-        dispatch_retry_interval_sec=20,
-        dispatch_retry_max=2,
     )
 
     assert decision.complete_current_room is False
@@ -484,11 +384,7 @@ def test_reconcile_mop_install_robot_state_suppresses_active_room_mismatch_retry
         expected_room_name="Dining room",
         observed_room_name="Hall",
         cleaning_progress=69,
-        active_room_mismatch_streak=1,
-        active_room_mismatch_required_streak=2,
         is_dock_prep_state=False,
-        dispatch_retry_interval_sec=20,
-        dispatch_retry_max=2,
         is_mop_maintenance_state=True,
     )
 
@@ -507,7 +403,6 @@ def test_reconcile_dock_prep_pause_requests_resume_when_ready() -> None:
         is_dock_prep_paused=True,
         dock_prep_resume_ready=True,
         seconds_since_last_command=120,
-        dispatch_retry_interval_sec=20,
     )
 
     assert decision.retry_current_room is False
@@ -541,22 +436,6 @@ def test_reconcile_paused_robot_with_blocking_error_waits_for_user_action() -> N
     assert decision.mark_out_of_sync_reason is None
     assert decision.reset_dispatch_retry_count is True
     assert decision.event_reasons == ("vacuum_error_waiting_user_action",)
-
-
-def test_reconcile_paused_robot_reports_non_fatal_error() -> None:
-    """Test non-fatal error names are preserved while paused."""
-    decision = _decision(
-        vacuum_state="paused",
-        task_status="room_cleaning_paused",
-        vacuum_error_code="remove_mop",
-        non_fatal_error_codes={"remove_mop"},
-        seconds_since_last_command=120,
-    )
-
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.reset_dispatch_retry_count is True
-    assert decision.event_reasons == ("vacuum_error_non_fatal:remove_mop",)
 
 
 def test_reconcile_matching_room_names_suppress_room_id_mismatch() -> None:
@@ -600,7 +479,6 @@ def test_reconcile_early_room_mismatch_waits_for_min_progress() -> None:
         expected_room_name="Kitchen",
         observed_room_name="Hall",
         cleaning_progress=0,
-        active_room_mismatch_min_progress=5,
         seconds_since_last_command=120,
     )
 
@@ -619,10 +497,6 @@ def test_reconcile_unconfirmed_late_room_mismatch_marks_out_of_sync() -> None:
         expected_room_name="Kitchen",
         observed_room_name="Hall",
         cleaning_progress=95,
-        active_room_mismatch_min_progress=5,
-        active_room_mismatch_max_progress=90,
-        active_room_mismatch_streak=3,
-        active_room_mismatch_required_streak=2,
         active_room_confirmed_since_dispatch=False,
         seconds_since_last_command=120,
     )
@@ -643,10 +517,6 @@ def test_reconcile_confirmed_late_room_mismatch_waits_near_completion() -> None:
         expected_room_name="Kitchen",
         observed_room_name="Hall",
         cleaning_progress=95,
-        active_room_mismatch_min_progress=5,
-        active_room_mismatch_max_progress=90,
-        active_room_mismatch_streak=3,
-        active_room_mismatch_required_streak=2,
         active_room_confirmed_since_dispatch=True,
         seconds_since_last_command=120,
     )
@@ -658,25 +528,6 @@ def test_reconcile_confirmed_late_room_mismatch_waits_near_completion() -> None:
     )
 
 
-def test_reconcile_room_mismatch_waits_for_required_streak() -> None:
-    """Test room mismatch must persist long enough before retry."""
-    decision = _decision(
-        vacuum_state="cleaning",
-        expected_room_name="Kitchen",
-        observed_room_name="Hall",
-        cleaning_progress=20,
-        active_room_mismatch_streak=0,
-        active_room_mismatch_required_streak=2,
-        seconds_since_last_command=120,
-    )
-
-    assert decision.retry_current_room is False
-    assert any(
-        reason.startswith("active_room_mismatch_waiting_streak:")
-        for reason in decision.event_reasons
-    )
-
-
 def test_reconcile_room_mismatch_waits_for_retry_interval() -> None:
     """Test room mismatch retry waits for command retry interval."""
     decision = _decision(
@@ -684,10 +535,7 @@ def test_reconcile_room_mismatch_waits_for_retry_interval() -> None:
         expected_room_name="Kitchen",
         observed_room_name="Hall",
         cleaning_progress=20,
-        active_room_mismatch_streak=2,
-        active_room_mismatch_required_streak=2,
         seconds_since_last_command=5,
-        dispatch_retry_interval_sec=20,
     )
 
     assert decision.retry_current_room is False
@@ -697,18 +545,15 @@ def test_reconcile_room_mismatch_waits_for_retry_interval() -> None:
     )
 
 
-def test_reconcile_room_mismatch_retries_after_streak_and_interval() -> None:
+def test_reconcile_room_mismatch_retries_after_interval() -> None:
     """Test sustained room mismatch requests a retry."""
     decision = _decision(
         vacuum_state="cleaning",
         expected_room_name="Kitchen",
         observed_room_name="Hall",
         cleaning_progress=20,
-        active_room_mismatch_streak=2,
-        active_room_mismatch_required_streak=2,
         dispatch_retry_count=1,
         seconds_since_last_command=120,
-        dispatch_retry_interval_sec=20,
     )
 
     assert decision.retry_current_room is True
@@ -727,10 +572,7 @@ def test_reconcile_room_mismatch_exhausts_retry_budget() -> None:
         expected_room_name="Dining Room",
         observed_room_name="Porch",
         cleaning_progress=50,
-        active_room_mismatch_streak=3,
-        active_room_mismatch_required_streak=2,
         dispatch_retry_count=2,
-        dispatch_retry_max=2,
         seconds_since_last_command=120,
     )
 
@@ -747,7 +589,6 @@ def test_reconcile_non_active_state_retries_after_interval() -> None:
         vacuum_state="idle",
         task_status="room_cleaning",
         seconds_since_last_command=30,
-        dispatch_retry_interval_sec=20,
         dispatch_retry_count=0,
     )
 
@@ -762,9 +603,7 @@ def test_reconcile_non_active_state_escalates_after_retry_budget() -> None:
         vacuum_state="idle",
         task_status="room_cleaning",
         seconds_since_last_command=30,
-        dispatch_retry_interval_sec=20,
         dispatch_retry_count=2,
-        dispatch_retry_max=2,
         expected_room_id=1,
         observed_room_id=7,
     )
@@ -783,7 +622,6 @@ def test_reconcile_unavailable_vacuum_waits_without_consuming_retry_budget() -> 
         task_status="",
         seconds_since_last_command=300,
         dispatch_retry_count=2,
-        dispatch_retry_max=2,
     )
 
     assert decision.retry_current_room is False
@@ -799,7 +637,6 @@ def test_reconcile_completed_task_survives_unavailable_vacuum_observation() -> N
         task_status="completed",
         task_status_cleared_since_dispatch=True,
         dispatch_retry_count=2,
-        dispatch_retry_max=2,
         seconds_since_last_command=120,
     )
 
@@ -851,8 +688,6 @@ def test_reconcile_active_room_mismatch_does_not_reset_retry_budget() -> None:
         expected_room_id=1,
         observed_room_id=7,
         cleaning_progress=20,
-        active_room_mismatch_streak=2,
-        active_room_mismatch_required_streak=2,
         seconds_since_last_command=5,
     )
 
@@ -871,7 +706,6 @@ def test_reconcile_dock_prep_preserves_retry_history_while_active() -> None:
         is_dock_prep_state=True,
         seconds_since_last_command=300,
         dispatch_retry_count=2,
-        dispatch_retry_max=2,
     )
 
     assert decision.retry_current_room is False
@@ -891,7 +725,6 @@ def test_reconcile_post_run_maintenance_holds_without_resuming_or_retrying() -> 
         dock_prep_resume_ready=True,
         seconds_since_last_command=300,
         dispatch_retry_count=2,
-        dispatch_retry_max=2,
     )
 
     assert decision.complete_current_room is False
@@ -913,7 +746,6 @@ def test_reconcile_does_not_bind_stale_maintenance_to_unconfirmed_room() -> None
         is_post_run_maintenance_state=True,
         seconds_since_last_command=300,
         dispatch_retry_count=1,
-        dispatch_retry_max=2,
     )
 
     assert decision.complete_current_room is False
@@ -936,7 +768,6 @@ def test_reconcile_remembers_post_run_maintenance_until_completion() -> None:
         post_run_maintenance_seen=True,
         seconds_since_last_command=300,
         dispatch_retry_count=0,
-        dispatch_retry_max=2,
     )
 
     assert decision.complete_current_room is False

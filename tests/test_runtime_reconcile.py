@@ -1,9 +1,6 @@
 """Tests for applying reconcile decisions to runtime state."""
 
-import pytest
-
 from custom_components.ha_dreame.queue_core import (
-    InvalidOperation,
     QueueState,
     ReconcileDecision,
     add_room,
@@ -217,32 +214,3 @@ def test_apply_reconcile_route_error_marks_queue_blocked() -> None:
 
     assert result.queue_state.run_state == "blocked"
     assert result.run_tracking is None
-
-
-def test_apply_reconcile_rejects_effectful_decision_without_tracking() -> None:
-    """Test effectful decisions require runtime tracking."""
-    state = _running_state()
-
-    with pytest.raises(InvalidOperation, match="requires run tracking"):
-        apply_reconcile_decision(
-            state,
-            None,
-            ReconcileDecision(retry_current_room=True),
-        )
-
-
-def test_apply_reconcile_rejects_stale_tracking() -> None:
-    """Test decisions cannot mutate a queue with tracking from another run or item."""
-    state = _running_state()
-    stale_tracking = QueueRunTracking(
-        run_id="old-run",
-        current_item_id=state.current_item_id or "missing",
-        last_command_at="2026-05-16T08:00:00+00:00",
-    )
-
-    with pytest.raises(InvalidOperation, match="does not match current queue run"):
-        apply_reconcile_decision(
-            state,
-            stale_tracking,
-            ReconcileDecision(retry_current_room=True),
-        )

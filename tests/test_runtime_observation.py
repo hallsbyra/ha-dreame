@@ -189,7 +189,6 @@ def test_observation_detects_mop_remove_install_maintenance(
         vacuum_entity_id="vacuum.dreame_robot",
     )
 
-    assert observation.is_returning_state is True
     assert observation.is_mop_maintenance_state is True
     assert observation.observed_room_id == 7
 

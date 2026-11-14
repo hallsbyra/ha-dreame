@@ -67,8 +67,6 @@ def test_explicit_vacuum_mode_disables_water_dispatch() -> None:
     )
 
     assert profile.cleaning_mode == 0
-    assert profile.runtime_suction_level == 2
-    assert profile.runtime_water_volume is None
     assert profile.dispatch_suction_level == 2
     assert profile.dispatch_water_volume is None
     assert profile.custom_suction_level == 2

@@ -404,8 +404,6 @@ function buildSummary(
       return "Route blocked. Review room access, then reset the queue.";
     case "out_of_sync":
       return "Queue out of sync. Review robot state, then reset the queue.";
-    case "manual_control":
-      return "Manual control active.";
     default:
       return `Queue state: ${queueRunStateLabel(snapshot.runState)}.`;
   }

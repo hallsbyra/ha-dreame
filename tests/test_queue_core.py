@@ -403,12 +403,3 @@ def test_terminal_run_state_for_reason_handles_route_blocks() -> None:
     """Test route failures map to blocked while other reasons map to out_of_sync."""
     assert terminal_run_state_for_reason("stopped_from_app") == "out_of_sync"
     assert terminal_run_state_for_reason("vacuum_route_error:expected_1:observed_7") == "blocked"
-
-    state = start_run(_seed_three_rooms())
-    state = external_takeover(
-        state,
-        reason="manual_override",
-        terminal_state="manual_control",
-    )
-
-    assert state.run_state == "manual_control"

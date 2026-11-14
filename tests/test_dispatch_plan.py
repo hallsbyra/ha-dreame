@@ -16,11 +16,7 @@ def test_build_room_dispatch_plan_returns_clean_segment_call() -> None:
 
     plan = build_room_dispatch_plan(item, vacuum_entity_id="vacuum.robot")
 
-    assert plan.item_id == "item-1"
-    assert plan.room_id == 7
-    assert plan.room_name == "Room 7"
-    assert plan.effective_overrides == {}
-    assert plan.service_calls == (
+    assert plan == (
         DispatchServiceCall(
             domain=DREAME_VACUUM_DOMAIN,
             service="vacuum_clean_segment",
@@ -71,7 +67,7 @@ def test_build_room_dispatch_plan_applies_profile_payloads(
 
     plan = build_room_dispatch_plan(item, vacuum_entity_id="vacuum.robot")
 
-    assert plan.service_calls == (
+    assert plan == (
         DispatchServiceCall(
             domain=DREAME_VACUUM_DOMAIN,
             service="vacuum_clean_segment",
@@ -101,7 +97,7 @@ def test_build_room_dispatch_plan_adds_advanced_custom_cleaning_call() -> None:
 
     plan = build_room_dispatch_plan(item, vacuum_entity_id="vacuum.robot")
 
-    assert plan.service_calls == (
+    assert plan == (
         DispatchServiceCall(
             domain=DREAME_VACUUM_DOMAIN,
             service="vacuum_set_custom_cleaning",
@@ -162,7 +158,7 @@ def test_build_room_dispatch_plan_skips_advanced_call_on_retry() -> None:
         retry_count=1,
     )
 
-    assert plan.service_calls == (
+    assert plan == (
         DispatchServiceCall(
             domain=DREAME_VACUUM_DOMAIN,
             service="vacuum_clean_segment",
@@ -223,7 +219,7 @@ def test_build_room_dispatch_plan_switches_mismatched_cleaning_mode_first(
         current_cleaning_mode=current_mode,
     )
 
-    assert plan.service_calls[0] == DispatchServiceCall(
+    assert plan[0] == DispatchServiceCall(
         domain="select",
         service="select_option",
         data={
@@ -231,8 +227,8 @@ def test_build_room_dispatch_plan_switches_mismatched_cleaning_mode_first(
             "option": expected_option,
         },
     )
-    assert plan.service_calls[-1].service == "vacuum_clean_segment"
-    assert len(plan.service_calls) == 2
+    assert plan[-1].service == "vacuum_clean_segment"
+    assert len(plan) == 2
 
 
 @pytest.mark.parametrize(
@@ -265,7 +261,7 @@ def test_build_room_dispatch_plan_keeps_matching_or_unobserved_cleaning_mode(
         current_cleaning_mode=current_mode,
     )
 
-    assert [call.service for call in plan.service_calls] == ["vacuum_clean_segment"]
+    assert [call.service for call in plan] == ["vacuum_clean_segment"]
 
 
 def test_build_room_dispatch_plan_switches_mode_before_custom_cleaning() -> None:
@@ -283,7 +279,7 @@ def test_build_room_dispatch_plan_switches_mode_before_custom_cleaning() -> None
         current_cleaning_mode="mopping",
     )
 
-    assert [call.service for call in plan.service_calls] == [
+    assert [call.service for call in plan] == [
         "select_option",
         "vacuum_set_custom_cleaning",
         "vacuum_clean_segment",

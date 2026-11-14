@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 
 from .queue_core import (
@@ -33,27 +33,6 @@ class RuntimeReconcileObservation:
     dock_prep_resume_ready: bool = False
     is_mop_maintenance_state: bool = False
     is_post_run_maintenance_state: bool = False
-    pause_waiting_seen: bool = False
-    is_returning_state: bool = False
-    force_retry_after_recovery: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class RuntimeReconcileSettings:
-    """Tunable reconcile evaluation settings."""
-
-    active_states: frozenset[str] = field(
-        default_factory=lambda: frozenset({"cleaning", "returning"})
-    )
-    dispatch_retry_interval_sec: int = 20
-    dispatch_retry_max: int = 2
-    non_fatal_error_codes: frozenset[str] = field(default_factory=frozenset)
-    active_room_mismatch_required_streak: int = 1
-    active_room_mismatch_min_progress: int = 1
-    active_room_mismatch_max_progress: int | None = 90
-
-
-DEFAULT_RUNTIME_RECONCILE_SETTINGS = RuntimeReconcileSettings()
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +54,6 @@ def evaluate_runtime_reconcile_observation(
     observation: RuntimeReconcileObservation,
     *,
     now: datetime,
-    settings: RuntimeReconcileSettings = DEFAULT_RUNTIME_RECONCILE_SETTINGS,
 ) -> RuntimeReconcileEvaluation:
     """Evaluate one runtime observation without reading HA state or sending commands."""
     queue_item = current_item(queue_state)
@@ -115,25 +93,10 @@ def evaluate_runtime_reconcile_observation(
         expected_room_id=expected_room_id,
         observed_room_id=observation.observed_room_id,
         is_dock_prep_state=observation.is_dock_prep_state,
-        active_states=set(settings.active_states),
-        dispatch_retry_interval_sec=settings.dispatch_retry_interval_sec,
-        dispatch_retry_max=settings.dispatch_retry_max,
         is_dock_prep_paused=(observation.is_dock_prep_paused and not observation.is_drying_state),
-        force_retry_after_recovery=observation.force_retry_after_recovery,
-        non_fatal_error_codes=set(settings.non_fatal_error_codes),
-        pause_waiting_seen=observation.pause_waiting_seen,
-        is_returning_state=observation.is_returning_state,
         expected_room_name=expected_room_name,
         observed_room_name=observation.observed_room_name,
         cleaning_progress=observation.cleaning_progress,
-        active_room_mismatch_streak=(
-            run_tracking.active_room_mismatch_streak
-            if awaiting_completion_event and run_tracking is not None
-            else 0
-        ),
-        active_room_mismatch_required_streak=settings.active_room_mismatch_required_streak,
-        active_room_mismatch_min_progress=settings.active_room_mismatch_min_progress,
-        active_room_mismatch_max_progress=settings.active_room_mismatch_max_progress,
         dock_prep_resume_ready=observation.dock_prep_resume_ready,
         water_tank_block_reason=observation.water_tank_block_reason,
         is_mop_maintenance_state=observation.is_mop_maintenance_state,

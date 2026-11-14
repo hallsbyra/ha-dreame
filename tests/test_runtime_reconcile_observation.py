@@ -10,7 +10,6 @@ from custom_components.ha_dreame.queue_core import (
 )
 from custom_components.ha_dreame.runtime_reconcile_observation import (
     RuntimeReconcileObservation,
-    RuntimeReconcileSettings,
     evaluate_runtime_reconcile_observation,
 )
 from custom_components.ha_dreame.runtime_state import QueueRunTracking
@@ -185,7 +184,6 @@ def test_evaluate_observation_delayed_non_active_state_retries() -> None:
             observed_room_id=1,
         ),
         now=NOW,
-        settings=RuntimeReconcileSettings(dispatch_retry_interval_sec=20),
     )
 
     assert evaluation.decision.retry_current_room is True
@@ -201,7 +199,6 @@ def test_evaluate_observation_active_room_mismatch_can_retry() -> None:
         state,
         _tracking(
             state,
-            active_room_mismatch_streak=1,
             dispatch_retry_count=1,
             last_command_at=(NOW - timedelta(seconds=30)).isoformat(),
         ),
@@ -212,10 +209,6 @@ def test_evaluate_observation_active_room_mismatch_can_retry() -> None:
             cleaning_progress=20,
         ),
         now=NOW,
-        settings=RuntimeReconcileSettings(
-            active_room_mismatch_required_streak=2,
-            dispatch_retry_interval_sec=20,
-        ),
     )
 
     assert evaluation.observed_room_id == 7
@@ -234,7 +227,6 @@ def test_evaluate_observation_late_room_mismatch_uses_default_completion_guard()
         _tracking(
             state,
             active_room_confirmed_since_dispatch=True,
-            active_room_mismatch_streak=1,
             last_command_at=(NOW - timedelta(seconds=30)).isoformat(),
         ),
         RuntimeReconcileObservation(
@@ -270,7 +262,6 @@ def test_evaluate_observation_mop_maintenance_waits_without_retry() -> None:
             is_mop_maintenance_state=True,
         ),
         now=NOW,
-        settings=RuntimeReconcileSettings(dispatch_retry_max=2),
     )
 
     assert evaluation.decision.retry_current_room is False
@@ -291,7 +282,6 @@ def test_evaluate_observation_bad_command_timestamp_does_not_retry() -> None:
             observed_room_id=1,
         ),
         now=NOW,
-        settings=RuntimeReconcileSettings(dispatch_retry_interval_sec=20),
     )
 
     assert evaluation.seconds_since_last_command is None
@@ -312,7 +302,6 @@ def test_evaluate_observation_naive_command_timestamp_does_not_retry() -> None:
             observed_room_id=1,
         ),
         now=NOW,
-        settings=RuntimeReconcileSettings(dispatch_retry_interval_sec=20),
     )
 
     assert evaluation.seconds_since_last_command is None

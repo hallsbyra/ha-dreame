@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 from .const import DREAME_VACUUM_DOMAIN
 from .profile_core import InvalidProfile, derive_cleaning_profile
@@ -37,27 +37,19 @@ class DispatchServiceCall:
     data: dict[str, Any]
 
 
-@dataclass(frozen=True, slots=True)
-class RoomDispatchPlan:
-    """Planned command payloads for one queue room."""
-
-    item_id: str
-    room_id: int
-    room_name: str
-    effective_overrides: dict[str, Any]
-    service_calls: tuple[DispatchServiceCall, ...]
-
-
 def build_room_dispatch_plan(
     item: QueueItem,
     *,
     vacuum_entity_id: str,
-    defaults: Mapping[str, Any] | None = None,
     retry_count: int = 0,
     current_cleaning_mode: str | None = None,
-) -> RoomDispatchPlan:
+) -> tuple[DispatchServiceCall, ...]:
     """Build planned Dreame service-call payloads for one queue item."""
-    effective = _effective_overrides(defaults=defaults, overrides=item.overrides)
+    effective = {
+        key: value
+        for key, value in item.overrides.items()
+        if value is not None and key not in REMOVED_OVERRIDE_KEYS
+    }
 
     resolved_route = _int_or_none(effective.get("cleaning_route"))
     if resolved_route is None:
@@ -134,39 +126,13 @@ def build_room_dispatch_plan(
         )
     )
 
-    return RoomDispatchPlan(
-        item_id=item.item_id,
-        room_id=item.room_id,
-        room_name=item.room_name,
-        effective_overrides=effective,
-        service_calls=tuple(calls),
-    )
+    return tuple(calls)
 
 
 def cleaning_mode_entity_id(vacuum_entity_id: str) -> str:
     """Return the dreame_vacuum cleaning-mode select paired with a vacuum entity."""
     object_id = str(vacuum_entity_id).split(".", maxsplit=1)[-1]
     return f"select.{object_id}_cleaning_mode"
-
-
-def _effective_overrides(
-    *,
-    defaults: Mapping[str, Any] | None,
-    overrides: Mapping[str, Any] | None,
-) -> dict[str, Any]:
-    effective = _non_null_dict(defaults)
-    effective.update(_non_null_dict(overrides))
-    return effective
-
-
-def _non_null_dict(raw: Mapping[str, Any] | None) -> dict[str, Any]:
-    if raw is None:
-        return {}
-    return {
-        key: value
-        for key, value in raw.items()
-        if value is not None and key not in REMOVED_OVERRIDE_KEYS
-    }
 
 
 def _int_or_none(value: Any) -> int | None:

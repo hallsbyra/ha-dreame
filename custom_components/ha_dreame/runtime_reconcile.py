@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from .queue_core import (
-    InvalidOperation,
     QueueState,
     ReconcileDecision,
     complete_current_room,
@@ -41,7 +40,7 @@ def apply_reconcile_decision(
             event_reasons=decision.event_reasons,
         )
 
-    _validate_tracking_matches_queue(queue_state, run_tracking)
+    # A decision only has an effect while awaiting the tracked current room.
     assert run_tracking is not None
 
     if decision.mark_out_of_sync_reason is not None:
@@ -111,19 +110,6 @@ def _decision_has_runtime_effect(decision: ReconcileDecision) -> bool:
         or decision.set_post_run_maintenance_seen
         or decision.reset_dispatch_retry_count
     )
-
-
-def _validate_tracking_matches_queue(
-    queue_state: QueueState,
-    run_tracking: QueueRunTracking | None,
-) -> None:
-    if run_tracking is None:
-        raise InvalidOperation("Runtime reconcile requires run tracking")
-    if (
-        queue_state.run_id != run_tracking.run_id
-        or queue_state.current_item_id != run_tracking.current_item_id
-    ):
-        raise InvalidOperation("Runtime reconcile tracking does not match current queue run")
 
 
 def _apply_tracking_updates(

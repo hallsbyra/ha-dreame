@@ -18,7 +18,6 @@ from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
     ATTR_ACTIVE_ROOM_CONFIRMED_SINCE_DISPATCH,
-    ATTR_ACTIVE_ROOM_MISMATCH_STREAK,
     ATTR_COMPLETED_ITEMS,
     ATTR_CURRENT_ITEM_ID,
     ATTR_DISPATCH_RETRY_COUNT,
@@ -641,7 +640,6 @@ async def _async_resume_queue_response(
     runtime_data.set_run_tracking(
         replace(
             run_tracking,
-            active_room_mismatch_streak=0,
             dispatch_retry_count=0,
             last_command_at=datetime.now(UTC).isoformat(),
             post_run_maintenance_seen=False,
@@ -829,9 +827,7 @@ async def async_start_waiting_queue(hass: HomeAssistant, entry: ConfigEntry) -> 
         entity_ids=runtime_data.observation_entity_ids,
     )
     if (
-        not runtime_data.commands_enabled
-        or not runtime_data.auto_reconcile_enabled
-        or observation.water_tank_block_reason
+        observation.water_tank_block_reason
         or observation.vacuum_state.lower()
         in {"", "unknown", "unavailable", "error", "paused", "cleaning", "returning"}
         or observation.robot_paused
@@ -1116,15 +1112,12 @@ def _reconcile_observation_response(
         "robot_paused": observation.robot_paused,
         "is_drying_state": observation.is_drying_state,
         "water_tank_block_reason": observation.water_tank_block_reason,
-        "force_retry_after_recovery": observation.force_retry_after_recovery,
         "is_dock_prep_paused": observation.is_dock_prep_paused,
         "is_dock_prep_state": observation.is_dock_prep_state,
         "is_mop_maintenance_state": observation.is_mop_maintenance_state,
         "is_post_run_maintenance_state": observation.is_post_run_maintenance_state,
-        "is_returning_state": observation.is_returning_state,
         "observed_room_id": observation.observed_room_id,
         "observed_room_name": observation.observed_room_name,
-        "pause_waiting_seen": observation.pause_waiting_seen,
         "task_status": observation.task_status,
         "vacuum_error_code": observation.vacuum_error_code,
         "vacuum_state": observation.vacuum_state,
@@ -1209,7 +1202,6 @@ def _run_tracking_response(run_tracking: QueueRunTracking | None) -> dict[str, A
         ATTR_ACTIVE_ROOM_CONFIRMED_SINCE_DISPATCH: (
             run_tracking.active_room_confirmed_since_dispatch
         ),
-        ATTR_ACTIVE_ROOM_MISMATCH_STREAK: run_tracking.active_room_mismatch_streak,
         ATTR_CURRENT_ITEM_ID: run_tracking.current_item_id,
         ATTR_DISPATCH_RETRY_COUNT: run_tracking.dispatch_retry_count,
         ATTR_LAST_COMMAND_AT: run_tracking.last_command_at,

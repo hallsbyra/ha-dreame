@@ -333,8 +333,6 @@ async def _async_auto_reconcile_tick(
         if (
             hass.data.get(DOMAIN, {}).get(entry.entry_id) is not entry
             or getattr(entry, "runtime_data", None) is not runtime_data
-            or not runtime_data.commands_enabled
-            or not runtime_data.auto_reconcile_enabled
             or runtime_data.unload_requested.is_set()
         ):
             return

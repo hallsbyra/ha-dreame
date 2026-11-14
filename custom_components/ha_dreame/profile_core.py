@@ -15,8 +15,6 @@ class CleaningProfile:
     """Resolved cleaning profile values for runtime state and dispatch."""
 
     cleaning_mode: int
-    runtime_suction_level: int | None
-    runtime_water_volume: int | None
     dispatch_suction_level: int | None
     dispatch_water_volume: int | None
     custom_suction_level: int
@@ -52,8 +50,6 @@ def derive_cleaning_profile(effective: dict[str, Any]) -> CleaningProfile:
 
     return CleaningProfile(
         cleaning_mode=resolved_mode,
-        runtime_suction_level=runtime_suction,
-        runtime_water_volume=runtime_water,
         dispatch_suction_level=None if resolved_mode == 1 else runtime_suction,
         dispatch_water_volume=None if resolved_mode == 0 else runtime_water,
         custom_suction_level=runtime_suction if runtime_suction is not None else 0,

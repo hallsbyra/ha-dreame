@@ -155,7 +155,6 @@ def build_runtime_reconcile_observation(
             robot_state,
             self_wash_base_status,
         ),
-        is_returning_state=_is_returning_state(vacuum_state, robot_state),
     )
 
 
@@ -244,11 +243,6 @@ def _parse_int(value: Any) -> int | None:
         return int(float(str(value).strip()))
     except ValueError:
         return None
-
-
-def _is_returning_state(vacuum_state: str, robot_state: str) -> bool:
-    normalized_states = {_normalize_signal(vacuum_state), _normalize_signal(robot_state)}
-    return any("returning" in state or state.startswith("return_") for state in normalized_states)
 
 
 def _is_mop_maintenance_state(task_status: str, robot_state: str) -> bool:

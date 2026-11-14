@@ -9,37 +9,28 @@ from custom_components.ha_dreame.const import DREAME_VACUUM_DOMAIN
 from custom_components.ha_dreame.dispatch_executor import (
     async_execute_dispatch_plan,
 )
-from custom_components.ha_dreame.dispatch_plan import (
-    DispatchServiceCall,
-    RoomDispatchPlan,
-)
+from custom_components.ha_dreame.dispatch_plan import DispatchServiceCall
 
 
-def _plan() -> RoomDispatchPlan:
-    return RoomDispatchPlan(
-        item_id="item-1",
-        room_id=7,
-        room_name="Room 7",
-        effective_overrides={"repeats": 2},
-        service_calls=(
-            DispatchServiceCall(
-                domain=DREAME_VACUUM_DOMAIN,
-                service="vacuum_set_custom_cleaning",
-                data={
-                    "entity_id": "vacuum.robot",
-                    "repeats": [2],
-                    "segment_id": [7],
-                },
-            ),
-            DispatchServiceCall(
-                domain=DREAME_VACUUM_DOMAIN,
-                service="vacuum_clean_segment",
-                data={
-                    "entity_id": "vacuum.robot",
-                    "repeats": 2,
-                    "segments": [7],
-                },
-            ),
+def _plan() -> tuple[DispatchServiceCall, ...]:
+    return (
+        DispatchServiceCall(
+            domain=DREAME_VACUUM_DOMAIN,
+            service="vacuum_set_custom_cleaning",
+            data={
+                "entity_id": "vacuum.robot",
+                "repeats": [2],
+                "segment_id": [7],
+            },
+        ),
+        DispatchServiceCall(
+            domain=DREAME_VACUUM_DOMAIN,
+            service="vacuum_clean_segment",
+            data={
+                "entity_id": "vacuum.robot",
+                "repeats": 2,
+                "segments": [7],
+            },
         ),
     )
 
@@ -88,15 +79,12 @@ async def test_execute_dispatch_plan_calls_services_in_order(
         "vacuum_clean_segment",
         _record_call,
     )
-    plan = _plan()
-
-    executed = await async_execute_dispatch_plan(
+    await async_execute_dispatch_plan(
         hass,
-        plan,
+        _plan(),
         commands_enabled=True,
     )
 
-    assert executed == plan.service_calls
     assert calls == [
         (
             DREAME_VACUUM_DOMAIN,

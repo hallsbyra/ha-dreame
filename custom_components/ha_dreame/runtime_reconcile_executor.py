@@ -15,11 +15,7 @@ from .audit import async_call_robot_service
 from .dispatch_plan import build_room_dispatch_plan
 from .queue_core import QueueError, QueueState, current_item
 from .runtime import HaDreameRuntimeData
-from .runtime_reconcile import (
-    COMMAND_INTENT_DISPATCH_CURRENT_ROOM,
-    COMMAND_INTENT_RESUME_CURRENT_ROOM,
-    RuntimeReconcileResult,
-)
+from .runtime_reconcile import COMMAND_INTENT_DISPATCH_CURRENT_ROOM, RuntimeReconcileResult
 from .runtime_state import QueueRunTracking
 
 
@@ -46,22 +42,13 @@ async def async_apply_runtime_reconcile_result(
         )
         return committed_result
 
-    if result.command_intent == COMMAND_INTENT_RESUME_CURRENT_ROOM:
-        committed_result = await _async_resume_current_room_intent(
-            hass,
-            runtime_data,
-            result,
-        )
-        _commit_runtime_state(
-            runtime_data,
-            committed_result.queue_state,
-            committed_result.run_tracking,
-        )
-        return committed_result
-
-    raise HomeAssistantError(
-        f"Unsupported runtime reconcile command intent: {result.command_intent}"
+    committed_result = await _async_resume_current_room_intent(hass, runtime_data, result)
+    _commit_runtime_state(
+        runtime_data,
+        committed_result.queue_state,
+        committed_result.run_tracking,
     )
+    return committed_result
 
 
 async def _async_dispatch_current_room_intent(
@@ -69,11 +56,9 @@ async def _async_dispatch_current_room_intent(
     runtime_data: HaDreameRuntimeData,
     result: RuntimeReconcileResult,
 ) -> RuntimeReconcileResult:
+    # Dispatch intents always target the current running room of an active run.
     item = current_item(result.queue_state)
-    if item is None:
-        raise HomeAssistantError("Runtime reconcile dispatch requires a current room")
-    if item.item_id != result.command_item_id:
-        raise HomeAssistantError("Runtime reconcile dispatch item does not match current room")
+    assert item is not None
 
     run_tracking = _new_dispatched_run_tracking(result)
     try:
@@ -112,16 +97,8 @@ async def _async_resume_current_room_intent(
 ) -> RuntimeReconcileResult:
     if not runtime_data.commands_enabled:
         raise HomeAssistantError("HA Dreame robot commands are disabled")
-    if result.queue_state.run_id is None or result.command_item_id is None:
-        raise HomeAssistantError("Runtime reconcile resume requires an active run")
-    if result.queue_state.current_item_id != result.command_item_id:
-        raise HomeAssistantError("Runtime reconcile resume item does not match current room")
-    if (
-        result.run_tracking is None
-        or result.run_tracking.run_id != result.queue_state.run_id
-        or result.run_tracking.current_item_id != result.command_item_id
-    ):
-        raise HomeAssistantError("Runtime reconcile resume requires matching run tracking")
+    # Resume intents are only produced for the tracked current room.
+    assert result.run_tracking is not None
 
     await async_call_robot_service(
         hass,
@@ -140,15 +117,9 @@ async def _async_resume_current_room_intent(
 
 
 def _new_dispatched_run_tracking(result: RuntimeReconcileResult) -> QueueRunTracking:
-    if result.queue_state.run_id is None or result.command_item_id is None:
-        raise HomeAssistantError("Runtime reconcile dispatch requires an active run")
-
+    assert result.queue_state.run_id is not None and result.command_item_id is not None
     dispatch_retry_count = 0
-    if (
-        result.run_tracking is not None
-        and result.run_tracking.run_id == result.queue_state.run_id
-        and result.run_tracking.current_item_id == result.command_item_id
-    ):
+    if result.run_tracking is not None:
         dispatch_retry_count = result.run_tracking.dispatch_retry_count
 
     return QueueRunTracking(
