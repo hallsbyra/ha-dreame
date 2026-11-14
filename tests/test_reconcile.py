@@ -16,9 +16,9 @@ from custom_components.ha_dreame.const import (
 from custom_components.ha_dreame.queue_core import add_room, new_state, start_run
 from custom_components.ha_dreame.reconcile import async_apply_decision, evaluate_reconcile
 from custom_components.ha_dreame.reconcile_core import Decision
-from custom_components.ha_dreame.runtime_state import QueueRunTracking
+from custom_components.ha_dreame.queue_core import DispatchTracking
 
-from .helpers import mock_entry, register_entity
+from .helpers import mock_entry, register_entity, set_dispatch, without_dispatch
 
 pytestmark = pytest.mark.usefixtures("mock_dreame_vacuum_dependency")
 
@@ -47,16 +47,12 @@ def _running_two_room_state():
     return start_run(state)
 
 
-def _tracking(state, **overrides: object) -> QueueRunTracking:
-    assert state.run_id is not None
-    assert state.current_item_id is not None
+def _tracking(state, **overrides: object) -> DispatchTracking:
     values = {
-        "run_id": state.run_id,
-        "current_item_id": state.current_item_id,
         "last_command_at": datetime.fromisoformat("2026-05-16T09:00:00+00:00"),
     }
     values.update(overrides)
-    return QueueRunTracking(**values)
+    return DispatchTracking(**values)
 
 
 async def _running_entry(hass: HomeAssistant, *, commands_enabled: bool = True, **tracking):
@@ -64,14 +60,15 @@ async def _running_entry(hass: HomeAssistant, *, commands_enabled: bool = True, 
     state = _running_two_room_state()
     run_tracking = _tracking(state, **tracking)
     entry.runtime_data.set_queue_state(state)
-    entry.runtime_data.set_run_tracking(run_tracking)
+    state = replace(state, dispatch=run_tracking)
+    entry.runtime_data.set_queue_state(state)
     return entry, vacuum_entity_id, state, run_tracking
 
 
-async def test_awaited_item_requires_running_room_with_matching_tracking(
+async def test_awaited_item_requires_a_dispatched_running_room(
     hass: HomeAssistant,
 ) -> None:
-    """Test only the tracked running room awaits completion."""
+    """Test only a running room that was dispatched awaits completion."""
     entry, _vacuum_entity_id = await _setup_entry(hass)
     runtime_data = entry.runtime_data
     idle_state = add_room(new_state(), room_id=1, room_name="Kitchen")
@@ -82,10 +79,7 @@ async def test_awaited_item_requires_running_room_with_matching_tracking(
     runtime_data.set_queue_state(state)
     assert runtime_data.awaited_item() is None
 
-    runtime_data.set_run_tracking(_tracking(state, run_id="previous-run"))
-    assert runtime_data.awaited_item() is None
-
-    runtime_data.set_run_tracking(_tracking(state))
+    set_dispatch(runtime_data, _tracking(state))
     assert runtime_data.awaited_item() == state.items[0]
 
 
@@ -136,8 +130,8 @@ async def test_apply_hold_commits_tracking_only(hass: HomeAssistant) -> None:
     intent = await async_apply_decision(hass, entry.runtime_data, Decision("hold", next_tracking))
 
     assert intent is None
-    assert entry.runtime_data.queue_state == state
-    assert entry.runtime_data.run_tracking == next_tracking
+    assert without_dispatch(entry.runtime_data.queue_state) == without_dispatch(state)
+    assert entry.runtime_data.queue_state.dispatch == next_tracking
 
 
 async def test_apply_complete_dispatches_next_room_visible_to_observers(
@@ -167,10 +161,9 @@ async def test_apply_complete_dispatches_next_room_visible_to_observers(
     queue_state = entry.runtime_data.queue_state
     assert [item.status for item in queue_state.items] == ["completed", "running"]
     assert queue_state.current_item_id == next_item.item_id
-    run_tracking = entry.runtime_data.run_tracking
+    run_tracking = entry.runtime_data.queue_state.dispatch
     assert run_tracking is not None
-    assert run_tracking.run_id == state.run_id
-    assert run_tracking.current_item_id == next_item.item_id
+    assert entry.runtime_data.queue_state.current_item_id == next_item.item_id
     assert run_tracking.dispatch_retry_count == 0
     assert run_tracking.task_status_cleared_since_dispatch is False
     assert run_tracking.last_command_at.tzinfo is not None
@@ -197,7 +190,8 @@ async def test_apply_complete_of_last_room_finishes_queue_without_dispatch(
     state = start_run(add_room(new_state(), room_id=1, room_name="Kitchen"))
     tracking = _tracking(state)
     entry.runtime_data.set_queue_state(state)
-    entry.runtime_data.set_run_tracking(tracking)
+    state = replace(state, dispatch=tracking)
+    entry.runtime_data.set_queue_state(state)
 
     intent = await async_apply_decision(hass, entry.runtime_data, Decision("complete", tracking))
 
@@ -205,7 +199,7 @@ async def test_apply_complete_of_last_room_finishes_queue_without_dispatch(
     assert calls == []
     assert entry.runtime_data.queue_state.run_state == "completed"
     assert entry.runtime_data.queue_state.current_item_id is None
-    assert entry.runtime_data.run_tracking is None
+    assert entry.runtime_data.queue_state.dispatch is None
 
 
 async def test_apply_complete_switches_mode_before_next_room(
@@ -258,8 +252,8 @@ async def test_apply_retry_redispatches_with_the_incremented_retry_count(
 
     assert intent == "dispatch_current_room"
     assert calls == [{"entity_id": vacuum_entity_id, "segments": [1]}]
-    assert entry.runtime_data.queue_state == state
-    run_tracking = entry.runtime_data.run_tracking
+    assert without_dispatch(entry.runtime_data.queue_state) == without_dispatch(state)
+    run_tracking = entry.runtime_data.queue_state.dispatch
     assert run_tracking is not None
     assert run_tracking.dispatch_retry_count == 2
     assert run_tracking.task_status_cleared_since_dispatch is False
@@ -288,7 +282,7 @@ async def test_apply_dispatch_failure_preserves_runtime_state(
 
     assert calls == [{"entity_id": vacuum_entity_id, "segments": [2]}]
     assert entry.runtime_data.queue_state == state
-    assert entry.runtime_data.run_tracking == tracking
+    assert entry.runtime_data.queue_state.dispatch == tracking
 
 
 async def test_apply_retry_honors_disabled_command_gate(
@@ -316,7 +310,7 @@ async def test_apply_retry_honors_disabled_command_gate(
 
     assert calls == []
     assert entry.runtime_data.queue_state == state
-    assert entry.runtime_data.run_tracking == tracking
+    assert entry.runtime_data.queue_state.dispatch == tracking
 
 
 @pytest.mark.parametrize(("blocked", "run_state"), [(False, "out_of_sync"), (True, "blocked")])
@@ -342,7 +336,7 @@ async def test_apply_fail_ends_the_run_and_clears_tracking(
         ("needs_attention", "dispatch_retry_exhausted"),
         ("pending", None),
     ]
-    assert entry.runtime_data.run_tracking is None
+    assert entry.runtime_data.queue_state.dispatch is None
 
 
 async def test_apply_resume_calls_vacuum_start_and_commits_tracking(
@@ -364,10 +358,10 @@ async def test_apply_resume_calls_vacuum_start_and_commits_tracking(
 
     assert intent == "resume_current_room"
     assert calls == [{"entity_id": vacuum_entity_id}]
-    assert entry.runtime_data.queue_state == state
-    run_tracking = entry.runtime_data.run_tracking
+    assert without_dispatch(entry.runtime_data.queue_state) == without_dispatch(state)
+    run_tracking = entry.runtime_data.queue_state.dispatch
     assert run_tracking is not None
-    assert run_tracking.current_item_id == state.current_item_id
+    assert entry.runtime_data.queue_state.current_item_id == state.current_item_id
     assert run_tracking.task_status_cleared_since_dispatch is True
     assert run_tracking.last_command_at != tracking.last_command_at
     assert run_tracking.last_command_at.tzinfo is not None
@@ -391,7 +385,7 @@ async def test_apply_resume_failure_preserves_runtime_state(
 
     assert calls == [{"entity_id": vacuum_entity_id}]
     assert entry.runtime_data.queue_state == state
-    assert entry.runtime_data.run_tracking == tracking
+    assert entry.runtime_data.queue_state.dispatch == tracking
 
 
 async def test_apply_resume_honors_disabled_command_gate(
@@ -411,4 +405,4 @@ async def test_apply_resume_honors_disabled_command_gate(
 
     assert calls == []
     assert entry.runtime_data.queue_state == state
-    assert entry.runtime_data.run_tracking == tracking
+    assert entry.runtime_data.queue_state.dispatch == tracking

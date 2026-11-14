@@ -62,7 +62,9 @@ from .const import (
 from .dispatch_executor import async_dispatch_current_room, current_room_dispatch_plan
 from .audit import async_call_robot_service, service_audit
 from .queue_core import (
+    DispatchTracking,
     QueueError,
+    QueueState,
     add_room,
     cancel_run,
     clear_pending,
@@ -79,7 +81,6 @@ from .runtime import HaDreameRuntimeData
 from .reconcile import ReconcileEvaluation, async_reconcile, evaluate_reconcile
 from .reconcile_core import Observation, is_meaningful_error
 from .runtime_observation import normalize_signal
-from .runtime_state import QueueRunTracking
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -500,7 +501,6 @@ async def _async_cancel_queue_response(
 
     if runtime_data.queue_state.run_state == "waiting_for_tanks":
         runtime_data.set_queue_state(cancel_run(runtime_data.queue_state))
-        runtime_data.set_run_tracking(None)
         return _queue_status_response(entry)
 
     await async_call_robot_service(
@@ -524,7 +524,6 @@ async def _async_cancel_queue_response(
         raise HomeAssistantError(str(err)) from err
 
     runtime_data.set_queue_state(queue_state)
-    runtime_data.set_run_tracking(None)
     return _queue_status_response(entry)
 
 
@@ -567,7 +566,6 @@ async def _async_skip_current_room_response(
         {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
     )
     runtime_data.set_queue_state(queue_state)
-    runtime_data.set_run_tracking(None)
     return _queue_status_response(entry)
 
 
@@ -582,12 +580,8 @@ async def _async_resume_queue_response(
     if runtime_data.queue_state.run_state != "running":
         raise HomeAssistantError("Queue is not running")
 
-    run_tracking = runtime_data.run_tracking
-    if (
-        run_tracking is None
-        or run_tracking.run_id != runtime_data.queue_state.run_id
-        or run_tracking.current_item_id != runtime_data.queue_state.current_item_id
-    ):
+    dispatch = runtime_data.queue_state.dispatch
+    if dispatch is None:
         raise HomeAssistantError("Queue run tracking is not active")
 
     observation = runtime_data.observe(hass)
@@ -604,12 +598,15 @@ async def _async_resume_queue_response(
         "start",
         {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
     )
-    runtime_data.set_run_tracking(
+    runtime_data.set_queue_state(
         replace(
-            run_tracking,
-            dispatch_retry_count=0,
-            last_command_at=datetime.now(UTC),
-            post_run_maintenance_seen=False,
+            runtime_data.queue_state,
+            dispatch=replace(
+                dispatch,
+                dispatch_retry_count=0,
+                last_command_at=datetime.now(UTC),
+                post_run_maintenance_seen=False,
+            ),
         )
     )
     return {
@@ -956,7 +953,7 @@ def _runtime_status_response(hass: HomeAssistant, config_entry_id: str) -> dict[
     return {
         CONF_ALLOW_ROBOT_COMMANDS: runtime_data.commands_enabled,
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
-        ATTR_RUN_TRACKING: _run_tracking_response(runtime_data.run_tracking),
+        ATTR_RUN_TRACKING: _run_tracking_response(runtime_data.queue_state),
         "recent_activity": list(runtime_data.recent_activity),
         "robot_status": _robot_status_response(runtime_data.observe(hass)),
         CONF_VACUUM_ENTITY_ID: runtime_data.vacuum_entity_id,
@@ -1010,7 +1007,7 @@ def _reconcile_response(entry: ConfigEntry, evaluation: ReconcileEvaluation) -> 
         "decision": (
             None
             if decision is None
-            else {**asdict(decision), "tracking": _run_tracking_response(decision.tracking)}
+            else {**asdict(decision), "tracking": _dispatch_response(decision.tracking)}
         ),
         "evaluation": {
             "awaiting_completion_event": decision is not None,
@@ -1036,19 +1033,23 @@ def _queue_status_response(entry: ConfigEntry) -> dict[str, Any]:
     }
 
 
-def _run_tracking_response(run_tracking: QueueRunTracking | None) -> dict[str, Any] | None:
-    """Return a serializable runtime run tracking snapshot."""
-    if run_tracking is None:
+def _run_tracking_response(queue_state: QueueState) -> dict[str, Any] | None:
+    """Return a serializable snapshot of the current room's dispatch tracking."""
+    if queue_state.dispatch is None:
         return None
-
     return {
-        ATTR_ACTIVE_ROOM_CONFIRMED_SINCE_DISPATCH: (
-            run_tracking.active_room_confirmed_since_dispatch
-        ),
-        ATTR_CURRENT_ITEM_ID: run_tracking.current_item_id,
-        ATTR_DISPATCH_RETRY_COUNT: run_tracking.dispatch_retry_count,
-        ATTR_LAST_COMMAND_AT: run_tracking.last_command_at.isoformat(),
-        ATTR_POST_RUN_MAINTENANCE_SEEN: run_tracking.post_run_maintenance_seen,
-        ATTR_RUN_ID: run_tracking.run_id,
-        ATTR_TASK_STATUS_CLEARED_SINCE_DISPATCH: (run_tracking.task_status_cleared_since_dispatch),
+        **_dispatch_response(queue_state.dispatch),
+        ATTR_CURRENT_ITEM_ID: queue_state.current_item_id,
+        ATTR_RUN_ID: queue_state.run_id,
+    }
+
+
+def _dispatch_response(dispatch: DispatchTracking) -> dict[str, Any]:
+    """Return serializable dispatch tracking fields."""
+    return {
+        ATTR_ACTIVE_ROOM_CONFIRMED_SINCE_DISPATCH: dispatch.active_room_confirmed_since_dispatch,
+        ATTR_DISPATCH_RETRY_COUNT: dispatch.dispatch_retry_count,
+        ATTR_LAST_COMMAND_AT: dispatch.last_command_at.isoformat(),
+        ATTR_POST_RUN_MAINTENANCE_SEEN: dispatch.post_run_maintenance_seen,
+        ATTR_TASK_STATUS_CLEARED_SINCE_DISPATCH: dispatch.task_status_cleared_since_dispatch,
     }

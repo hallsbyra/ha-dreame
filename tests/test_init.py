@@ -1,7 +1,5 @@
 """Tests for HA Dreame integration setup."""
 
-from datetime import datetime
-
 import pytest
 
 from homeassistant.core import HomeAssistant
@@ -23,7 +21,6 @@ from custom_components.ha_dreame.const import (
 )
 from custom_components.ha_dreame.queue_core import QueueState, add_room
 from custom_components.ha_dreame.runtime import HaDreameRuntimeData
-from custom_components.ha_dreame.runtime_state import QueueRunTracking
 
 from .helpers import mock_entry, register_entity
 
@@ -45,7 +42,7 @@ async def test_setup_entry_attaches_runtime_data(hass: HomeAssistant) -> None:
     assert isinstance(entry.runtime_data.queue_state, QueueState)
     assert entry.runtime_data.queue_state.run_state == "idle"
     assert entry.runtime_data.queue_state.items == ()
-    assert entry.runtime_data.run_tracking is None
+    assert entry.runtime_data.queue_state.dispatch is None
     assert hass.data[DOMAIN][entry.entry_id] is entry
 
 
@@ -69,33 +66,6 @@ async def test_runtime_data_updates_queue_state(
     await hass.async_block_till_done()
 
     assert entry.runtime_data.queue_state == updated_state
-
-
-async def test_runtime_data_updates_run_tracking(
-    hass: HomeAssistant,
-) -> None:
-    """Test runtime data exposes an updateable run tracking surface."""
-    vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
-    entry = mock_entry({CONF_VACUUM_ENTITY_ID: vacuum_entity_id})
-    entry.add_to_hass(hass)
-
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-
-    run_tracking = QueueRunTracking(
-        run_id="run-1",
-        current_item_id="item-1",
-        last_command_at=datetime.fromisoformat("2026-05-15T18:00:00+00:00"),
-    )
-    entry.runtime_data.set_run_tracking(run_tracking)
-    await hass.async_block_till_done()
-
-    assert entry.runtime_data.run_tracking == run_tracking
-
-    entry.runtime_data.set_run_tracking(None)
-    await hass.async_block_till_done()
-
-    assert entry.runtime_data.run_tracking is None
 
 
 async def test_setup_entry_reads_enabled_command_gate_from_options(

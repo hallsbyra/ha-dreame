@@ -10,7 +10,7 @@ from custom_components.ha_dreame.dispatch_executor import async_dispatch_current
 from custom_components.ha_dreame.queue_core import add_room, new_state, start_run
 from custom_components.ha_dreame.runtime import HaDreameRuntimeData
 
-from .helpers import mock_entry, register_entity
+from .helpers import mock_entry, register_entity, without_dispatch
 
 pytestmark = pytest.mark.usefixtures("mock_dreame_vacuum_dependency")
 
@@ -52,7 +52,7 @@ async def test_dispatch_rejects_disabled_command_gate_and_restores_state(
 
     assert calls == []
     assert runtime_data.queue_state == previous_state
-    assert runtime_data.run_tracking is None
+    assert runtime_data.queue_state.dispatch is None
 
 
 async def test_dispatch_publishes_state_then_calls_services_in_order(
@@ -87,11 +87,10 @@ async def test_dispatch_publishes_state_then_calls_services_in_order(
             next_state.current_item_id,
         ),
     ]
-    assert runtime_data.queue_state == next_state
-    run_tracking = runtime_data.run_tracking
+    assert without_dispatch(runtime_data.queue_state) == without_dispatch(next_state)
+    run_tracking = runtime_data.queue_state.dispatch
     assert run_tracking is not None
-    assert run_tracking.run_id == next_state.run_id
-    assert run_tracking.current_item_id == next_state.current_item_id
+    assert runtime_data.queue_state.current_item_id == next_state.current_item_id
     assert run_tracking.dispatch_retry_count == 1
     assert run_tracking.last_command_at.tzinfo is not None
 
@@ -119,4 +118,4 @@ async def test_dispatch_stops_after_service_failure_and_restores_state(
 
     assert calls == [("select", "select_option")]
     assert runtime_data.queue_state == previous_state
-    assert runtime_data.run_tracking is None
+    assert runtime_data.queue_state.dispatch is None

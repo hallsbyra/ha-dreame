@@ -33,7 +33,6 @@ from .audit import automatic_audit, register_external_command_audit
 from .runtime import HaDreameRuntimeData
 from .runtime_observation import ABSENT_STATES, RuntimeObservationEntityIds, normalize_signal
 from .reconcile import async_reconcile_under_lock
-from .runtime_state import QueueRunTracking
 from .services import async_register_services, async_remove_services, async_start_waiting_queue
 
 _LOGGER = logging.getLogger(__name__)
@@ -146,7 +145,6 @@ def _build_runtime_data(hass: HomeAssistant, entry: ConfigEntry) -> HaDreameRunt
         ),
         operation_lock=asyncio.Lock(),
         queue_coordinator=_build_queue_coordinator(hass, entry),
-        run_tracking_coordinator=_build_run_tracking_coordinator(hass, entry),
         unload_requested=asyncio.Event(),
         vacuum_entity_id=vacuum_entity_id,
     )
@@ -334,18 +332,4 @@ def _build_queue_coordinator(
         name=f"{DOMAIN}_{entry.entry_id}_queue",
     )
     coordinator.async_set_updated_data(new_state())
-    return coordinator
-
-
-def _build_run_tracking_coordinator(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-) -> DataUpdateCoordinator[QueueRunTracking | None]:
-    """Build the runtime run tracking coordinator for a config entry."""
-    coordinator = DataUpdateCoordinator[QueueRunTracking | None](
-        hass,
-        _LOGGER,
-        name=f"{DOMAIN}_{entry.entry_id}_run_tracking",
-    )
-    coordinator.async_set_updated_data(None)
     return coordinator

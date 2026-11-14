@@ -1,5 +1,7 @@
 """Shared test helpers for HA Dreame."""
 
+from dataclasses import replace
+
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -33,3 +35,13 @@ def mock_entry(
 ) -> MockConfigEntry:
     """Build a mock HA Dreame config entry."""
     return MockConfigEntry(domain=DOMAIN, title=TITLE, data=data, options=options)
+
+
+def set_dispatch(runtime_data, dispatch) -> None:
+    """Attach dispatch tracking to the runtime's current queue state."""
+    runtime_data.set_queue_state(replace(runtime_data.queue_state, dispatch=dispatch))
+
+
+def without_dispatch(queue_state):
+    """Return a queue state for comparisons that ignore its dispatch tracking."""
+    return replace(queue_state, dispatch=None)

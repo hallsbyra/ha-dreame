@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
@@ -32,13 +33,29 @@ class QueueItem:
 
 
 @dataclass(frozen=True)
+class DispatchTracking:
+    """Reconcile memory about the current room since its last robot command."""
+
+    last_command_at: datetime
+    dispatch_retry_count: int = 0
+    active_room_confirmed_since_dispatch: bool = False
+    task_status_cleared_since_dispatch: bool = False
+    post_run_maintenance_seen: bool = False
+
+
+@dataclass(frozen=True)
 class QueueState:
-    """Current queue state."""
+    """Current queue state.
+
+    `dispatch` belongs to the current room: transitions that change the current room
+    clear it, and a room dispatch sets it.
+    """
 
     run_state: str = "idle"
     run_id: str | None = None
     items: tuple[QueueItem, ...] = ()
     current_item_id: str | None = None
+    dispatch: DispatchTracking | None = None
 
 
 TERMINAL_ITEM_STATUSES = {"completed", "skipped", "needs_attention"}
@@ -174,6 +191,7 @@ def start_run(state: QueueState) -> QueueState:
         run_id=uuid4().hex,
         items=tuple(items),
         current_item_id=first_item.item_id,
+        dispatch=None,
     )
 
 
@@ -194,6 +212,7 @@ def cancel_run(state: QueueState, *, reason: str = "canceled_by_user") -> QueueS
         run_state="canceled",
         items=_mark_non_terminal_items(state.items, reason=reason),
         current_item_id=None,
+        dispatch=None,
     )
 
 
@@ -221,6 +240,7 @@ def external_takeover(state: QueueState, *, reason: str, blocked: bool = False) 
         run_state="blocked" if blocked else "out_of_sync",
         items=tuple(items),
         current_item_id=None,
+        dispatch=None,
     )
 
 
@@ -255,11 +275,12 @@ def _finish_current_room(
             run_state="completed",
             items=tuple(items),
             current_item_id=None,
+            dispatch=None,
         )
 
     next_item = items[next_pending_index]
     items[next_pending_index] = replace(next_item, status="running")
-    return replace(state, items=tuple(items), current_item_id=next_item.item_id)
+    return replace(state, items=tuple(items), current_item_id=next_item.item_id, dispatch=None)
 
 
 def _running_current_context(state: QueueState) -> tuple[list[QueueItem], int, QueueItem]:

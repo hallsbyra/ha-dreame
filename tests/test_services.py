@@ -1,5 +1,7 @@
 """Tests for HA Dreame services."""
 
+from dataclasses import replace
+
 from datetime import datetime
 import logging
 
@@ -54,9 +56,9 @@ from custom_components.ha_dreame.const import (
     SERVICE_UPDATE_RUNNING_OVERRIDE,
 )
 from custom_components.ha_dreame.queue_core import start_run
-from custom_components.ha_dreame.runtime_state import QueueRunTracking
+from custom_components.ha_dreame.queue_core import DispatchTracking
 
-from .helpers import mock_entry, register_entity
+from .helpers import mock_entry, register_entity, set_dispatch, without_dispatch
 
 pytestmark = pytest.mark.usefixtures("mock_dreame_vacuum_dependency")
 
@@ -86,12 +88,11 @@ async def test_docked_paused_tank_problem_blocks_commands_and_records_caller(
         await _call_start_queue_service(hass, entry.entry_id)
     queue = start_run(entry.runtime_data.queue_state)
     entry.runtime_data.set_queue_state(queue)
-    entry.runtime_data.set_run_tracking(
-        QueueRunTracking(
-            run_id=queue.run_id,
-            current_item_id=queue.current_item_id,
+    set_dispatch(
+        entry.runtime_data,
+        DispatchTracking(
             last_command_at=datetime.fromisoformat("2026-01-01T00:00:00+00:00"),
-        )
+        ),
     )
     with pytest.raises(HomeAssistantError, match="dirty_water_tank_not_ready"):
         await _call_resume_queue_service(hass, entry.entry_id)
@@ -918,7 +919,7 @@ async def test_start_queue_service_rejects_disabled_command_gate_without_dispatc
 
     assert calls == []
     queue_state = entry.runtime_data.queue_state
-    assert entry.runtime_data.run_tracking is None
+    assert entry.runtime_data.queue_state.dispatch is None
     assert queue_state.run_state == "idle"
     assert queue_state.items[0].status == "pending"
     assert queue_state.current_item_id is None
@@ -943,7 +944,7 @@ async def test_start_queue_service_rejects_empty_queue(
 
     assert entry.runtime_data.queue_state.run_state == "idle"
     assert entry.runtime_data.queue_state.items == ()
-    assert entry.runtime_data.run_tracking is None
+    assert entry.runtime_data.queue_state.dispatch is None
 
 
 async def test_start_queue_service_dispatches_first_room_and_updates_runtime_state(
@@ -987,10 +988,9 @@ async def test_start_queue_service_dispatches_first_room_and_updates_runtime_sta
     assert queue_state.run_state == "running"
     assert queue_state.current_item_id == running_item.item_id
     assert running_item.status == "running"
-    run_tracking = entry.runtime_data.run_tracking
+    run_tracking = entry.runtime_data.queue_state.dispatch
     assert run_tracking is not None
-    assert run_tracking.run_id == queue_state.run_id
-    assert run_tracking.current_item_id == running_item.item_id
+    assert entry.runtime_data.queue_state.current_item_id == running_item.item_id
     assert run_tracking.dispatch_retry_count == 0
     assert run_tracking.task_status_cleared_since_dispatch is False
     assert run_tracking.last_command_at.tzinfo is not None
@@ -1124,7 +1124,7 @@ async def test_start_queue_service_rejects_previous_active_room_task(
     assert calls == []
     assert entry.runtime_data.queue_state.run_state == "idle"
     assert entry.runtime_data.queue_state.items[0].status == "pending"
-    assert entry.runtime_data.run_tracking is None
+    assert entry.runtime_data.queue_state.dispatch is None
 
 
 async def test_start_queue_service_leaves_queue_idle_when_dispatch_fails(
@@ -1167,7 +1167,7 @@ async def test_start_queue_service_leaves_queue_idle_when_dispatch_fails(
     assert queue_state.run_state == "idle"
     assert queue_state.current_item_id is None
     assert queue_state.items[0].status == "pending"
-    assert entry.runtime_data.run_tracking is None
+    assert entry.runtime_data.queue_state.dispatch is None
 
 
 async def test_update_running_override_rejects_disabled_command_gate_without_dispatch(
@@ -1384,19 +1384,18 @@ async def test_cancel_queue_service_rejects_disabled_command_gate_without_dispat
     await _call_add_queue_room_service(hass, entry.entry_id)
     queue_state = start_run(entry.runtime_data.queue_state)
     entry.runtime_data.set_queue_state(queue_state)
-    run_tracking = QueueRunTracking(
-        run_id=queue_state.run_id,
-        current_item_id=queue_state.current_item_id,
+    run_tracking = DispatchTracking(
         last_command_at=datetime.fromisoformat("2026-01-01T00:00:00+00:00"),
     )
-    entry.runtime_data.set_run_tracking(run_tracking)
+    queue_state = replace(queue_state, dispatch=run_tracking)
+    entry.runtime_data.set_queue_state(queue_state)
 
     with pytest.raises(HomeAssistantError, match="robot commands are disabled"):
         await _call_cancel_queue_service(hass, entry.entry_id)
 
     assert calls == []
     assert entry.runtime_data.queue_state == queue_state
-    assert entry.runtime_data.run_tracking == run_tracking
+    assert entry.runtime_data.queue_state.dispatch == run_tracking
 
 
 async def test_cancel_queue_service_returns_vacuum_to_base_and_cancels_run(
@@ -1461,7 +1460,7 @@ async def test_cancel_queue_service_returns_vacuum_to_base_and_cancels_run(
         "canceled_by_user",
         "canceled_by_user",
     ]
-    assert entry.runtime_data.run_tracking is None
+    assert entry.runtime_data.queue_state.dispatch is None
     assert response == {
         ATTR_COMPLETED_ITEMS: 0,
         ATTR_PENDING_ITEMS: 0,
@@ -1527,7 +1526,7 @@ async def test_cancel_queue_service_preserves_runtime_state_when_dock_command_fa
     await _call_add_queue_room_service(hass, entry.entry_id)
     await _call_start_queue_service(hass, entry.entry_id)
     queue_state = entry.runtime_data.queue_state
-    run_tracking = entry.runtime_data.run_tracking
+    run_tracking = entry.runtime_data.queue_state.dispatch
 
     with pytest.raises(HomeAssistantError, match="dock command failed"):
         await _call_cancel_queue_service(hass, entry.entry_id)
@@ -1535,7 +1534,7 @@ async def test_cancel_queue_service_preserves_runtime_state_when_dock_command_fa
     assert clean_calls == [{"entity_id": vacuum_entity_id, "segments": [1]}]
     assert dock_calls == [{"entity_id": vacuum_entity_id}]
     assert entry.runtime_data.queue_state == queue_state
-    assert entry.runtime_data.run_tracking == run_tracking
+    assert entry.runtime_data.queue_state.dispatch == run_tracking
 
 
 async def test_resume_queue_service_rejects_disabled_command_gate_without_dispatch(
@@ -1558,12 +1557,11 @@ async def test_resume_queue_service_rejects_disabled_command_gate_without_dispat
     await _call_add_queue_room_service(hass, entry.entry_id)
     queue_state = start_run(entry.runtime_data.queue_state)
     entry.runtime_data.set_queue_state(queue_state)
-    run_tracking = QueueRunTracking(
-        run_id=queue_state.run_id,
-        current_item_id=queue_state.current_item_id,
+    run_tracking = DispatchTracking(
         last_command_at=datetime.fromisoformat("2026-01-01T00:00:00+00:00"),
     )
-    entry.runtime_data.set_run_tracking(run_tracking)
+    queue_state = replace(queue_state, dispatch=run_tracking)
+    entry.runtime_data.set_queue_state(queue_state)
     hass.states.async_set(vacuum_entity_id, "paused")
     hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning_paused")
 
@@ -1572,7 +1570,7 @@ async def test_resume_queue_service_rejects_disabled_command_gate_without_dispat
 
     assert start_calls == []
     assert entry.runtime_data.queue_state == queue_state
-    assert entry.runtime_data.run_tracking == run_tracking
+    assert entry.runtime_data.queue_state.dispatch == run_tracking
 
 
 async def test_resume_queue_service_rejects_non_running_queue_without_dispatch(
@@ -1625,12 +1623,11 @@ async def test_resume_queue_service_rejects_active_robot_without_dispatch(
     await _call_add_queue_room_service(hass, entry.entry_id)
     queue_state = start_run(entry.runtime_data.queue_state)
     entry.runtime_data.set_queue_state(queue_state)
-    entry.runtime_data.set_run_tracking(
-        QueueRunTracking(
-            run_id=queue_state.run_id,
-            current_item_id=queue_state.current_item_id,
+    set_dispatch(
+        entry.runtime_data,
+        DispatchTracking(
             last_command_at=datetime.fromisoformat("2026-01-01T00:00:00+00:00"),
-        )
+        ),
     )
     hass.states.async_set(vacuum_entity_id, "cleaning")
     hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning")
@@ -1640,7 +1637,7 @@ async def test_resume_queue_service_rejects_active_robot_without_dispatch(
         await _call_resume_queue_service(hass, entry.entry_id)
 
     assert start_calls == []
-    assert entry.runtime_data.queue_state == queue_state
+    assert without_dispatch(entry.runtime_data.queue_state) == without_dispatch(queue_state)
 
 
 async def test_resume_queue_service_starts_interrupted_robot_and_refreshes_tracking(
@@ -1666,25 +1663,22 @@ async def test_resume_queue_service_starts_interrupted_robot_and_refreshes_track
     await _call_add_queue_room_service(hass, entry.entry_id)
     queue_state = start_run(entry.runtime_data.queue_state)
     entry.runtime_data.set_queue_state(queue_state)
-    run_tracking = QueueRunTracking(
-        run_id=queue_state.run_id,
-        current_item_id=queue_state.current_item_id,
+    run_tracking = DispatchTracking(
         last_command_at=datetime.fromisoformat("2026-01-01T00:00:00+00:00"),
         dispatch_retry_count=2,
     )
-    entry.runtime_data.set_run_tracking(run_tracking)
+    queue_state = replace(queue_state, dispatch=run_tracking)
+    entry.runtime_data.set_queue_state(queue_state)
     hass.states.async_set(vacuum_entity_id, "error")
     hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning")
     hass.states.async_set("sensor.dreame_robot_error", "mop_removed")
 
     response = await _call_resume_queue_service(hass, entry.entry_id)
 
-    refreshed_tracking = entry.runtime_data.run_tracking
+    refreshed_tracking = entry.runtime_data.queue_state.dispatch
     assert start_calls == [{"entity_id": vacuum_entity_id}]
-    assert entry.runtime_data.queue_state == queue_state
+    assert without_dispatch(entry.runtime_data.queue_state) == without_dispatch(queue_state)
     assert refreshed_tracking is not None
-    assert refreshed_tracking.run_id == run_tracking.run_id
-    assert refreshed_tracking.current_item_id == run_tracking.current_item_id
     assert refreshed_tracking.dispatch_retry_count == 0
     assert refreshed_tracking.last_command_at != run_tracking.last_command_at
     assert response == {
@@ -1727,19 +1721,18 @@ async def test_skip_current_room_service_rejects_disabled_command_gate_without_d
     )
     queue_state = start_run(entry.runtime_data.queue_state)
     entry.runtime_data.set_queue_state(queue_state)
-    run_tracking = QueueRunTracking(
-        run_id=queue_state.run_id,
-        current_item_id=queue_state.current_item_id,
+    run_tracking = DispatchTracking(
         last_command_at=datetime.fromisoformat("2026-01-01T00:00:00+00:00"),
     )
-    entry.runtime_data.set_run_tracking(run_tracking)
+    queue_state = replace(queue_state, dispatch=run_tracking)
+    entry.runtime_data.set_queue_state(queue_state)
 
     with pytest.raises(HomeAssistantError, match="robot commands are disabled"):
         await _call_skip_current_room_service(hass, entry.entry_id)
 
     assert stop_calls == []
     assert entry.runtime_data.queue_state == queue_state
-    assert entry.runtime_data.run_tracking == run_tracking
+    assert entry.runtime_data.queue_state.dispatch == run_tracking
 
 
 async def test_skip_current_room_service_rejects_non_running_queue_without_dispatch(
@@ -1769,7 +1762,7 @@ async def test_skip_current_room_service_rejects_non_running_queue_without_dispa
 
     assert stop_calls == []
     assert entry.runtime_data.queue_state.run_state == "idle"
-    assert entry.runtime_data.run_tracking is None
+    assert entry.runtime_data.queue_state.dispatch is None
 
 
 async def test_skip_current_room_service_advances_and_dispatches_next_room(
@@ -1835,10 +1828,9 @@ async def test_skip_current_room_service_advances_and_dispatches_next_room(
     assert queue_state.current_item_id == next_item.item_id
     assert [item.status for item in queue_state.items] == ["skipped", "running"]
     assert queue_state.items[0].result == "skip_pressed"
-    run_tracking = entry.runtime_data.run_tracking
+    run_tracking = entry.runtime_data.queue_state.dispatch
     assert run_tracking is not None
-    assert run_tracking.run_id == queue_state.run_id
-    assert run_tracking.current_item_id == next_item.item_id
+    assert entry.runtime_data.queue_state.current_item_id == next_item.item_id
     assert run_tracking.dispatch_retry_count == 0
     assert run_tracking.task_status_cleared_since_dispatch is False
     assert run_tracking.last_command_at.tzinfo is not None
@@ -1924,7 +1916,7 @@ async def test_skip_current_room_service_sends_final_skipped_room_home(
     assert queue_state.current_item_id is None
     assert skipped_item.status == "skipped"
     assert skipped_item.result == "skip_pressed"
-    assert entry.runtime_data.run_tracking is None
+    assert entry.runtime_data.queue_state.dispatch is None
     assert response == {
         ATTR_COMPLETED_ITEMS: 0,
         ATTR_PENDING_ITEMS: 0,
@@ -1984,7 +1976,7 @@ async def test_skip_current_room_service_preserves_runtime_state_when_stop_fails
     )
     await _call_start_queue_service(hass, entry.entry_id)
     queue_state = entry.runtime_data.queue_state
-    run_tracking = entry.runtime_data.run_tracking
+    run_tracking = entry.runtime_data.queue_state.dispatch
 
     with pytest.raises(HomeAssistantError, match="stop failed"):
         await _call_skip_current_room_service(hass, entry.entry_id)
@@ -1992,7 +1984,7 @@ async def test_skip_current_room_service_preserves_runtime_state_when_stop_fails
     assert clean_calls == [{"entity_id": vacuum_entity_id, "segments": [1]}]
     assert stop_calls == [{"entity_id": vacuum_entity_id}]
     assert entry.runtime_data.queue_state == queue_state
-    assert entry.runtime_data.run_tracking == run_tracking
+    assert entry.runtime_data.queue_state.dispatch == run_tracking
 
 
 async def test_runtime_status_service_returns_entry_runtime_data(

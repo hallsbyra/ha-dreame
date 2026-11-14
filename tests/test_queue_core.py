@@ -1,8 +1,12 @@
 """Tests for the pure HA Dreame queue core."""
 
+from dataclasses import replace
+from datetime import UTC, datetime
+
 import pytest
 
 from custom_components.ha_dreame.queue_core import (
+    DispatchTracking,
     InvalidOperation,
     ItemNotFound,
     QueueItem,
@@ -402,3 +406,18 @@ def test_external_takeover_can_end_the_run_blocked() -> None:
 
     assert state.run_state == "blocked"
     assert [item.status for item in state.items] == ["needs_attention", "pending", "pending"]
+
+
+def test_transitions_that_change_the_current_room_clear_its_dispatch() -> None:
+    """Test dispatch tracking belongs to one current room and never outlives it."""
+    dispatch = DispatchTracking(last_command_at=datetime(2026, 5, 17, 8, 0, tzinfo=UTC))
+    running = replace(start_run(_seed_three_rooms()), dispatch=dispatch)
+
+    assert move_item(running, item_id=running.items[2].item_id, new_position=1).dispatch == (
+        dispatch
+    )
+    assert clear_pending(running).dispatch == dispatch
+    assert complete_current_room(running).dispatch is None
+    assert skip_current_room(running).dispatch is None
+    assert cancel_run(running).dispatch is None
+    assert external_takeover(running, reason="stopped_from_app").dispatch is None

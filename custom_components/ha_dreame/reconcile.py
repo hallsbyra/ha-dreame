@@ -13,10 +13,15 @@ from homeassistant.exceptions import HomeAssistantError
 from .audit import async_call_robot_service, record_activity
 from .const import VACUUM_DOMAIN
 from .dispatch_executor import async_dispatch_current_room
-from .queue_core import QueueItem, complete_current_room, current_item, external_takeover
+from .queue_core import (
+    DispatchTracking,
+    QueueItem,
+    complete_current_room,
+    current_item,
+    external_takeover,
+)
 from .reconcile_core import Decision, Observation, decide
 from .runtime import HaDreameRuntimeData
-from .runtime_state import QueueRunTracking
 
 _LOGGER = logging.getLogger(__name__)
 COMMAND_INTENT_DISPATCH_CURRENT_ROOM = "dispatch_current_room"
@@ -29,7 +34,7 @@ class ReconcileEvaluation:
 
     observation: Observation
     item: QueueItem | None = None
-    tracking: QueueRunTracking | None = None
+    tracking: DispatchTracking | None = None
     seconds_since_command: float | None = None
     decision: Decision | None = None
 
@@ -43,7 +48,7 @@ def evaluate_reconcile(
     """Observe the robot and decide about the awaited room without changing anything."""
     observation = runtime_data.observe(hass, task_status_override=task_status_override)
     item = runtime_data.awaited_item()
-    tracking = runtime_data.run_tracking
+    tracking = runtime_data.queue_state.dispatch
     if item is None or tracking is None:
         return ReconcileEvaluation(observation)
     seconds = max(0.0, (datetime.now(UTC) - tracking.last_command_at).total_seconds())
@@ -114,8 +119,8 @@ async def async_apply_decision(
     """Apply a decision about the current room and return the command intent it sent."""
     queue_state = runtime_data.queue_state
     if decision.action == "hold":
-        if decision.tracking != runtime_data.run_tracking:
-            runtime_data.set_run_tracking(decision.tracking)
+        if decision.tracking != queue_state.dispatch:
+            runtime_data.set_queue_state(replace(queue_state, dispatch=decision.tracking))
         return None
 
     if decision.action == "fail":
@@ -123,7 +128,6 @@ async def async_apply_decision(
         runtime_data.set_queue_state(
             external_takeover(queue_state, reason=decision.fail_reason, blocked=decision.blocked)
         )
-        runtime_data.set_run_tracking(None)
         return None
 
     next_state = (
@@ -131,7 +135,6 @@ async def async_apply_decision(
     )
     if next_state.current_item_id is None:
         runtime_data.set_queue_state(next_state)
-        runtime_data.set_run_tracking(None)
         return None
 
     command_intent = (
@@ -158,7 +161,12 @@ async def async_apply_decision(
             "start",
             {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
         )
-        runtime_data.set_run_tracking(replace(decision.tracking, last_command_at=datetime.now(UTC)))
+        runtime_data.set_queue_state(
+            replace(
+                queue_state,
+                dispatch=replace(decision.tracking, last_command_at=datetime.now(UTC)),
+            )
+        )
     else:
         retry_count = decision.tracking.dispatch_retry_count if decision.action == "retry" else 0
         await async_dispatch_current_room(hass, runtime_data, next_state, retry_count)

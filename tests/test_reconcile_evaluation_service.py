@@ -1,5 +1,7 @@
 """Tests for the read-only reconcile evaluation service."""
 
+from dataclasses import replace
+
 from datetime import datetime
 
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -16,7 +18,7 @@ from custom_components.ha_dreame.const import (
     SERVICE_EVALUATE_RECONCILE,
 )
 from custom_components.ha_dreame.queue_core import QueueState, add_room, start_run
-from custom_components.ha_dreame.runtime_state import QueueRunTracking
+from custom_components.ha_dreame.queue_core import DispatchTracking
 
 from .helpers import mock_entry, register_entity
 
@@ -65,17 +67,13 @@ def _running_state() -> QueueState:
     return start_run(state)
 
 
-def _tracking(state: QueueState, **overrides: object) -> QueueRunTracking:
-    assert state.run_id is not None
-    assert state.current_item_id is not None
+def _tracking(state: QueueState, **overrides: object) -> DispatchTracking:
     values = {
-        "run_id": state.run_id,
-        "current_item_id": state.current_item_id,
         "last_command_at": datetime.fromisoformat("2000-01-01T00:00:00+00:00"),
         "task_status_cleared_since_dispatch": True,
     }
     values.update(overrides)
-    return QueueRunTracking(**values)
+    return DispatchTracking(**values)
 
 
 async def test_setup_entry_registers_evaluate_reconcile_service(
@@ -133,7 +131,7 @@ async def test_evaluate_reconcile_returns_noop_for_idle_queue(
     assert response["evaluation"]["expected_room_id"] is None
     assert response["decision"] is None
     assert entry.runtime_data.queue_state == QueueState()
-    assert entry.runtime_data.run_tracking is None
+    assert entry.runtime_data.queue_state.dispatch is None
 
 
 async def test_evaluate_reconcile_returns_decision_for_running_queue(
@@ -145,7 +143,8 @@ async def test_evaluate_reconcile_returns_decision_for_running_queue(
     queue_state = _running_state()
     run_tracking = _tracking(queue_state)
     entry.runtime_data.set_queue_state(queue_state)
-    entry.runtime_data.set_run_tracking(run_tracking)
+    queue_state = replace(queue_state, dispatch=run_tracking)
+    entry.runtime_data.set_queue_state(queue_state)
     hass.states.async_set(vacuum_entity_id, "idle")
     hass.states.async_set("sensor.dreame_robot_task_status", "completed")
     hass.states.async_set(
@@ -164,7 +163,7 @@ async def test_evaluate_reconcile_returns_decision_for_running_queue(
     assert response["decision"]["action"] == "complete"
     assert response["decision"]["reasons"] == ("task_status_completed",)
     assert entry.runtime_data.queue_state == queue_state
-    assert entry.runtime_data.run_tracking == run_tracking
+    assert entry.runtime_data.queue_state.dispatch == run_tracking
 
 
 async def test_evaluate_reconcile_uses_configured_observation_entities(
@@ -182,7 +181,8 @@ async def test_evaluate_reconcile_uses_configured_observation_entities(
     queue_state = _running_state()
     run_tracking = _tracking(queue_state)
     entry.runtime_data.set_queue_state(queue_state)
-    entry.runtime_data.set_run_tracking(run_tracking)
+    queue_state = replace(queue_state, dispatch=run_tracking)
+    entry.runtime_data.set_queue_state(queue_state)
     hass.states.async_set(vacuum_entity_id, "idle")
     hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning")
     hass.states.async_set(
@@ -204,7 +204,7 @@ async def test_evaluate_reconcile_uses_configured_observation_entities(
     assert response["decision"]["action"] == "complete"
     assert response["decision"]["reasons"] == ("task_status_completed",)
     assert entry.runtime_data.queue_state == queue_state
-    assert entry.runtime_data.run_tracking == run_tracking
+    assert entry.runtime_data.queue_state.dispatch == run_tracking
 
 
 async def test_evaluate_reconcile_does_not_call_vacuum_services(
@@ -215,7 +215,8 @@ async def test_evaluate_reconcile_does_not_call_vacuum_services(
     vacuum_entity_id, entry = await _setup_loaded_entry(hass)
     queue_state = _running_state()
     entry.runtime_data.set_queue_state(queue_state)
-    entry.runtime_data.set_run_tracking(_tracking(queue_state, dispatch_retry_count=1))
+    queue_state = replace(queue_state, dispatch=_tracking(queue_state, dispatch_retry_count=1))
+    entry.runtime_data.set_queue_state(queue_state)
     hass.states.async_set(vacuum_entity_id, "idle")
     hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning")
 

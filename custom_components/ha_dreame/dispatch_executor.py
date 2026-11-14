@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from homeassistant.core import HomeAssistant
@@ -10,9 +11,8 @@ from homeassistant.exceptions import HomeAssistantError
 from .audit import async_call_robot_service
 from .const import companion_entity_id
 from .dispatch_plan import DispatchServiceCall, build_room_dispatch_plan
-from .queue_core import QueueError, QueueState, current_item
+from .queue_core import DispatchTracking, QueueError, QueueState, current_item
 from .runtime import HaDreameRuntimeData
-from .runtime_state import QueueRunTracking
 
 
 def current_room_dispatch_plan(
@@ -47,26 +47,24 @@ async def async_dispatch_current_room(
     *,
     plan: tuple[DispatchServiceCall, ...] | None = None,
 ) -> None:
-    """Publish next_state with fresh run tracking, then dispatch its current room.
+    """Publish next_state with fresh dispatch tracking, then dispatch its current room.
 
     Service handlers and state observers can run synchronously while the command is in
     flight. Publishing first keeps them from attributing fresh robot activity to the room
-    that just finished. A rejected command restores the previous queue and tracking.
+    that just finished. A rejected command restores the previous queue state.
     Callers that must validate before sending another command pass a plan built earlier.
     """
     if plan is None:
         plan = current_room_dispatch_plan(hass, runtime_data, next_state, retry_count)
-    assert next_state.run_id is not None and next_state.current_item_id is not None
 
     previous_queue_state = runtime_data.queue_state
-    previous_run_tracking = runtime_data.run_tracking
-    runtime_data.set_queue_state(next_state)
-    runtime_data.set_run_tracking(
-        QueueRunTracking(
-            run_id=next_state.run_id,
-            current_item_id=next_state.current_item_id,
-            last_command_at=datetime.now(UTC),
-            dispatch_retry_count=retry_count,
+    runtime_data.set_queue_state(
+        replace(
+            next_state,
+            dispatch=DispatchTracking(
+                last_command_at=datetime.now(UTC),
+                dispatch_retry_count=retry_count,
+            ),
         )
     )
     try:
@@ -80,5 +78,4 @@ async def async_dispatch_current_room(
             )
     except Exception:
         runtime_data.set_queue_state(previous_queue_state)
-        runtime_data.set_run_tracking(previous_run_tracking)
         raise

@@ -1,5 +1,7 @@
 """Tests for the manual reconcile apply service."""
 
+from dataclasses import replace
+
 from datetime import datetime
 
 import pytest
@@ -23,9 +25,9 @@ from custom_components.ha_dreame.const import (
     SERVICE_APPLY_RECONCILE,
 )
 from custom_components.ha_dreame.queue_core import QueueState, add_room, start_run
-from custom_components.ha_dreame.runtime_state import QueueRunTracking
+from custom_components.ha_dreame.queue_core import DispatchTracking
 
-from .helpers import mock_entry, register_entity
+from .helpers import mock_entry, register_entity, set_dispatch, without_dispatch
 
 pytestmark = pytest.mark.usefixtures("mock_dreame_vacuum_dependency")
 
@@ -68,16 +70,12 @@ def _running_state() -> QueueState:
     return start_run(state)
 
 
-def _tracking(state: QueueState, **overrides: object) -> QueueRunTracking:
-    assert state.run_id is not None
-    assert state.current_item_id is not None
+def _tracking(state: QueueState, **overrides: object) -> DispatchTracking:
     values = {
-        "run_id": state.run_id,
-        "current_item_id": state.current_item_id,
         "last_command_at": datetime.fromisoformat("2000-01-01T00:00:00+00:00"),
     }
     values.update(overrides)
-    return QueueRunTracking(**values)
+    return DispatchTracking(**values)
 
 
 def _set_current_room(hass: HomeAssistant, room_id: int, room_name: str) -> None:
@@ -137,7 +135,8 @@ async def test_apply_reconcile_rejects_disabled_command_gate_without_mutating(
     queue_state = _running_state()
     run_tracking = _tracking(queue_state, task_status_cleared_since_dispatch=True)
     entry.runtime_data.set_queue_state(queue_state)
-    entry.runtime_data.set_run_tracking(run_tracking)
+    queue_state = replace(queue_state, dispatch=run_tracking)
+    entry.runtime_data.set_queue_state(queue_state)
     hass.states.async_set(vacuum_entity_id, "idle")
     hass.states.async_set("sensor.dreame_robot_task_status", "completed")
     _set_current_room(hass, 1, "Kitchen")
@@ -147,7 +146,7 @@ async def test_apply_reconcile_rejects_disabled_command_gate_without_mutating(
 
     assert calls == []
     assert entry.runtime_data.queue_state == queue_state
-    assert entry.runtime_data.run_tracking == run_tracking
+    assert entry.runtime_data.queue_state.dispatch == run_tracking
 
 
 async def test_apply_reconcile_noop_returns_observation_without_mutating(
@@ -165,7 +164,7 @@ async def test_apply_reconcile_noop_returns_observation_without_mutating(
     assert response["decision"] is None
     assert response["queue"]["run_state"] == "idle"
     assert entry.runtime_data.queue_state == QueueState()
-    assert entry.runtime_data.run_tracking is None
+    assert entry.runtime_data.queue_state.dispatch is None
 
 
 async def test_apply_reconcile_updates_tracking_only_decision_without_robot_calls(
@@ -186,7 +185,8 @@ async def test_apply_reconcile_updates_tracking_only_decision_without_robot_call
     queue_state = _running_state()
     run_tracking = _tracking(queue_state, task_status_cleared_since_dispatch=False)
     entry.runtime_data.set_queue_state(queue_state)
-    entry.runtime_data.set_run_tracking(run_tracking)
+    queue_state = replace(queue_state, dispatch=run_tracking)
+    entry.runtime_data.set_queue_state(queue_state)
     hass.states.async_set(vacuum_entity_id, "cleaning")
     hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning")
     _set_current_room(hass, 1, "Kitchen")
@@ -196,9 +196,9 @@ async def test_apply_reconcile_updates_tracking_only_decision_without_robot_call
     assert calls == []
     assert response["decision"]["action"] == "hold"
     assert response["decision"]["tracking"]["task_status_cleared_since_dispatch"] is True
-    assert entry.runtime_data.queue_state == queue_state
-    assert entry.runtime_data.run_tracking is not None
-    assert entry.runtime_data.run_tracking.task_status_cleared_since_dispatch is True
+    assert without_dispatch(entry.runtime_data.queue_state) == without_dispatch(queue_state)
+    assert entry.runtime_data.queue_state.dispatch is not None
+    assert entry.runtime_data.queue_state.dispatch.task_status_cleared_since_dispatch is True
 
 
 async def test_apply_reconcile_completion_dispatches_next_room(
@@ -218,8 +218,8 @@ async def test_apply_reconcile_completion_dispatches_next_room(
     vacuum_entity_id, entry = await _setup_loaded_entry(hass)
     queue_state = _running_state()
     entry.runtime_data.set_queue_state(queue_state)
-    entry.runtime_data.set_run_tracking(
-        _tracking(queue_state, task_status_cleared_since_dispatch=True)
+    set_dispatch(
+        entry.runtime_data, _tracking(queue_state, task_status_cleared_since_dispatch=True)
     )
     hass.states.async_set(vacuum_entity_id, "idle")
     hass.states.async_set("sensor.dreame_robot_task_status", "completed")
@@ -236,8 +236,8 @@ async def test_apply_reconcile_completion_dispatches_next_room(
     assert response["queue"][ATTR_PENDING_ITEMS] == 0
     assert entry.runtime_data.queue_state.run_state == "running"
     assert entry.runtime_data.queue_state.current_item_id == next_item.item_id
-    assert entry.runtime_data.run_tracking is not None
-    assert entry.runtime_data.run_tracking.current_item_id == next_item.item_id
+    assert entry.runtime_data.queue_state.dispatch is not None
+    assert entry.runtime_data.queue_state.current_item_id == next_item.item_id
 
 
 async def test_apply_reconcile_uses_configured_observation_entities(
@@ -264,8 +264,8 @@ async def test_apply_reconcile_uses_configured_observation_entities(
     )
     queue_state = _running_state()
     entry.runtime_data.set_queue_state(queue_state)
-    entry.runtime_data.set_run_tracking(
-        _tracking(queue_state, task_status_cleared_since_dispatch=True)
+    set_dispatch(
+        entry.runtime_data, _tracking(queue_state, task_status_cleared_since_dispatch=True)
     )
     hass.states.async_set(vacuum_entity_id, "idle")
     hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning")
@@ -306,7 +306,8 @@ async def test_apply_reconcile_dispatch_failure_preserves_runtime_state(
     queue_state = _running_state()
     run_tracking = _tracking(queue_state, task_status_cleared_since_dispatch=True)
     entry.runtime_data.set_queue_state(queue_state)
-    entry.runtime_data.set_run_tracking(run_tracking)
+    queue_state = replace(queue_state, dispatch=run_tracking)
+    entry.runtime_data.set_queue_state(queue_state)
     hass.states.async_set(vacuum_entity_id, "idle")
     hass.states.async_set("sensor.dreame_robot_task_status", "completed")
     _set_current_room(hass, 1, "Kitchen")
@@ -316,7 +317,7 @@ async def test_apply_reconcile_dispatch_failure_preserves_runtime_state(
 
     assert calls == [{"entity_id": vacuum_entity_id, "segments": [2]}]
     assert entry.runtime_data.queue_state == queue_state
-    assert entry.runtime_data.run_tracking == run_tracking
+    assert entry.runtime_data.queue_state.dispatch == run_tracking
 
 
 async def test_apply_reconcile_resume_intent_calls_vacuum_start(
@@ -333,7 +334,8 @@ async def test_apply_reconcile_resume_intent_calls_vacuum_start(
     queue_state = _running_state()
     run_tracking = _tracking(queue_state)
     entry.runtime_data.set_queue_state(queue_state)
-    entry.runtime_data.set_run_tracking(run_tracking)
+    queue_state = replace(queue_state, dispatch=run_tracking)
+    entry.runtime_data.set_queue_state(queue_state)
     hass.states.async_set(vacuum_entity_id, "cleaning")
     hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning")
     hass.states.async_set("sensor.dreame_robot_state", "washing_paused")
@@ -348,8 +350,8 @@ async def test_apply_reconcile_resume_intent_calls_vacuum_start(
         "task_status_cleared_after_dispatch",
         "dock_prep_paused_resume_requested",
     )
-    assert entry.runtime_data.queue_state == queue_state
-    assert entry.runtime_data.run_tracking is not None
-    assert entry.runtime_data.run_tracking.current_item_id == queue_state.current_item_id
-    assert entry.runtime_data.run_tracking.task_status_cleared_since_dispatch is True
-    assert entry.runtime_data.run_tracking.last_command_at != run_tracking.last_command_at
+    assert without_dispatch(entry.runtime_data.queue_state) == without_dispatch(queue_state)
+    assert entry.runtime_data.queue_state.dispatch is not None
+    assert entry.runtime_data.queue_state.current_item_id == queue_state.current_item_id
+    assert entry.runtime_data.queue_state.dispatch.task_status_cleared_since_dispatch is True
+    assert entry.runtime_data.queue_state.dispatch.last_command_at != run_tracking.last_command_at

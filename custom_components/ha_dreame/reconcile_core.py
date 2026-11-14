@@ -8,8 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any, Literal
 
-from .queue_core import QueueItem
-from .runtime_state import QueueRunTracking
+from .queue_core import DispatchTracking, QueueItem
 
 ACTIVE_STATES = frozenset({"cleaning", "returning"})
 DISPATCH_RETRY_INTERVAL_SEC = 20
@@ -51,7 +50,7 @@ class Decision:
     """
 
     action: Action
-    tracking: QueueRunTracking
+    tracking: DispatchTracking
     reasons: tuple[str, ...] = ()
     fail_reason: str | None = None
     blocked: bool = False
@@ -65,7 +64,7 @@ def is_meaningful_error(error_code: str) -> bool:
 def decide(
     observation: Observation,
     item: QueueItem,
-    tracking: QueueRunTracking,
+    tracking: DispatchTracking,
     seconds_since_command: float,
 ) -> Decision:
     """Decide one tick while `item` awaits completion under `tracking`."""

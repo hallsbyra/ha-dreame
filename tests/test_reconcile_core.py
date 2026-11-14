@@ -6,7 +6,7 @@ import pytest
 
 from custom_components.ha_dreame.queue_core import QueueItem
 from custom_components.ha_dreame.reconcile_core import Decision, Observation, decide
-from custom_components.ha_dreame.runtime_state import QueueRunTracking
+from custom_components.ha_dreame.queue_core import DispatchTracking
 
 NOW = datetime(2026, 5, 17, 8, 0, tzinfo=UTC)
 TRACKING_FIELDS = (
@@ -37,9 +37,7 @@ def _decision(**overrides: object) -> Decision:
         status="running",
     )
     seconds = values.pop("seconds_since_last_command")
-    tracking = QueueRunTracking(
-        run_id="run-1",
-        current_item_id="item-1",
+    tracking = DispatchTracking(
         last_command_at=NOW,
         **{key: values.pop(key) for key in TRACKING_FIELDS if key in values},
     )

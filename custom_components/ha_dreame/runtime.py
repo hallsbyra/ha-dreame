@@ -13,7 +13,6 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from .queue_core import QueueItem, QueueState, current_item
 from .runtime_observation import RuntimeObservationEntityIds, build_runtime_reconcile_observation
 from .reconcile_core import Observation
-from .runtime_state import QueueRunTracking
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,7 +24,6 @@ class HaDreameRuntimeData:
     observation_entity_ids: RuntimeObservationEntityIds
     operation_lock: asyncio.Lock
     queue_coordinator: DataUpdateCoordinator[QueueState]
-    run_tracking_coordinator: DataUpdateCoordinator[QueueRunTracking | None]
     unload_requested: asyncio.Event
     vacuum_entity_id: str
     recent_activity: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=100))
@@ -45,17 +43,14 @@ class HaDreameRuntimeData:
         )
 
     def awaited_item(self) -> QueueItem | None:
-        """Return the running room while it awaits completion under matching run tracking."""
+        """Return the running room while it awaits completion after its dispatch."""
         queue_state = self.queue_state
-        run_tracking = self.run_tracking
         item = current_item(queue_state)
         if (
             queue_state.run_state != "running"
+            or queue_state.dispatch is None
             or item is None
             or item.status != "running"
-            or run_tracking is None
-            or run_tracking.run_id != queue_state.run_id
-            or run_tracking.current_item_id != item.item_id
         ):
             return None
         return item
@@ -72,12 +67,3 @@ class HaDreameRuntimeData:
     def set_queue_state(self, queue_state: QueueState) -> None:
         """Set the current runtime queue state and notify listeners."""
         self.queue_coordinator.async_set_updated_data(queue_state)
-
-    @property
-    def run_tracking(self) -> QueueRunTracking | None:
-        """Return runtime tracking for the current dispatched queue item."""
-        return self.run_tracking_coordinator.data
-
-    def set_run_tracking(self, run_tracking: QueueRunTracking | None) -> None:
-        """Set current runtime run tracking and notify listeners."""
-        self.run_tracking_coordinator.async_set_updated_data(run_tracking)
