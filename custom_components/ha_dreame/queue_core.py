@@ -78,17 +78,20 @@ def add_room(
     """Append one pending room, inheriting the previous item's overrides by default.
 
     Adding after a finished run starts a fresh queue. After a failed run it keeps the rooms that
-    need review: the robot may still be cleaning them, and hiding them loses the only trace.
+    need review, since the robot may still be cleaning them and hiding them loses the only
+    trace, and the remaining pending rooms, which can still run. The new room inherits from the
+    last remaining room only.
     """
     if state.run_state in TERMINAL_RUN_STATES:
         kept = (
-            tuple(item for item in state.items if item.status == "needs_attention")
+            tuple(item for item in state.items if item.status in {"needs_attention", "pending"})
             if state.run_state in FAILED_RUN_STATES
             else ()
         )
         state = QueueState(items=kept)
         if overrides is None:
-            overrides = {}
+            remaining = [item for item in kept if item.status == "pending"]
+            overrides = remaining[-1].overrides if remaining else {}
 
     if overrides is None:
         overrides = state.items[-1].overrides if state.items else {}

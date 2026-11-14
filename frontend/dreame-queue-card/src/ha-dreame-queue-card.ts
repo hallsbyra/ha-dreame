@@ -5,6 +5,7 @@ import {
   CARD_EDITOR_TAG,
   CARD_ELEMENT_TAG,
   defaultCardConfig,
+  RUN_REMAINING_ARIA_LABEL,
   serviceErrorText,
   type ActiveQueueService,
   type CardOverrideControl,
@@ -500,7 +501,7 @@ class HaDreameQueueCard extends LitElement {
               ?disabled=${!configEntryId || control.disabled === true}
               @click=${() => this._callQueueService(configEntryId, control.service)}
             >
-              <ha-icon icon=${this._activeControlIcon(control.service)}></ha-icon>
+              <ha-icon icon=${this._activeControlIcon(control)}></ha-icon>
             </button>
           `,
         )}
@@ -635,7 +636,11 @@ class HaDreameQueueCard extends LitElement {
     `;
   }
 
-  private _activeControlIcon(service: ActiveQueueService): string {
+  private _activeControlIcon(control: { ariaLabel: string; service: ActiveQueueService }): string {
+    const service = control.service;
+    if (control.ariaLabel === RUN_REMAINING_ARIA_LABEL) {
+      return "mdi:playlist-play";
+    }
     if (service === "start_queue" || service === "resume_queue") {
       return "mdi:play";
     }

@@ -100,6 +100,9 @@ During an active queue run, the card shows a dedicated interrupted state when th
 reports paused/error signals. In that state it offers command-gated Continue and End controls,
 matching the operator workflow exposed by Dreame while keeping `allow_robot_commands` authoritative.
 
+After a failed run (`out_of_sync` or `blocked`) the card offers Reset, and while untouched rooms
+are still pending it also offers Run remaining, which starts them under the normal Start rules.
+
 ## Safety Model
 
 - `ha_dreame` owns its own services, entities, storage keys, and card identifiers under the `ha_dreame` namespace.

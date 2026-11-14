@@ -59,6 +59,7 @@ export type CardActiveControl = {
 
 type ControlBase = Pick<CardActiveControl, "ariaLabel" | "label" | "service">;
 
+export const RUN_REMAINING_ARIA_LABEL = "Run remaining rooms";
 export const CONTROLS_UNAVAILABLE_REASON = "Queue controls are unavailable";
 const UNKNOWN_REASON = "Not available right now";
 const REASON_TEXTS: Record<string, string> = {
@@ -355,7 +356,10 @@ function buildActiveControls(
 
   // Resetting only discards queue state; it sends no robot command, so it is not command-gated.
   if (isTerminalQueueFailure(snapshot.runState)) {
-    return [{ariaLabel: "Reset queue", label: "Reset", service: "clear_pending_queue"}];
+    const reset: CardActiveControl = {ariaLabel: "Reset queue", label: "Reset", service: "clear_pending_queue"};
+    return snapshot.pendingItems > 0
+      ? [gated({ariaLabel: RUN_REMAINING_ARIA_LABEL, label: "Run remaining", service: "start_queue"}), reset]
+      : [reset];
   }
 
   if (snapshot.runState === "running") {
@@ -413,12 +417,16 @@ function buildSummary(
     case "canceled":
       return "Queue canceled.";
     case "blocked":
-      return "Route blocked. Review room access, then reset the queue.";
+      return `Route blocked. Review room access, then ${failureNextStep(snapshot)}.`;
     case "out_of_sync":
-      return "Queue out of sync. Review robot state, then reset the queue.";
+      return `Queue out of sync. Review robot state, then ${failureNextStep(snapshot)}.`;
     default:
       return `Queue state: ${queueRunStateLabel(snapshot.runState)}.`;
   }
+}
+
+function failureNextStep(snapshot: QueueSnapshot): string {
+  return snapshot.pendingItems > 0 ? "run the remaining rooms or reset the queue" : "reset the queue";
 }
 
 /** Explain what Start will do, or why the backend blocks it. */

@@ -291,10 +291,17 @@ examples only.
   stale terminal items.
 - Controller implication: reset queue run metadata and stale items before accepting the new pending
   room. After `out_of_sync` or `blocked`, keep the `needs_attention` room: the robot may still be
-  cleaning it after a false alarm, and dropping it hides the only trace of that work. Drop it again
-  once a later run reaches a terminal state that is not a failure.
-- Test implication: cover add-room behavior after each terminal run state, and that a room needing
-  review survives one add after a failed run but not after a later completed run.
+  cleaning it after a false alarm, and dropping it hides the only trace of that work. Also keep the
+  untouched `pending` rooms the failed run left behind, so they can still run; the new room is
+  appended after them and inherits the last remaining room's overrides like any appended room
+  (with no remaining rooms it inherits nothing). Drop the review room again once a later run
+  reaches a terminal state that is not a failure.
+- Run remaining: the card offers "Run remaining" next to Reset while a failed queue has pending
+  rooms. It calls `start_queue`, which starts the first pending room under the normal Start rules,
+  including the tank wait, and keeps the `needs_attention` row visible as history in that run.
+- Test implication: cover add-room behavior after each terminal run state, that review and
+  remaining rooms survive one add after a failed run but not after a later completed run, and
+  starting the remaining rooms from `out_of_sync` and `blocked`.
 
 ### Cloud Reconnect Can Replay The Previous Completion Right After Dispatch
 
@@ -315,11 +322,13 @@ examples only.
   briefly enters `error` with error code `route`, `sensor.<robot>_task_status` turns `completed`
   while the robot is still in another room, and the robot returns to base on its own.
 - Controller implication: the queue moves to terminal `blocked` and the current item to
-  `needs_attention`. No run controls apply, so the card must still offer a reset
-  (`clear_pending_queue`) that returns the queue to an empty `idle` state without sending a robot
-  command. Before this was added, the only way out was to add a room, which was not discoverable.
-- Test implication: failure states (`blocked`, `out_of_sync`) expose exactly one reset control,
-  which stays available when robot commands are disabled.
+  `needs_attention`. The card must always offer a reset (`clear_pending_queue`) that returns the
+  queue to an empty `idle` state without sending a robot command. Before this was added, the only
+  way out was to add a room, which was not discoverable. When untouched rooms remain pending, the
+  card also offers "Run remaining" (see Adding After A Terminal Queue).
+- Test implication: failure states (`blocked`, `out_of_sync`) always expose the reset control,
+  which stays available when robot commands are disabled, plus a command-gated Run remaining
+  control only while pending rooms exist.
 
 ### Queue Editing Preserves Visible And Previous Settings
 
