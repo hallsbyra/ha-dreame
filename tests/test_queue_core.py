@@ -163,6 +163,11 @@ def test_add_room_after_failed_run_keeps_room_needing_review(reason: str) -> Non
         ("Bathroom", "running"),
     ]
 
+    state = complete_current_room(state)
+    state = add_room(state, room_id=1, room_name="Kitchen")
+
+    assert [(item.room_name, item.status) for item in state.items] == [("Kitchen", "pending")]
+
 
 def test_start_run_sets_run_state_and_first_room_running() -> None:
     """Test starting a run marks the first pending room as running."""
