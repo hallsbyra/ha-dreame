@@ -23,13 +23,6 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from .const import (
     CONF_ALLOW_ROBOT_COMMANDS,
     CONF_AUTO_RECONCILE_ENABLED,
-    CONF_CLEAN_WATER_TANK_STATUS_ENTITY_ID,
-    CONF_CLEANING_PROGRESS_ENTITY_ID,
-    CONF_CURRENT_ROOM_ENTITY_ID,
-    CONF_ERROR_ENTITY_ID,
-    CONF_ROBOT_STATE_ENTITY_ID,
-    CONF_SELF_WASH_BASE_STATUS_ENTITY_ID,
-    CONF_TASK_STATUS_ENTITY_ID,
     CONF_VACUUM_ENTITY_ID,
     DOMAIN,
     DREAME_VACUUM_DOMAIN,
@@ -38,7 +31,7 @@ from .const import (
 from .queue_core import QueueState, new_state
 from .audit import automatic_audit, register_external_command_audit
 from .runtime import HaDreameRuntimeData
-from .runtime_observation import RuntimeObservationEntityIds
+from .runtime_observation import ABSENT_STATES, RuntimeObservationEntityIds, normalize_signal
 from .runtime_reconcile_runner import (
     async_evaluate_and_apply_runtime_reconcile_under_lock,
 )
@@ -53,7 +46,6 @@ FRONTEND_CARD_FILENAME = "ha-dreame-queue-card.js"
 FRONTEND_STATIC_PATH = Path(__file__).parent / "frontend"
 FRONTEND_STATIC_URL_PATH = f"/{DOMAIN}/frontend"
 _FRONTEND_STATIC_REGISTERED = f"{DOMAIN}_frontend_static_registered"
-_ABSENT_TASK_STATUS_STATES = {"", "unknown", "unavailable", "none", "null"}
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -151,7 +143,9 @@ def _build_runtime_data(hass: HomeAssistant, entry: ConfigEntry) -> HaDreameRunt
     return HaDreameRuntimeData(
         auto_reconcile_enabled=entry.options.get(CONF_AUTO_RECONCILE_ENABLED) is True,
         commands_enabled=entry.options.get(CONF_ALLOW_ROBOT_COMMANDS) is True,
-        observation_entity_ids=_build_observation_entity_ids(entry),
+        observation_entity_ids=RuntimeObservationEntityIds.for_vacuum(
+            vacuum_entity_id, entry.options
+        ),
         operation_lock=asyncio.Lock(),
         queue_coordinator=_build_queue_coordinator(hass, entry),
         run_tracking_coordinator=_build_run_tracking_coordinator(hass, entry),
@@ -192,18 +186,15 @@ def _register_task_status_listener(
     if not runtime_data.commands_enabled or not runtime_data.auto_reconcile_enabled:
         return
 
-    task_status_entity_id = (
-        runtime_data.observation_entity_ids.task_status_entity_id
-        or _conventional_task_status_entity_id(runtime_data.vacuum_entity_id)
-    )
+    task_status_entity_id = runtime_data.observation_entity_ids.task_status_entity_id
 
     @callback
     def _schedule_task_status_reconcile(event: Event[EventStateChangedData]) -> None:
         old_state = event.data["old_state"]
         new_state = event.data["new_state"]
-        old_status = _normalized_task_status(old_state.state if old_state is not None else "")
-        new_status = _normalized_task_status(new_state.state if new_state is not None else "")
-        if new_status == old_status or new_status in _ABSENT_TASK_STATUS_STATES:
+        old_status = normalize_signal(old_state.state if old_state is not None else "")
+        new_status = normalize_signal(new_state.state if new_state is not None else "")
+        if new_status == old_status or new_status in ABSENT_STATES:
             return
 
         context = _active_reconcile_context(runtime_data)
@@ -240,10 +231,7 @@ def _register_current_room_listener(
     if not runtime_data.commands_enabled or not runtime_data.auto_reconcile_enabled:
         return
 
-    current_room_entity_id = (
-        runtime_data.observation_entity_ids.current_room_entity_id
-        or _conventional_current_room_entity_id(runtime_data.vacuum_entity_id)
-    )
+    current_room_entity_id = runtime_data.observation_entity_ids.current_room_entity_id
 
     @callback
     def _schedule_current_room_reconcile(event: Event[EventStateChangedData]) -> None:
@@ -281,23 +269,6 @@ def _register_current_room_listener(
             _schedule_current_room_reconcile,
         )
     )
-
-
-def _conventional_task_status_entity_id(vacuum_entity_id: str) -> str:
-    """Return the conventional Dreame task-status companion entity id."""
-    object_id = vacuum_entity_id.split(".", maxsplit=1)[-1]
-    return f"sensor.{object_id}_task_status"
-
-
-def _conventional_current_room_entity_id(vacuum_entity_id: str) -> str:
-    """Return the conventional Dreame current-room companion sensor."""
-    object_id = vacuum_entity_id.split(".", maxsplit=1)[-1]
-    return f"sensor.{object_id}_current_room"
-
-
-def _normalized_task_status(value: object) -> str:
-    """Normalize a task lifecycle state for event capture."""
-    return str(value or "").strip().lower()
 
 
 def _active_reconcile_context(runtime_data: HaDreameRuntimeData) -> tuple[str, str] | None:
@@ -359,33 +330,6 @@ async def _async_auto_reconcile_tick(
                 DOMAIN,
                 entry.entry_id,
             )
-
-
-def _build_observation_entity_ids(entry: ConfigEntry) -> RuntimeObservationEntityIds:
-    """Build explicit observation entity ids from config entry options."""
-    return RuntimeObservationEntityIds(
-        task_status_entity_id=_optional_entity_id(entry.options.get(CONF_TASK_STATUS_ENTITY_ID)),
-        robot_state_entity_id=_optional_entity_id(entry.options.get(CONF_ROBOT_STATE_ENTITY_ID)),
-        current_room_entity_id=_optional_entity_id(entry.options.get(CONF_CURRENT_ROOM_ENTITY_ID)),
-        error_entity_id=_optional_entity_id(entry.options.get(CONF_ERROR_ENTITY_ID)),
-        cleaning_progress_entity_id=_optional_entity_id(
-            entry.options.get(CONF_CLEANING_PROGRESS_ENTITY_ID)
-        ),
-        self_wash_base_status_entity_id=_optional_entity_id(
-            entry.options.get(CONF_SELF_WASH_BASE_STATUS_ENTITY_ID)
-        ),
-        clean_water_tank_status_entity_id=_optional_entity_id(
-            entry.options.get(CONF_CLEAN_WATER_TANK_STATUS_ENTITY_ID)
-        ),
-    )
-
-
-def _optional_entity_id(value: object) -> str | None:
-    """Return a stripped entity id option or None."""
-    if not isinstance(value, str):
-        return None
-    entity_id = value.strip()
-    return entity_id or None
 
 
 def _build_queue_coordinator(

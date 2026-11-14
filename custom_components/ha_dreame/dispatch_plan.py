@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .const import DREAME_VACUUM_DOMAIN
+from .const import DREAME_VACUUM_DOMAIN, companion_entity_id
 from .profile_core import InvalidProfile, derive_cleaning_profile
 from .queue_core import InvalidOperation, QueueItem
 
@@ -69,7 +69,7 @@ def build_room_dispatch_plan(
     observed_mode = str(current_cleaning_mode or "").strip().lower()
     wanted_modes = CLEANING_MODE_OPTIONS[profile.cleaning_mode]
     if observed_mode in KNOWN_CLEANING_MODE_OPTIONS and observed_mode not in wanted_modes:
-        mode_entity_id = cleaning_mode_entity_id(vacuum_entity_id)
+        mode_entity_id = companion_entity_id(vacuum_entity_id, "select", "cleaning_mode")
         calls.append(
             DispatchServiceCall(
                 domain="select",
@@ -127,12 +127,6 @@ def build_room_dispatch_plan(
     )
 
     return tuple(calls)
-
-
-def cleaning_mode_entity_id(vacuum_entity_id: str) -> str:
-    """Return the dreame_vacuum cleaning-mode select paired with a vacuum entity."""
-    object_id = str(vacuum_entity_id).split(".", maxsplit=1)[-1]
-    return f"select.{object_id}_cleaning_mode"
 
 
 def _int_or_none(value: Any) -> int | None:

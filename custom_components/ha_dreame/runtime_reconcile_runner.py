@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
 
@@ -12,7 +12,6 @@ from homeassistant.exceptions import HomeAssistantError
 from .queue_core import QueueError
 from .audit import record_activity
 from .runtime import HaDreameRuntimeData
-from .runtime_observation import build_runtime_reconcile_observation
 from .runtime_reconcile import RuntimeReconcileResult, apply_reconcile_decision
 from .runtime_reconcile_executor import async_apply_runtime_reconcile_result
 from .runtime_reconcile_observation import (
@@ -40,13 +39,7 @@ def evaluate_runtime_reconcile(
     task_status_override: str | None = None,
 ) -> tuple[RuntimeReconcileObservation, RuntimeReconcileEvaluation]:
     """Build and evaluate one runtime reconcile observation."""
-    observation = build_runtime_reconcile_observation(
-        hass,
-        vacuum_entity_id=runtime_data.vacuum_entity_id,
-        entity_ids=runtime_data.observation_entity_ids,
-    )
-    if task_status_override is not None:
-        observation = replace(observation, task_status=task_status_override)
+    observation = runtime_data.observe(hass, task_status_override=task_status_override)
     evaluation = evaluate_runtime_reconcile_observation(
         runtime_data.queue_state,
         runtime_data.run_tracking,

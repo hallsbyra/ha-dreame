@@ -343,6 +343,7 @@ def test_reconcile_mop_remove_transition_waits_without_retry_or_out_of_sync() ->
     decision = _decision(
         vacuum_state="docked",
         task_status="returning_to_remove_mop",
+        is_mop_maintenance_state=True,
         vacuum_error_code="no_error",
         seconds_since_last_command=300,
         task_status_cleared_since_dispatch=True,

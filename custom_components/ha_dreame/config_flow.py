@@ -25,6 +25,7 @@ from .const import (
     DOMAIN,
     DREAME_VACUUM_DOMAIN,
     VACUUM_DOMAIN,
+    optional_entity_id,
 )
 
 OBSERVATION_ENTITY_ID_OPTIONS = (
@@ -153,7 +154,7 @@ class HaDreameOptionsFlow(config_entries.OptionsFlow):
         """Validate optional companion observation entity ids."""
         errors: dict[str, str] = {}
         for option in OBSERVATION_ENTITY_ID_OPTIONS:
-            entity_id = _optional_entity_id(user_input.get(option))
+            entity_id = optional_entity_id(user_input.get(option))
             if entity_id and self.hass.states.get(entity_id) is None:
                 errors[option] = "entity_not_found"
         return errors
@@ -164,15 +165,7 @@ class HaDreameOptionsFlow(config_entries.OptionsFlow):
         if user_input.get(CONF_AUTO_RECONCILE_ENABLED) is True:
             data[CONF_AUTO_RECONCILE_ENABLED] = True
         for option in OBSERVATION_ENTITY_ID_OPTIONS:
-            entity_id = _optional_entity_id(user_input.get(option))
+            entity_id = optional_entity_id(user_input.get(option))
             if entity_id:
                 data[option] = entity_id
         return data
-
-
-def _optional_entity_id(value: object) -> str | None:
-    """Return a stripped entity id option or None."""
-    if not isinstance(value, str):
-        return None
-    entity_id = value.strip()
-    return entity_id or None

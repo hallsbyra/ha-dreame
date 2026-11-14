@@ -7,10 +7,12 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .queue_core import QueueState
-from .runtime_observation import RuntimeObservationEntityIds
+from .runtime_observation import RuntimeObservationEntityIds, build_runtime_reconcile_observation
+from .runtime_reconcile_observation import RuntimeReconcileObservation
 from .runtime_state import QueueRunTracking
 
 
@@ -27,6 +29,20 @@ class HaDreameRuntimeData:
     unload_requested: asyncio.Event
     vacuum_entity_id: str
     recent_activity: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=100))
+
+    def observe(
+        self,
+        hass: HomeAssistant,
+        *,
+        task_status_override: str | None = None,
+    ) -> RuntimeReconcileObservation:
+        """Read one robot observation from this entry's companion entities."""
+        return build_runtime_reconcile_observation(
+            hass,
+            vacuum_entity_id=self.vacuum_entity_id,
+            entity_ids=self.observation_entity_ids,
+            task_status_override=task_status_override,
+        )
 
     @property
     def queue_state(self) -> QueueState:

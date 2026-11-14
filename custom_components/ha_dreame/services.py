@@ -57,6 +57,7 @@ from .const import (
     SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES,
     SERVICE_UPDATE_RUNNING_OVERRIDE,
     VACUUM_DOMAIN,
+    companion_entity_id,
 )
 from .dispatch_executor import async_dispatch_current_room, current_room_dispatch_plan
 from .audit import async_call_robot_service, service_audit
@@ -67,6 +68,7 @@ from .queue_core import (
     clear_pending,
     current_item,
     external_takeover,
+    is_meaningful_error,
     move_item,
     remove_item,
     skip_current_room,
@@ -75,7 +77,7 @@ from .queue_core import (
 )
 from .queue_snapshot import count_queue_items, queue_item_snapshots
 from .runtime import HaDreameRuntimeData
-from .runtime_observation import build_runtime_reconcile_observation
+from .runtime_observation import normalize_signal
 from .runtime_reconcile import RuntimeReconcileResult
 from .runtime_reconcile_observation import (
     RuntimeReconcileEvaluation,
@@ -603,8 +605,10 @@ async def _async_resume_queue_response(
     ):
         raise HomeAssistantError("Queue run tracking is not active")
 
-    robot_status = _robot_status_response(hass, runtime_data)
-    _require_ready_water_tanks(hass, runtime_data)
+    observation = runtime_data.observe(hass)
+    robot_status = _robot_status_response(observation)
+    if observation.water_tank_block_reason:
+        raise HomeAssistantError(observation.water_tank_block_reason)
     if not robot_status["interrupted"]:
         raise HomeAssistantError("Robot is not waiting for user action")
 
@@ -732,19 +736,17 @@ async def _async_update_running_override_response(
 async def _async_start_queue_response(
     hass: HomeAssistant,
     config_entry_id: str,
+    observation: RuntimeReconcileObservation | None = None,
 ) -> dict[str, Any]:
     """Start queue execution and dispatch the first pending room."""
     entry = _runtime_entry(hass, config_entry_id)
-    runtime_data = entry.runtime_data
+    runtime_data: HaDreameRuntimeData = entry.runtime_data
 
     _require_commands(runtime_data)
 
-    observation = build_runtime_reconcile_observation(
-        hass,
-        vacuum_entity_id=runtime_data.vacuum_entity_id,
-        entity_ids=runtime_data.observation_entity_ids,
-    )
-    if observation.task_status and observation.task_status.lower() != "completed":
+    if observation is None:
+        observation = runtime_data.observe(hass)
+    if observation.task_status and normalize_signal(observation.task_status) != "completed":
         raise HomeAssistantError("Cannot start queue while a previous robot task is still active")
     try:
         queue_state = start_run(runtime_data.queue_state)
@@ -785,24 +787,20 @@ async def async_start_waiting_queue(hass: HomeAssistant, entry: ConfigEntry) -> 
     runtime_data = entry.runtime_data
     if runtime_data.queue_state.run_state != "waiting_for_tanks":
         return
-    observation = build_runtime_reconcile_observation(
-        hass,
-        vacuum_entity_id=runtime_data.vacuum_entity_id,
-        entity_ids=runtime_data.observation_entity_ids,
-    )
+    observation = runtime_data.observe(hass)
     if (
         observation.water_tank_block_reason
-        or observation.vacuum_state.lower()
+        or normalize_signal(observation.vacuum_state)
         in {"", "unknown", "unavailable", "error", "paused", "cleaning", "returning"}
         or observation.robot_paused
-        or observation.task_status.lower() != "completed"
-        or _meaningful_error(_normalize_status_value(observation.vacuum_error_code))
+        or normalize_signal(observation.task_status) != "completed"
+        or is_meaningful_error(normalize_signal(observation.vacuum_error_code))
     ):
         return
     # Disarm before dispatch: a service failure must not create an invisible retry loop.
     runtime_data.set_queue_state(replace(runtime_data.queue_state, run_state="idle"))
     try:
-        await _async_start_queue_response(hass, entry.entry_id)
+        await _async_start_queue_response(hass, entry.entry_id, observation)
     except Exception:
         runtime_data.set_queue_state(
             external_takeover(runtime_data.queue_state, reason="deferred_start_dispatch_failed")
@@ -817,13 +815,11 @@ def _running_override_service_call(
     value: int,
 ) -> tuple[str, str, str, dict[str, Any]]:
     """Return the companion entity service call for one running override."""
-    vacuum_object_id = _vacuum_object_id(vacuum_entity_id)
-
     if field == "suction_level":
         option = RUNNING_OVERRIDE_SUCTION_OPTIONS.get(value)
         if option is None:
             raise HomeAssistantError("Invalid running override suction_level value")
-        entity_id = f"select.{vacuum_object_id}_suction_level"
+        entity_id = companion_entity_id(vacuum_entity_id, "select", "suction_level")
         return (
             entity_id,
             "select",
@@ -835,7 +831,7 @@ def _running_override_service_call(
         wetness = RUNNING_OVERRIDE_WATER_VALUES.get(value)
         if wetness is None:
             raise HomeAssistantError("Invalid running override water_volume value")
-        entity_id = f"number.{vacuum_object_id}_wetness_level"
+        entity_id = companion_entity_id(vacuum_entity_id, "number", "wetness_level")
         return (
             entity_id,
             "number",
@@ -844,17 +840,6 @@ def _running_override_service_call(
         )
 
     raise HomeAssistantError(f"Invalid running override field: {field}")
-
-
-def _vacuum_object_id(vacuum_entity_id: str) -> str:
-    """Return the object id for a configured vacuum entity."""
-    normalized = str(vacuum_entity_id or "").strip()
-    if not normalized.startswith(f"{VACUUM_DOMAIN}."):
-        raise HomeAssistantError(f"Invalid vacuum entity id: {vacuum_entity_id}")
-    object_id = normalized.split(".", maxsplit=1)[1]
-    if not object_id:
-        raise HomeAssistantError(f"Invalid vacuum entity id: {vacuum_entity_id}")
-    return object_id
 
 
 def _control_readiness_response(
@@ -875,7 +860,7 @@ def _control_readiness_response(
     running_override_ready = queue_state.run_state == "running" and all(
         entity["available"] for entity in companion_entities.values()
     )
-    robot_status = _robot_status_response(hass, runtime_data)
+    robot_status = _robot_status_response(runtime_data.observe(hass))
     available_actions: list[str] = []
     blocking_reasons: list[str] = []
 
@@ -988,24 +973,16 @@ def _runtime_status_response(hass: HomeAssistant, config_entry_id: str) -> dict[
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
         ATTR_RUN_TRACKING: _run_tracking_response(runtime_data.run_tracking),
         "recent_activity": list(runtime_data.recent_activity),
-        "robot_status": _robot_status_response(hass, runtime_data),
+        "robot_status": _robot_status_response(runtime_data.observe(hass)),
         CONF_VACUUM_ENTITY_ID: runtime_data.vacuum_entity_id,
     }
 
 
-def _robot_status_response(
-    hass: HomeAssistant,
-    runtime_data: HaDreameRuntimeData,
-) -> dict[str, Any]:
+def _robot_status_response(observation: RuntimeReconcileObservation) -> dict[str, Any]:
     """Return robot interruption status derived from read-only companion entities."""
-    observation = build_runtime_reconcile_observation(
-        hass,
-        vacuum_entity_id=runtime_data.vacuum_entity_id,
-        entity_ids=runtime_data.observation_entity_ids,
-    )
-    vacuum_state = _normalize_status_value(observation.vacuum_state)
-    task_status = _normalize_status_value(observation.task_status)
-    error_code = _normalize_status_value(observation.vacuum_error_code)
+    vacuum_state = normalize_signal(observation.vacuum_state)
+    task_status = normalize_signal(observation.task_status)
+    error_code = normalize_signal(observation.vacuum_error_code)
 
     interruption_reasons: list[str] = []
     if vacuum_state == "paused":
@@ -1019,9 +996,9 @@ def _robot_status_response(
     interruption_context = bool(interruption_reasons) or vacuum_state == "error"
     if vacuum_state == "error":
         interruption_reasons.append(
-            f"vacuum_error:{error_code}" if _meaningful_error(error_code) else "vacuum_error"
+            f"vacuum_error:{error_code}" if is_meaningful_error(error_code) else "vacuum_error"
         )
-    elif interruption_context and _meaningful_error(error_code):
+    elif interruption_context and is_meaningful_error(error_code):
         interruption_reasons.append(f"vacuum_error:{error_code}")
 
     return {
@@ -1031,26 +1008,6 @@ def _robot_status_response(
         "task_status": task_status,
         "vacuum_state": vacuum_state,
     }
-
-
-def _require_ready_water_tanks(hass: HomeAssistant, runtime_data: HaDreameRuntimeData) -> None:
-    observation = build_runtime_reconcile_observation(
-        hass,
-        vacuum_entity_id=runtime_data.vacuum_entity_id,
-        entity_ids=runtime_data.observation_entity_ids,
-    )
-    if observation.water_tank_block_reason:
-        raise HomeAssistantError(observation.water_tank_block_reason)
-
-
-def _normalize_status_value(value: str) -> str:
-    """Normalize runtime status strings for service responses."""
-    return str(value or "").strip().lower()
-
-
-def _meaningful_error(error_code: str) -> bool:
-    """Return whether a Dreame error code represents an actionable robot error."""
-    return error_code not in {"", "unknown", "unavailable", "no_error"}
 
 
 def _evaluate_reconcile_response(hass: HomeAssistant, config_entry_id: str) -> dict[str, Any]:

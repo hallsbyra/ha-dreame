@@ -8,7 +8,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
 from .audit import async_call_robot_service
-from .dispatch_plan import DispatchServiceCall, build_room_dispatch_plan, cleaning_mode_entity_id
+from .const import companion_entity_id
+from .dispatch_plan import DispatchServiceCall, build_room_dispatch_plan
 from .queue_core import QueueError, QueueState, current_item
 from .runtime import HaDreameRuntimeData
 from .runtime_state import QueueRunTracking
@@ -24,7 +25,9 @@ def current_room_dispatch_plan(
     item = current_item(state)
     if item is None:
         raise HomeAssistantError("No current room to dispatch")
-    mode_state = hass.states.get(cleaning_mode_entity_id(runtime_data.vacuum_entity_id))
+    mode_state = hass.states.get(
+        companion_entity_id(runtime_data.vacuum_entity_id, "select", "cleaning_mode")
+    )
     try:
         return build_room_dispatch_plan(
             item,

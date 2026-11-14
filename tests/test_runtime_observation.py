@@ -95,9 +95,13 @@ def test_observation_explicit_entity_ids_override_conventional_sensors(
     observation = build_runtime_reconcile_observation(
         hass,
         vacuum_entity_id="vacuum.dreame_robot",
-        entity_ids=RuntimeObservationEntityIds(
-            task_status_entity_id="sensor.robot_task",
-            current_room_entity_id="sensor.robot_room",
+        entity_ids=RuntimeObservationEntityIds.for_vacuum(
+            "vacuum.dreame_robot",
+            {
+                "task_status_entity_id": " sensor.robot_task ",
+                "current_room_entity_id": "sensor.robot_room",
+                "error_entity_id": "",
+            },
         ),
     )
 
@@ -315,3 +319,20 @@ def test_observation_rejects_non_running_dock_without_pause_attribute(
 
     assert observation.is_dock_prep_state is True
     assert observation.is_dock_prep_paused is False
+
+
+def test_observation_task_status_override_drives_mop_maintenance_flag(
+    hass: HomeAssistant,
+) -> None:
+    """Test an event-captured task status replaces the sensor before flags are derived."""
+    hass.states.async_set("vacuum.dreame_robot", "returning")
+    hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning")
+
+    observation = build_runtime_reconcile_observation(
+        hass,
+        vacuum_entity_id="vacuum.dreame_robot",
+        task_status_override="returning_to_install_mop",
+    )
+
+    assert observation.task_status == "returning_to_install_mop"
+    assert observation.is_mop_maintenance_state is True

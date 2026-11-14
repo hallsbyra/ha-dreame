@@ -193,9 +193,7 @@ def register_external_command_audit(hass: HomeAssistant, runtime: HaDreameRuntim
             reason=new_state.state,
         )
 
-    task_entity = runtime.observation_entity_ids.task_status_entity_id or (
-        "sensor." + runtime.vacuum_entity_id.split(".", 1)[1] + "_task_status"
-    )
+    task_entity = runtime.observation_entity_ids.task_status_entity_id
     unsubscribe_commands = hass.bus.async_listen("call_service", observe)
     unsubscribe_tasks = async_track_state_change_event(hass, [task_entity], observe_task)
 

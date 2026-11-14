@@ -59,16 +59,18 @@ class ReconcileDecision:
 TERMINAL_ITEM_STATUSES = {"completed", "skipped", "needs_attention"}
 FAILED_RUN_STATES = {"out_of_sync", "blocked"}
 TERMINAL_RUN_STATES = {"completed", "canceled", *FAILED_RUN_STATES}
-MOP_MAINTENANCE_TASK_STATUSES = {
-    "returning_to_remove_mop",
-    "returning_to_install_mop",
-}
+NO_ERROR_CODES = frozenset({"", "unknown", "unavailable", "no_error"})
 ACTIVE_STATES = frozenset({"cleaning", "returning"})
 DISPATCH_RETRY_INTERVAL_SEC = 20
 DISPATCH_RETRY_MAX = 2
 ACTIVE_ROOM_MISMATCH_MIN_PROGRESS = 1
 ACTIVE_ROOM_MISMATCH_MAX_PROGRESS = 90
 VACUUM_ERROR_WAIT_REASON = "vacuum_error_waiting_user_action"
+
+
+def is_meaningful_error(error_code: str) -> bool:
+    """Return whether a normalized Dreame error code is an actionable robot error."""
+    return error_code not in NO_ERROR_CODES
 
 
 def new_state() -> QueueState:
@@ -315,7 +317,7 @@ def evaluate_reconcile_tick(
         if normalized_task == "completed":
             if not effective_task_status_cleared:
                 event_reasons.append("task_status_completed_ignored_not_cleared_after_dispatch")
-            elif normalized_error in {"", "unknown", "unavailable", "no_error"}:
+            elif not is_meaningful_error(normalized_error):
                 event_reasons.append("task_status_completed_ignored_due_vacuum_error")
             else:
                 event_reasons.append(
@@ -389,8 +391,8 @@ def evaluate_reconcile_tick(
             event_reasons=tuple(event_reasons + ["post_run_completion_waiting"]),
         )
 
-    if normalized_task in MOP_MAINTENANCE_TASK_STATUSES or is_mop_maintenance_state:
-        if normalized_error not in {"", "unknown", "unavailable", "no_error"}:
+    if is_mop_maintenance_state:
+        if is_meaningful_error(normalized_error):
             return ReconcileDecision(
                 set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
                 reset_dispatch_retry_count=True,
@@ -408,7 +410,7 @@ def evaluate_reconcile_tick(
         )
 
     if is_dock_prep_state and is_dock_prep_paused and not normalized_task.endswith("_paused"):
-        if normalized_error not in {"", "unknown", "unavailable", "no_error"}:
+        if is_meaningful_error(normalized_error):
             return ReconcileDecision(
                 set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
                 reset_dispatch_retry_count=True,
@@ -432,7 +434,7 @@ def evaluate_reconcile_tick(
 
     is_paused_state = normalized_vacuum == "paused" or normalized_task.endswith("_paused")
     if is_paused_state:
-        if normalized_error not in {"", "unknown", "unavailable", "no_error"}:
+        if is_meaningful_error(normalized_error):
             return ReconcileDecision(
                 set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
                 reset_dispatch_retry_count=True,

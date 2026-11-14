@@ -54,3 +54,16 @@ SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES = "update_queue_item_overrides"
 SERVICE_UPDATE_RUNNING_OVERRIDE = "update_running_override"
 TITLE = "HA Dreame"
 VACUUM_DOMAIN = "vacuum"
+
+
+def companion_entity_id(vacuum_entity_id: str, domain: str, suffix: str) -> str:
+    """Return the dreame_vacuum companion entity named after a vacuum entity."""
+    object_id = vacuum_entity_id.split(".", maxsplit=1)[-1]
+    return f"{domain}.{object_id}_{suffix}"
+
+
+def optional_entity_id(value: object) -> str | None:
+    """Return a stripped entity id option or None."""
+    if not isinstance(value, str):
+        return None
+    return value.strip() or None
