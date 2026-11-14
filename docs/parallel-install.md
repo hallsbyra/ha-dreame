@@ -9,7 +9,7 @@ It is intentionally public-safe. Use placeholder paths and generic entity exampl
 - `ha_dreame` uses the Home Assistant domain `ha_dreame`, so its services and entities are namespaced.
 - The integration depends on an existing `dreame_vacuum` vacuum entity. It does not replace that integration.
 - `ha_dreame` is command-disabled by default. Active robot commands require the `allow_robot_commands` option to be enabled explicitly.
-- Automatic reconcile is opt-in: auto reconcile is disabled by default and only runs when both `allow_robot_commands` and `auto_reconcile_enabled` are enabled.
+- Automatic reconcile follows the command gate: it runs only while `allow_robot_commands` is enabled, and then always runs. There is no separate reconcile option or manual reconcile service.
 - Do not let two controllers or integration instances send robot commands to the same robot at the same time. Parallel active command control is not a target.
 
 ## HACS Custom Repository Install
@@ -53,9 +53,8 @@ Use this path only for local development. Keep commands generic and substitute l
 1. Confirm the existing `dreame_vacuum` integration is already configured and exposes one vacuum entity.
 2. Add a `HA Dreame` config entry for that vacuum.
 3. Keep `allow_robot_commands` disabled.
-4. Keep `auto_reconcile_enabled` disabled.
-5. If automatic observation needs non-conventional entity names, set explicit companion observation entities in options.
-6. Restart or reload the config entry after changing options when Home Assistant asks for it.
+4. If automatic observation needs non-conventional entity names, set explicit companion observation entities in options.
+5. Restart or reload the config entry after changing options when Home Assistant asks for it.
 
 ## Dashboard Card Resource
 
@@ -99,22 +98,19 @@ Do not enable commands for read-only validation.
 Only use active commands in a short controlled window.
 
 1. Ensure no other controller or integration instance is about to send robot commands for the same robot.
-2. Enable `allow_robot_commands` in `HA Dreame` options.
-3. Keep `auto_reconcile_enabled` disabled unless the test specifically covers automatic reconciliation.
-4. Start with one simple room queue and observe the robot state before adding more pending work.
-5. If testing automatic reconciliation, enable `auto_reconcile_enabled` only after confirming the command gate is intentionally enabled.
-6. Watch Home Assistant logs and queue status after each command.
-7. Disable `allow_robot_commands` again after the test window unless continuing controlled active testing.
+2. Enable `allow_robot_commands` in `HA Dreame` options. This also starts automatic reconciliation of the running queue.
+3. Start with one simple room queue and observe the robot state before adding more pending work.
+4. Watch Home Assistant logs and queue status after each command.
+5. Disable `allow_robot_commands` again after the test window unless continuing controlled active testing.
 
 ## Rollback
 
 Rollback should leave the existing `dreame_vacuum` integration untouched.
 
 1. Disable `allow_robot_commands`.
-2. Disable `auto_reconcile_enabled`.
-3. Unload or remove the `HA Dreame` config entry.
-4. Remove the local custom component files or uninstall the HACS custom repository if needed.
-5. Restart Home Assistant when removing files or changing custom integration installation state.
+2. Unload or remove the `HA Dreame` config entry.
+3. Remove the local custom component files or uninstall the HACS custom repository if needed.
+4. Restart Home Assistant when removing files or changing custom integration installation state.
 
 ## Runtime Observations
 

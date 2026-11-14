@@ -22,7 +22,6 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
     CONF_ALLOW_ROBOT_COMMANDS,
-    CONF_AUTO_RECONCILE_ENABLED,
     CONF_VACUUM_ENTITY_ID,
     DOMAIN,
     DREAME_VACUUM_DOMAIN,
@@ -43,6 +42,8 @@ FRONTEND_CARD_FILENAME = "ha-dreame-queue-card.js"
 FRONTEND_STATIC_PATH = Path(__file__).parent / "frontend"
 FRONTEND_STATIC_URL_PATH = f"/{DOMAIN}/frontend"
 _FRONTEND_STATIC_REGISTERED = f"{DOMAIN}_frontend_static_registered"
+CONFIG_ENTRY_VERSION = 1
+_REMOVED_AUTO_RECONCILE = "auto_reconcile_enabled"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -73,6 +74,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.entry_id,
         runtime_data.vacuum_entity_id,
     )
+    return True
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate an entry saved by an older version of the integration."""
+    if entry.version > CONFIG_ENTRY_VERSION:
+        return False
+    if entry.minor_version < 2:
+        # 1.2 removed the separate automatic reconcile option: reconciliation now runs
+        # whenever robot commands are allowed.
+        options = {
+            key: value for key, value in entry.options.items() if key != _REMOVED_AUTO_RECONCILE
+        }
+        hass.config_entries.async_update_entry(entry, options=options, minor_version=2)
+        _LOGGER.info("Migrated %s config entry %s to version 1.2", DOMAIN, entry.entry_id)
     return True
 
 
@@ -138,7 +154,6 @@ def _build_runtime_data(hass: HomeAssistant, entry: ConfigEntry) -> HaDreameRunt
         raise ConfigEntryError(f"Configured vacuum is not from Dreame: {vacuum_entity_id}")
 
     return HaDreameRuntimeData(
-        auto_reconcile_enabled=entry.options.get(CONF_AUTO_RECONCILE_ENABLED) is True,
         commands_enabled=entry.options.get(CONF_ALLOW_ROBOT_COMMANDS) is True,
         observation_entity_ids=RuntimeObservationEntityIds.for_vacuum(
             vacuum_entity_id, entry.options
@@ -151,9 +166,8 @@ def _build_runtime_data(hass: HomeAssistant, entry: ConfigEntry) -> HaDreameRunt
 
 
 def _register_auto_reconcile_interval(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Register automatic runtime reconciliation for explicitly enabled entries."""
-    runtime_data = entry.runtime_data
-    if not runtime_data.commands_enabled or not runtime_data.auto_reconcile_enabled:
+    """Reconcile on an interval while robot commands are allowed."""
+    if not entry.runtime_data.commands_enabled:
         return
 
     @callback
@@ -179,7 +193,7 @@ def _register_task_status_listener(
 ) -> None:
     """Capture Dreame task lifecycle changes between interval ticks."""
     runtime_data = entry.runtime_data
-    if not runtime_data.commands_enabled or not runtime_data.auto_reconcile_enabled:
+    if not runtime_data.commands_enabled:
         return
 
     task_status_entity_id = runtime_data.observation_entity_ids.task_status_entity_id
@@ -224,7 +238,7 @@ def _register_current_room_listener(
 ) -> None:
     """Capture room confirmations immediately instead of relying on interval polling."""
     runtime_data = entry.runtime_data
-    if not runtime_data.commands_enabled or not runtime_data.auto_reconcile_enabled:
+    if not runtime_data.commands_enabled:
         return
 
     current_room_entity_id = runtime_data.observation_entity_ids.current_room_entity_id

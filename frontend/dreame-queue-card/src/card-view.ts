@@ -466,11 +466,10 @@ function buildStartBlock(
   }
 
   if (tankBlock) {
-    return snapshot.autoReconcileEnabled === true
-      ? {control: {ariaLabel: "Start queue", label: "Start", service: "start_queue"},
-         summary: `${tankBlock}. Press Start to start automatically after fixing the tanks.`}
-      : {control: {ariaLabel: "Start queue", disabled: true, disabledReason: tankBlock,
-         label: "Start", service: "start_queue"}, summary: tankBlock};
+    return {
+      control: {ariaLabel: "Start queue", label: "Start", service: "start_queue"},
+      summary: `${tankBlock}. Press Start to start automatically after fixing the tanks.`,
+    };
   }
 
   return null;

@@ -16,8 +16,8 @@ controlled command-gated smoke test without namespace or command-gate problems.
 - The existing `dreame_vacuum` integration is already configured in Home
   Assistant and exposes one vacuum entity.
 - The tester has a rollback path and can restart Home Assistant.
-- Leave `allow_robot_commands` disabled for initial validation.
-- Leave `auto_reconcile_enabled` disabled for initial validation.
+- Leave `allow_robot_commands` disabled for initial validation. Allowing robot
+  commands also enables automatic reconciliation of the running queue.
 
 Keep command windows narrow and deliberate until the candidate has passed the
 read-only and dashboard smoke checks.
@@ -77,7 +77,6 @@ repository install path.
 5. Add the `HA Dreame` integration from the integrations UI.
 6. Select the existing Dreame vacuum entity provided by `dreame_vacuum`.
 7. Keep `allow_robot_commands` disabled.
-8. Keep `auto_reconcile_enabled` disabled.
 
 Local development copies are acceptable for focused debugging, but do not commit
 machine-specific paths, hostnames, tokens, entity ids, or room names.
@@ -139,13 +138,12 @@ Do not let two integration instances or controllers send robot commands to the s
 4. Enable `allow_robot_commands`.
 5. Call `ha_dreame.get_control_readiness` again and confirm `start_queue` is in
    `available_actions`.
-6. Keep `auto_reconcile_enabled` disabled unless this exact test targets
-   automatic reconciliation.
-7. Start the queue from `ha_dreame`.
-8. Observe the queue status sensor, robot state, task status, and Home Assistant
+6. Start the queue from `ha_dreame`. Automatic reconciliation completes the
+   room and dispatches any next room while robot commands stay allowed.
+7. Observe the queue status sensor, robot state, task status, and Home Assistant
    logs.
-9. Test either skip or cancel, not both, unless the first command path is clean.
-10. Disable `allow_robot_commands` after the command window.
+8. Test either skip or cancel, not both, unless the first command path is clean.
+9. Disable `allow_robot_commands` after the command window.
 
 If the robot reports a durable new state transition, update
 `docs/dreame-behavior-knowledge.md` and add or plan test coverage.
@@ -155,12 +153,11 @@ If the robot reports a durable new state transition, update
 Rollback should leave the existing `dreame_vacuum` integration untouched.
 
 1. Disable `allow_robot_commands`.
-2. Disable `auto_reconcile_enabled`.
-3. Unload or remove the `HA Dreame` config entry.
-4. Remove the dashboard resource if it was added manually.
-5. Uninstall the HACS custom repository or remove the local custom component
+2. Unload or remove the `HA Dreame` config entry.
+3. Remove the dashboard resource if it was added manually.
+4. Uninstall the HACS custom repository or remove the local custom component
    files.
-6. Restart Home Assistant if custom integration files were removed.
+5. Restart Home Assistant if custom integration files were removed.
 
 ## Evidence To Capture
 

@@ -52,8 +52,8 @@ examples only.
   stayed idle after the tank was refilled. Audit history contained an add-room
   request but no start request until a later manual Start. The disabled button
   had prevented the user from registering their intent.
-- Controller behavior: with commands and automatic reconciliation enabled, Start
-  accepts a tank-blocked queue as `waiting_for_tanks`, leaving its rooms pending.
+- Controller behavior: with robot commands allowed (which also runs automatic
+  reconciliation), Start accepts a tank-blocked queue as `waiting_for_tanks`, leaving its rooms pending.
   The card confirms that it will start automatically when the tanks and robot are
   ready, and offers Cancel. Adding rooms alone never arms automatic start.
 - The existing 20-second reconcile interval releases the request once both tank
@@ -67,7 +67,8 @@ examples only.
 - Audit entries include queue state and target item/room, linking the accepted
   waiting request to subsequent `automatic_reconcile` robot dispatch.
 - Tests cover clean/dirty tank recovery, duplicate Start and interval ticks,
-  cancellation/removal, absent intent, disabled automatic reconciliation, other
+  cancellation/removal, absent intent, entries migrated from the removed automatic
+  reconcile option, other
   robot states and failed dispatch.
 
 ### Paused Tasks Hidden By Docked/Drying State (2026-09-05)
@@ -124,6 +125,12 @@ examples only.
 - Test implication: cover post-run `completed` plus dock/prep state after a successful room run when
   no earlier reconcile tick set `task_status_cleared_since_dispatch`. Cover a brief valid completion
   pulse between interval ticks and simultaneous event/interval reconciliation.
+- Resolution: commands without automatic reconciliation left every started queue stuck on its
+  first room, so that mode was removed. Automatic reconciliation (interval tick plus task-status
+  and current-room listeners) now runs whenever `allow_robot_commands` is enabled; the separate
+  `auto_reconcile_enabled` option and the manual `apply_reconcile` stepping service are gone.
+  Config entry migration 1.2 drops the stale option, so an entry that had commands allowed with
+  automatic reconciliation off now reconciles automatically.
 
 ### Transient Runtime Unavailability Is Inconclusive
 

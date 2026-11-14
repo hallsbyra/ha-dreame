@@ -31,7 +31,6 @@ from .const import (
     ATTR_TASK_STATUS_CLEARED_SINCE_DISPATCH,
     ATTR_TOTAL_ITEMS,
     CONF_ALLOW_ROBOT_COMMANDS,
-    CONF_AUTO_RECONCILE_ENABLED,
     CONF_CONFIG_ENTRY_ID,
     CONF_FIELD,
     CONF_ITEM_ID,
@@ -43,7 +42,6 @@ from .const import (
     CONF_VACUUM_ENTITY_ID,
     DOMAIN,
     SERVICE_ADD_QUEUE_ROOM,
-    SERVICE_APPLY_RECONCILE,
     SERVICE_CANCEL_QUEUE,
     SERVICE_CLEAR_PENDING_QUEUE,
     SERVICE_EVALUATE_RECONCILE,
@@ -78,7 +76,7 @@ from .queue_core import (
 )
 from .queue_snapshot import count_queue_items, queue_item_snapshots
 from .runtime import HaDreameRuntimeData
-from .reconcile import ReconcileEvaluation, async_reconcile_under_lock, evaluate_reconcile
+from .reconcile import ReconcileEvaluation, evaluate_reconcile
 from .reconcile_core import Observation, is_meaningful_error
 from .runtime_observation import normalize_signal
 
@@ -216,18 +214,6 @@ def _queue_mutation(mutation: Callable[..., QueueState], *fields: str) -> Servic
         return _queue_status_response(entry)
 
     return _async_handle
-
-
-async def _async_apply_reconcile(
-    hass: HomeAssistant, entry: ConfigEntry, data: Mapping[str, Any]
-) -> dict[str, Any]:
-    """Evaluate and apply one manual runtime reconcile decision."""
-    _require_commands(entry.runtime_data)
-    evaluation = await async_reconcile_under_lock(hass, entry.runtime_data)
-    return {
-        **_reconcile_response(entry, evaluation),
-        "queue": _queue_status_response(entry),
-    }
 
 
 async def _async_cancel_queue(
@@ -404,11 +390,6 @@ async def _async_start_queue(
     if observation.water_tank_block_reason:
         if not _entity_available(hass, runtime_data.vacuum_entity_id):
             raise HomeAssistantError("Robot is unavailable")
-        if not runtime_data.auto_reconcile_enabled:
-            raise HomeAssistantError(
-                "Waiting for water tanks requires automatic reconciliation; "
-                + observation.water_tank_block_reason
-            )
         runtime_data.set_queue_state(
             replace(runtime_data.queue_state, run_state="waiting_for_tanks")
         )
@@ -524,11 +505,7 @@ async def _async_control_readiness(
             if reason.endswith("_tank_not_ready")
         )
     if queue_state.run_state == "idle":
-        if (
-            can_offer_command_actions
-            and pending_items > 0
-            and (not tank_block or runtime_data.auto_reconcile_enabled)
-        ):
+        if can_offer_command_actions and pending_items > 0:
             available_actions.append(SERVICE_START_QUEUE)
         elif pending_items == 0:
             blocking_reasons.append("queue_has_no_pending_items")
@@ -551,7 +528,6 @@ async def _async_control_readiness(
 
     return {
         CONF_ALLOW_ROBOT_COMMANDS: runtime_data.commands_enabled,
-        CONF_AUTO_RECONCILE_ENABLED: runtime_data.auto_reconcile_enabled,
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
         CONF_VACUUM_ENTITY_ID: runtime_data.vacuum_entity_id,
         ATTR_PENDING_ITEMS: pending_items,
@@ -723,7 +699,6 @@ SERVICES: dict[str, _Service] = {
     SERVICE_ADD_QUEUE_ROOM: _Service(
         _queue_mutation(add_room, CONF_ROOM_ID, CONF_ROOM_NAME), ADD_QUEUE_ROOM_SCHEMA
     ),
-    SERVICE_APPLY_RECONCILE: _Service(_async_apply_reconcile),
     SERVICE_CANCEL_QUEUE: _Service(_async_cancel_queue),
     SERVICE_CLEAR_PENDING_QUEUE: _Service(_queue_mutation(clear_pending)),
     SERVICE_EVALUATE_RECONCILE: _Service(_async_evaluate_reconcile, read_only=True),

@@ -42,8 +42,7 @@ The config flow selects an existing Dreame vacuum. The integration validates tha
 
 Important options:
 
-- `allow_robot_commands`: disabled by default. When disabled, active robot command services fail before dispatching commands.
-- `auto_reconcile_enabled`: disabled by default. Automatic reconcile only runs when both this option and `allow_robot_commands` are enabled.
+- `allow_robot_commands`: disabled by default. When disabled, active robot command services fail before dispatching commands. When enabled, the integration also reconciles the running queue with the robot automatically: it completes rooms, dispatches the next room, retries and resumes as described in [docs/dreame-behavior-knowledge.md](docs/dreame-behavior-knowledge.md). Earlier versions had a separate automatic reconcile option; entries that had commands allowed with it disabled now reconcile automatically.
 - Companion observation entities: optional explicit sensor ids for installations where the derived `sensor.<robot>_state`, `sensor.<robot>_task_status`, or `sensor.<robot>_error` names do not match.
 
 Before a controlled command window, call `ha_dreame.get_control_readiness` for
@@ -84,7 +83,7 @@ matching the operator workflow exposed by Dreame while keeping `allow_robot_comm
 
 - This is an alpha migration project, not a stable release.
 - Real-world parity with the previous private queue and dashboard has passed initial cutover use, but remaining release hardening is still tracked in issues.
-- Automatic reconciliation is opt-in and should remain disabled unless a user deliberately wants command-gated automatic reconcile.
+- Automatic reconciliation runs only while `allow_robot_commands` is enabled; there is no manual reconcile stepping.
 - Brand assets for HACS presentation are tracked separately from runtime readiness.
 - The public repository intentionally avoids private room names, dashboard files, local hostnames, and local entity ids.
 
@@ -93,11 +92,10 @@ matching the operator workflow exposed by Dreame while keeping `allow_robot_comm
 Rollback should leave the existing `dreame_vacuum` integration untouched.
 
 1. Disable `allow_robot_commands`.
-2. Disable `auto_reconcile_enabled`.
-3. Remove or unload the `HA Dreame` config entry.
-4. Remove the dashboard card resource if it was added manually.
-5. Uninstall the HACS custom repository or remove the local custom component files.
-6. Restart Home Assistant when removing custom integration files.
+2. Remove or unload the `HA Dreame` config entry.
+3. Remove the dashboard card resource if it was added manually.
+4. Uninstall the HACS custom repository or remove the local custom component files.
+5. Restart Home Assistant when removing custom integration files.
 
 ## Validation
 

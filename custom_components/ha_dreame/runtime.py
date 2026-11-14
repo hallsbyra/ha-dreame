@@ -19,7 +19,6 @@ from .reconcile_core import Observation
 class HaDreameRuntimeData:
     """Runtime data attached to a configured HA Dreame entry."""
 
-    auto_reconcile_enabled: bool
     commands_enabled: bool
     observation_entity_ids: RuntimeObservationEntityIds
     operation_lock: asyncio.Lock
