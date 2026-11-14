@@ -215,19 +215,20 @@ examples only.
 - Confidence: `Observed`
 - Behavior: `current_room` can flip near completion even while the robot is finishing the intended
   work.
-- Controller implication: suppress room-mismatch redispatch near completion only after the queued
-  room was confirmed active. If the queued room was never confirmed, high progress in another room
-  is takeover evidence and the queue must become `out_of_sync` rather than claim completion.
-- Test implication: cover confirmed late flips as non-redispatch behavior and unconfirmed
-  high-progress mismatches as `out_of_sync`.
+- Controller implication: once the queued room was confirmed active, never act on a room mismatch
+  at any progress; redispatching an already-cleaning robot only resets its target. If the queued
+  room was never confirmed, high progress in another room is takeover evidence and the queue must
+  become `out_of_sync` rather than claim completion.
+- Test implication: cover confirmed room flips at unknown, low and high progress as
+  non-redispatch behavior and unconfirmed high-progress mismatches as `out_of_sync`.
 
 ### Cancel During Dock Preparation May Not Stop The Pending Task
 
 - Confidence: `Observed`
 - Behavior: `vacuum.return_to_base` can report success while the robot is already docked preparing a
   room task, yet that canceled task can leave the dock and continue seconds later.
-- Controller implication: cancellation must explicitly stop the active/pending task before sending
-  the robot to base. A new queue must not dispatch while the previous task status remains active.
+- Controller implication: cancellation, and skipping the final room, must explicitly stop the
+  active/pending task before sending the robot to base. A new queue must not dispatch while the previous task status remains active.
 - Controller implication: active wrong-room redispatch must respect the normal retry budget, and a
   completed task may complete a queued room only when the observed room matches or the queued room
   was confirmed active earlier in the run.
@@ -269,8 +270,8 @@ examples only.
   returns, and seconds after the next room was dispatched and briefly showed `room_cleaning`, the
   integration can report `docked` with `task_status=completed` and a stale current room from an
   earlier task. A few seconds later the robot reports `cleaning` in the dispatched room again.
-- Controller implication: a completion in the wrong room without active-room confirmation is
-  inconclusive until one dispatch retry interval has passed since the command. Hold instead of
+- Controller implication: a completion without active-room confirmation, whether the observed room
+  is wrong or unknown, is inconclusive until one dispatch retry interval has passed since the command. Hold instead of
   marking the queue `out_of_sync`; a persistent foreign completion still ends the run after that.
 - Test implication: cover an unconfirmed wrong-room completion inside and after the retry interval.
 

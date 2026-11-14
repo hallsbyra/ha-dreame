@@ -132,7 +132,11 @@ def test_evaluate_observation_completed_after_cleared_status_completes_room() ->
 
     evaluation = evaluate_runtime_reconcile_observation(
         state,
-        _tracking(state, task_status_cleared_since_dispatch=True),
+        _tracking(
+            state,
+            task_status_cleared_since_dispatch=True,
+            last_command_at=(NOW - timedelta(seconds=30)).isoformat(),
+        ),
         RuntimeReconcileObservation(
             vacuum_state="idle",
             task_status="completed",
@@ -244,7 +248,7 @@ def test_evaluate_observation_late_room_mismatch_uses_default_completion_guard()
 
     assert evaluation.decision.retry_current_room is False
     assert evaluation.decision.event_reasons == (
-        "active_room_mismatch_waiting_near_completion:expected_1:observed_7:progress_95:max_90",
+        "active_room_mismatch_after_confirmation:expected_1:observed_7",
     )
 
 

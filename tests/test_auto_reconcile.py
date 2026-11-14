@@ -252,7 +252,7 @@ async def test_auto_reconcile_logs_late_room_mismatch_as_debug_hold(
         record.levelno == logging.DEBUG
         and record.name == "custom_components.ha_dreame.runtime_reconcile_runner"
         and "action=hold" in record.message
-        and "active_room_mismatch_waiting_near_completion" in record.message
+        and "active_room_mismatch_after_confirmation" in record.message
         for record in caplog.records
     )
     assert not any(

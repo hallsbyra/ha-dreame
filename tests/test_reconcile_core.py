@@ -653,9 +653,8 @@ def test_reconcile_confirmed_late_room_mismatch_waits_near_completion() -> None:
 
     assert decision.retry_current_room is False
     assert decision.mark_out_of_sync_reason is None
-    assert any(
-        reason.startswith("active_room_mismatch_waiting_near_completion:")
-        for reason in decision.event_reasons
+    assert decision.event_reasons == (
+        "active_room_mismatch_after_confirmation:expected_1:observed_1",
     )
 
 
@@ -801,6 +800,7 @@ def test_reconcile_completed_task_survives_unavailable_vacuum_observation() -> N
         task_status_cleared_since_dispatch=True,
         dispatch_retry_count=2,
         dispatch_retry_max=2,
+        seconds_since_last_command=120,
     )
 
     assert decision.complete_current_room is True

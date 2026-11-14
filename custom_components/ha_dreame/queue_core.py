@@ -124,8 +124,8 @@ def remove_item(state: QueueState, *, item_id: str) -> QueueState:
         raise InvalidOperation("Only pending rooms can be removed")
 
     del items[item_index]
-    if state.run_state == "waiting_for_tanks" and not items:
-        return new_state()
+    if state.run_state == "waiting_for_tanks" and _find_first_pending_index(items) is None:
+        return QueueState(items=tuple(items))
     return replace(state, items=tuple(items))
 
 
@@ -360,6 +360,19 @@ def evaluate_reconcile_tick(
                         event_reasons + ["task_status_completed_after_manual_pause_returning"]
                     ),
                 )
+            # A cloud reconnect can replay the previous task's completion seconds after a
+            # fresh dispatch. Give an unconfirmed room one retry interval to show itself.
+            if (
+                not active_room_confirmed_since_dispatch
+                and seconds_since_last_command is not None
+                and seconds_since_last_command < dispatch_retry_interval_sec
+            ):
+                return ReconcileDecision(
+                    set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+                    event_reasons=tuple(
+                        event_reasons + ["task_status_completed_unconfirmed_room_waiting"]
+                    ),
+                )
             _, completed_room_mismatch = _room_match_state(
                 expected_room_id=expected_room_id,
                 observed_room_id=observed_room_id,
@@ -367,18 +380,6 @@ def evaluate_reconcile_tick(
                 normalized_observed_room_name=normalized_observed_room_name,
             )
             if completed_room_mismatch and not active_room_confirmed_since_dispatch:
-                # A cloud reconnect can replay the previous task's completion seconds after a
-                # fresh dispatch. Give the robot one retry interval to show the new room.
-                if (
-                    seconds_since_last_command is not None
-                    and seconds_since_last_command < dispatch_retry_interval_sec
-                ):
-                    return ReconcileDecision(
-                        set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
-                        event_reasons=tuple(
-                            event_reasons + ["task_status_completed_unconfirmed_room_waiting"]
-                        ),
-                    )
                 return ReconcileDecision(
                     mark_out_of_sync_reason=(
                         "task_completed_unconfirmed_room:"
@@ -593,6 +594,18 @@ def _evaluate_active_reconcile(
             event_reasons=tuple(event_reasons),
         )
 
+    # Redispatching a robot that is already cleaning only resets its target, and the room
+    # sensor flips at doorways. Once the room is confirmed, a mismatch is never acted on.
+    if active_room_confirmed_since_dispatch:
+        event_reasons.append(
+            f"active_room_mismatch_after_confirmation:expected_{expected_room_id}:"
+            f"observed_{observed_room_id}"
+        )
+        return ReconcileDecision(
+            set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+            event_reasons=tuple(event_reasons),
+        )
+
     if cleaning_progress is not None and cleaning_progress < active_room_mismatch_min_progress:
         event_reasons.append(
             (
@@ -611,32 +624,17 @@ def _evaluate_active_reconcile(
         and active_room_mismatch_max_progress is not None
         and cleaning_progress >= active_room_mismatch_max_progress
     ):
-        if not active_room_confirmed_since_dispatch:
-            reason = (
-                "active_room_mismatch_unconfirmed_near_completion:"
-                f"expected_{expected_room_id}:observed_{observed_room_id}"
-            )
-            return ReconcileDecision(
-                mark_out_of_sync_reason=reason,
-                set_task_status_cleared_since_dispatch=(set_task_status_cleared_since_dispatch),
-                event_reasons=tuple(
-                    event_reasons
-                    + [
-                        f"{reason}:progress_{cleaning_progress}:"
-                        f"max_{active_room_mismatch_max_progress}"
-                    ]
-                ),
-            )
-        event_reasons.append(
-            (
-                "active_room_mismatch_waiting_near_completion:"
-                f"expected_{expected_room_id}:observed_{observed_room_id}:"
-                f"progress_{cleaning_progress}:max_{active_room_mismatch_max_progress}"
-            )
+        reason = (
+            "active_room_mismatch_unconfirmed_near_completion:"
+            f"expected_{expected_room_id}:observed_{observed_room_id}"
         )
         return ReconcileDecision(
+            mark_out_of_sync_reason=reason,
             set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
-            event_reasons=tuple(event_reasons),
+            event_reasons=tuple(
+                event_reasons
+                + [f"{reason}:progress_{cleaning_progress}:max_{active_room_mismatch_max_progress}"]
+            ),
         )
 
     next_mismatch_streak = int(active_room_mismatch_streak) + 1

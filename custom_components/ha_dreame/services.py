@@ -585,6 +585,14 @@ async def _async_skip_current_room_response(
         runtime_data.set_run_tracking(_new_run_tracking(queue_state))
         return _queue_status_response(entry)
 
+    # Stop first, as cancel does: a bare dock command is ignored during dock preparation.
+    await async_call_robot_service(
+        hass,
+        VACUUM_DOMAIN,
+        "stop",
+        {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
+        blocking=True,
+    )
     await async_call_robot_service(
         hass,
         VACUUM_DOMAIN,
