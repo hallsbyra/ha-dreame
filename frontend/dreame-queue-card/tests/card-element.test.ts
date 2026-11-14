@@ -570,7 +570,7 @@ describe("ha-dreame-queue-card", () => {
     });
   });
 
-  it("increments missing repeat overrides on the first click", async () => {
+  it("shows unset overrides as Default and starts them at their first option", async () => {
     const callService = vi.fn();
     const element = document.createElement(CARD_ELEMENT_TAG) as any;
     element.setConfig({
@@ -582,12 +582,20 @@ describe("ha-dreame-queue-card", () => {
 
     await element.updateComplete;
 
-    const repeats = element.shadowRoot?.querySelector(
+    const shadowRoot = element.shadowRoot as ShadowRoot | null;
+    const water = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Cycle Office water volume"]',
+    );
+    const repeats = shadowRoot?.querySelector<HTMLButtonElement>(
       'button[aria-label="Cycle Office repeats"]',
-    ) as HTMLButtonElement | null;
+    );
 
+    expect(water).not.toBeNull();
+    expect(water!.textContent).toContain("Default");
+    expect(water!.title).toBe("Water: Default");
+    expect(water!.querySelectorAll(".override-bar")).toHaveLength(0);
     expect(repeats).not.toBeNull();
-    expect(repeats!.textContent).toContain("x1");
+    expect(repeats!.textContent).toContain("Default");
     repeats!.click();
 
     expect(callService).toHaveBeenCalledWith(
@@ -596,7 +604,7 @@ describe("ha-dreame-queue-card", () => {
       {
         config_entry_id: "config-entry-1",
         item_id: "item-3",
-        overrides: { repeats: 2 },
+        overrides: { repeats: 1 },
       },
     );
   });

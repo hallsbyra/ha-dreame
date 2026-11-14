@@ -421,3 +421,16 @@ def test_transitions_that_change_the_current_room_clear_its_dispatch() -> None:
     assert skip_current_room(running).dispatch is None
     assert cancel_run(running).dispatch is None
     assert external_takeover(running, reason="stopped_from_app").dispatch is None
+
+
+def test_update_item_overrides_replaces_the_whole_dict() -> None:
+    """Test leaving a field out of an update returns that field to the robot default."""
+    state = _seed_three_rooms()
+    item_id = state.items[0].item_id
+    state = update_item_overrides(
+        state, item_id=item_id, overrides={"water_volume": 3, "repeats": 2}
+    )
+
+    state = update_item_overrides(state, item_id=item_id, overrides={"repeats": 2})
+
+    assert state.items[0].overrides == {"repeats": 2}
