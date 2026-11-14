@@ -177,7 +177,8 @@ def _cancel_reason(queue_state: QueueState, commands_enabled: bool) -> str | Non
     # Canceling a waiting start sends no robot command, so the command gate does not apply.
     if queue_state.run_state == "waiting_for_tanks":
         return None
-    return _skip_reason(queue_state, commands_enabled)
+    # Cancel also works without a queue run: it is the way to stop an app-started job.
+    return None if commands_enabled else COMMANDS_DISABLED
 
 
 def _normalize(value: str | None) -> str:

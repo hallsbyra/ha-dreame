@@ -61,11 +61,10 @@ def test_every_queue_action_is_either_allowed_or_blocked_with_a_reason() -> None
 def test_ready_robot_with_pending_rooms_may_start() -> None:
     state = _decide(_pending(), READY)
 
-    assert state.allowed_actions == (START,)
+    assert state.allowed_actions == (START, CANCEL)
     assert state.blocked_reasons == {
         RESUME: "not_running",
         SKIP: "not_running",
-        CANCEL: "not_running",
     }
 
 
@@ -214,10 +213,10 @@ def test_run_without_dispatch_tracking_cannot_resume() -> None:
 
 
 @pytest.mark.parametrize("run_state", ["completed", "canceled"])
-def test_finished_queue_without_pending_rooms_offers_nothing(run_state: str) -> None:
+def test_finished_queue_without_pending_rooms_offers_only_cancel(run_state: str) -> None:
     state = _decide(replace(QueueState(), run_state=run_state), READY)
 
-    assert state.allowed_actions == ()
+    assert state.allowed_actions == (CANCEL,)
     assert state.reason(START) == "queue_empty"
 
 
@@ -227,7 +226,7 @@ def test_failed_run_with_remaining_rooms_may_run_them_under_the_start_rules(
 ) -> None:
     failed = external_takeover(_running(), reason="stopped_from_app", blocked=blocked)
 
-    assert _decide(failed, READY).allowed_actions == (START,)
+    assert _decide(failed, READY).allowed_actions == (START, CANCEL)
     assert _decide(failed, TANK).allows(START)
     assert _decide(failed, replace(READY, task_status="room_cleaning")).reason(START) == (
         "robot_busy"

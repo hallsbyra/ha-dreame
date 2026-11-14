@@ -1125,7 +1125,7 @@ async def test_start_queue_service_rejects_previous_active_room_task(
         await _call_start_queue_service(hass, entry.entry_id)
     assert err.value.translation_key == "robot_busy"
     readiness = await _call_control_readiness_service(hass, entry.entry_id)
-    assert readiness["allowed_actions"] == []
+    assert readiness["allowed_actions"] == [SERVICE_CANCEL_QUEUE]
     assert readiness["blocked_reasons"][SERVICE_START_QUEUE] == "robot_busy"
     assert readiness["blocking_reasons"] == ["robot_busy"]
 
@@ -2169,9 +2169,9 @@ async def test_control_readiness_reports_read_only_safe_default(
             SERVICE_START_QUEUE: "queue_empty",
             SERVICE_RESUME_QUEUE: "not_running",
             SERVICE_SKIP_CURRENT_ROOM: "not_running",
-            SERVICE_CANCEL_QUEUE: "not_running",
+            SERVICE_CANCEL_QUEUE: "commands_disabled",
         },
-        "blocking_reasons": ["queue_empty"],
+        "blocking_reasons": ["queue_empty", "commands_disabled"],
         "companion_entities": {
             "suction_level": {
                 "available": False,
@@ -2219,7 +2219,7 @@ async def test_control_readiness_reports_start_queue_ready(
     assert response["ready_for_control_window"] is True
     assert response["queue_run_state"] == "idle"
     assert response[ATTR_PENDING_ITEMS] == 1
-    assert response["available_actions"] == [SERVICE_START_QUEUE]
+    assert response["available_actions"] == [SERVICE_START_QUEUE, SERVICE_CANCEL_QUEUE]
     assert response["blocking_reasons"] == []
 
 

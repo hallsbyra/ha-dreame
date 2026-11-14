@@ -90,7 +90,7 @@ async def test_queue_status_sensor_exposes_initial_queue_state(
         SERVICE_START_QUEUE: "queue_empty",
         "resume_queue": "not_running",
         SERVICE_SKIP_CURRENT_ROOM: "not_running",
-        SERVICE_CANCEL_QUEUE: "not_running",
+        SERVICE_CANCEL_QUEUE: "commands_disabled",
     }
 
 
@@ -665,13 +665,13 @@ async def test_queue_status_sensor_publishes_what_the_user_may_do_now(
     vacuum_entity_id, _ = await _setup_commanded_entry_with_room(hass)
 
     state = hass.states.get("sensor.ha_dreame_queue_status")
-    assert state.attributes["allowed_actions"] == [SERVICE_START_QUEUE]
+    assert state.attributes["allowed_actions"] == [SERVICE_START_QUEUE, SERVICE_CANCEL_QUEUE]
     assert SERVICE_START_QUEUE not in state.attributes["blocked_reasons"]
 
     hass.states.async_set("sensor.dreame_robot_task_status", "room_cleaning")
     await hass.async_block_till_done()
     state = hass.states.get("sensor.ha_dreame_queue_status")
-    assert state.attributes["allowed_actions"] == []
+    assert state.attributes["allowed_actions"] == [SERVICE_CANCEL_QUEUE]
     assert state.attributes["blocked_reasons"][SERVICE_START_QUEUE] == "robot_busy"
 
     hass.states.async_set("sensor.dreame_robot_task_status", "completed")
@@ -684,7 +684,7 @@ async def test_queue_status_sensor_publishes_what_the_user_may_do_now(
     hass.states.async_set("sensor.dreame_robot_clean_water_tank_status", "low_water")
     await hass.async_block_till_done()
     state = hass.states.get("sensor.ha_dreame_queue_status")
-    assert state.attributes["allowed_actions"] == [SERVICE_START_QUEUE]
+    assert state.attributes["allowed_actions"] == [SERVICE_START_QUEUE, SERVICE_CANCEL_QUEUE]
 
 
 async def test_queue_status_sensor_follows_configured_observation_entities(

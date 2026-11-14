@@ -71,7 +71,7 @@ rejected service call carries the reason code as its error translation key.
 | `tank_attention` | A water tank needs attention, so the run cannot continue yet. |
 | `queue_empty` | No pending rooms to start. |
 | `run_active` | The queue is already running. |
-| `not_running` | No run is active, so there is nothing to resume, skip or cancel. |
+| `not_running` | No run is active, so there is nothing to resume or skip. Cancel stays available: without a run it stops the robot, for example an app-started job. |
 | `not_interrupted` | The robot is not waiting for user action, so there is nothing to resume. |
 
 Start with a water tank problem is allowed: it arms a waiting start that begins
