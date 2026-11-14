@@ -61,9 +61,10 @@ examples only.
   of availability. Cancel, clearing the queue, or removing its last room disarms
   the request. Waiting cancellation sends no robot commands.
 - A failed deferred dispatch ends in `out_of_sync` rather than retrying indefinitely.
-  Like the rest of the queue, an armed request is in memory and is cleared by an
-  integration reload or HA restart. Existing busy-task and paused-drying protections
-  remain; this exception is specifically for an explicit Start with tank problems.
+  Like the rest of the queue, an armed request is stored and survives an integration
+  reload or HA restart (see The Queue Survives Home Assistant Restarts). Existing
+  busy-task and paused-drying protections remain; this exception is specifically for an
+  explicit Start with tank problems.
 - Audit entries include queue state and target item/room, linking the accepted
   waiting request to subsequent `automatic_reconcile` robot dispatch.
 - Tests cover clean/dirty tank recovery, duplicate Start and interval ticks,
@@ -110,6 +111,35 @@ examples only.
   washing that automatically resumes after a refill. The card shows `Paused` and
   the tank problem instead of claiming that a room is being cleaned.
 - Regression coverage exercises the combined signals, tank recovery and command gates.
+
+### The Queue Survives Home Assistant Restarts
+
+- Confidence: `Inferred`: the storage rule is a design decision; how the robot behaves
+  across an HA restart is not observed separately.
+- Behavior: the queue used to live only in memory. An HA restart, integration reload or
+  options change emptied it, so a running queue lost its remaining rooms while the robot
+  kept cleaning the current one, and an armed waiting start disappeared.
+- Controller implication: each config entry keeps its queue, including the current room's
+  dispatch tracking, in the HA store `ha_dreame.<entry_id>` (version 1). Every queue
+  commit schedules a save one second later; unload writes the latest state at once and
+  HA's final write flushes a pending save on shutdown. Setup restores exactly what was
+  saved, including `running` and `waiting_for_tanks`, before the interval tick and the
+  listeners start, and reconciliation continues from the observed robot state. A room the
+  robot finished during the downtime completes when the saved tracking had seen the task
+  status clear; tracking saved right after a dispatch still treats `completed` as stale,
+  as it would without a restart. The time since the last command includes the downtime,
+  so an unconfirmed room that the robot is not cleaning can be redispatched on the first
+  tick, within the normal retry budget. A restored waiting start is released once the
+  tanks and robot are ready. When robot commands are disabled the restored queue does not
+  reconcile; a waiting start can still be canceled, while a running queue keeps its state
+  until commands are allowed again. Unreadable or invalid stored data logs a warning and
+  starts an empty queue instead of failing setup. Removing the config entry deletes its
+  store. The `recent_activity` audit buffer is not stored and is still cleared by a
+  restart or reload.
+- Test implication: round-trip serialization including tracking, invalid stored data, a
+  restored running queue completing and dispatching from observed state, a restored
+  waiting start released by the interval, save delay, unload flush, options reload, and
+  store removal with the entry.
 
 ### Start Provenance
 

@@ -6,18 +6,20 @@ import asyncio
 from datetime import datetime, timedelta
 import logging
 from pathlib import Path
+from typing import Any
 
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryError
+from homeassistant.exceptions import ConfigEntryError, HomeAssistantError
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_interval,
 )
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
@@ -27,7 +29,7 @@ from .const import (
     DREAME_VACUUM_DOMAIN,
     VACUUM_DOMAIN,
 )
-from .queue_core import QueueState, new_state
+from .queue_core import QueueError, QueueState, new_state, queue_state_from_dict
 from .audit import automatic_audit, register_external_command_audit
 from .runtime import HaDreameRuntimeData
 from .runtime_observation import ABSENT_STATES, RuntimeObservationEntityIds, normalize_signal
@@ -43,6 +45,7 @@ FRONTEND_STATIC_PATH = Path(__file__).parent / "frontend"
 FRONTEND_STATIC_URL_PATH = f"/{DOMAIN}/frontend"
 _FRONTEND_STATIC_REGISTERED = f"{DOMAIN}_frontend_static_registered"
 CONFIG_ENTRY_VERSION = 1
+QUEUE_STORAGE_VERSION = 1
 _REMOVED_AUTO_RECONCILE = "auto_reconcile_enabled"
 
 
@@ -55,7 +58,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up a config entry."""
-    runtime_data = _build_runtime_data(hass, entry)
+    store = _queue_store(hass, entry.entry_id)
+    runtime_data = _build_runtime_data(hass, entry, store, await _async_restore_queue(store, entry))
 
     hass.data.setdefault(DOMAIN, {})
     await _async_register_frontend_static_path(hass)
@@ -122,6 +126,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             runtime_data.unload_requested.clear()
             return False
 
+        await runtime_data.async_save_queue()
         hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
         if hasattr(entry, "runtime_data"):
             del entry.runtime_data
@@ -130,12 +135,44 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return True
 
 
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove the stored queue of a deleted config entry."""
+    await _queue_store(hass, entry.entry_id).async_remove()
+
+
+def _queue_store(hass: HomeAssistant, entry_id: str) -> Store[dict[str, Any]]:
+    """Return the store that keeps one entry's queue across restarts."""
+    return Store(hass, QUEUE_STORAGE_VERSION, f"{DOMAIN}.{entry_id}")
+
+
+async def _async_restore_queue(store: Store[dict[str, Any]], entry: ConfigEntry) -> QueueState:
+    """Return the stored queue exactly as saved, or an empty queue if it cannot be read.
+
+    Reconciliation continues a restored run from the robot's observed state.
+    """
+    try:
+        data = await store.async_load()
+        return new_state() if data is None else queue_state_from_dict(data)
+    except (QueueError, NotImplementedError, HomeAssistantError) as err:
+        _LOGGER.warning(
+            "Ignoring unreadable stored HA Dreame queue for config entry %s: %s",
+            entry.entry_id,
+            err,
+        )
+        return new_state()
+
+
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload a config entry when options change."""
     await hass.config_entries.async_reload(entry.entry_id)
 
 
-def _build_runtime_data(hass: HomeAssistant, entry: ConfigEntry) -> HaDreameRuntimeData:
+def _build_runtime_data(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    store: Store[dict[str, Any]],
+    queue_state: QueueState,
+) -> HaDreameRuntimeData:
     """Build validated runtime data for a config entry."""
     vacuum_entity_id = entry.data.get(CONF_VACUUM_ENTITY_ID)
 
@@ -159,7 +196,8 @@ def _build_runtime_data(hass: HomeAssistant, entry: ConfigEntry) -> HaDreameRunt
             vacuum_entity_id, entry.options
         ),
         operation_lock=asyncio.Lock(),
-        queue_coordinator=_build_queue_coordinator(hass, entry),
+        queue_coordinator=_build_queue_coordinator(hass, entry, queue_state),
+        queue_store=store,
         unload_requested=asyncio.Event(),
         vacuum_entity_id=vacuum_entity_id,
     )
@@ -338,6 +376,7 @@ async def _async_auto_reconcile_tick(
 def _build_queue_coordinator(
     hass: HomeAssistant,
     entry: ConfigEntry,
+    queue_state: QueueState,
 ) -> DataUpdateCoordinator[QueueState]:
     """Build the runtime queue state coordinator for a config entry."""
     coordinator = DataUpdateCoordinator[QueueState](
@@ -345,5 +384,5 @@ def _build_queue_coordinator(
         _LOGGER,
         name=f"{DOMAIN}_{entry.entry_id}_queue",
     )
-    coordinator.async_set_updated_data(new_state())
+    coordinator.async_set_updated_data(queue_state)
     return coordinator

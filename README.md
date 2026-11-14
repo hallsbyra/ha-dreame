@@ -106,6 +106,7 @@ are still pending it also offers Run remaining, which starts them under the norm
 ## Safety Model
 
 - `ha_dreame` owns its own services, entities, storage keys, and card identifiers under the `ha_dreame` namespace.
+- Each config entry stores its queue, including a running or waiting run, in the Home Assistant store `ha_dreame.<entry_id>`, so the queue survives restarts, reloads and options changes. The audit `recent_activity` history is kept in memory only.
 - The integration depends on `dreame_vacuum`; it does not replace or authenticate to the robot directly.
 - Active robot commands require explicit operator enablement through `allow_robot_commands`.
 - Parallel installation of multiple controllers for the same robot is not a target. Avoid parallel active control.
@@ -123,7 +124,7 @@ are still pending it also offers Run remaining, which starts them under the norm
 Rollback should leave the existing `dreame_vacuum` integration untouched.
 
 1. Disable `allow_robot_commands`.
-2. Remove or unload the `HA Dreame` config entry.
+2. Remove or unload the `HA Dreame` config entry. Removing it also deletes its stored queue.
 3. Remove the dashboard card resource if it was added manually.
 4. Uninstall the HACS custom repository or remove the local custom component files.
 5. Restart Home Assistant when removing custom integration files.

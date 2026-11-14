@@ -8,16 +8,19 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .control_core import ControlState, control_state
-from .queue_core import QueueItem, QueueState, current_item
+from .queue_core import QueueItem, QueueState, current_item, queue_state_to_dict
 from .runtime_observation import (
     RuntimeObservationEntityIds,
     build_runtime_reconcile_observation,
     observed_entity_ids,
 )
 from .reconcile_core import Observation
+
+QUEUE_SAVE_DELAY = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +31,7 @@ class HaDreameRuntimeData:
     observation_entity_ids: RuntimeObservationEntityIds
     operation_lock: asyncio.Lock
     queue_coordinator: DataUpdateCoordinator[QueueState]
+    queue_store: Store[dict[str, Any]]
     unload_requested: asyncio.Event
     vacuum_entity_id: str
     recent_activity: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=100))
@@ -84,5 +88,14 @@ class HaDreameRuntimeData:
         return queue_state
 
     def set_queue_state(self, queue_state: QueueState) -> None:
-        """Set the current runtime queue state and notify listeners."""
+        """Set the current runtime queue state, notify listeners and schedule a save."""
         self.queue_coordinator.async_set_updated_data(queue_state)
+        self.queue_store.async_delay_save(self.stored_queue, QUEUE_SAVE_DELAY)
+
+    def stored_queue(self) -> dict[str, Any]:
+        """Return the current queue state as stored data."""
+        return queue_state_to_dict(self.queue_state)
+
+    async def async_save_queue(self) -> None:
+        """Write the current queue state now, replacing any pending delayed save."""
+        await self.queue_store.async_save(self.stored_queue())

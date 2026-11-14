@@ -20,6 +20,10 @@ class ItemNotFound(QueueError):
     """Raised when a queue item does not exist."""
 
 
+class InvalidQueueData(QueueError):
+    """Raised when stored queue data cannot be read back into a queue state."""
+
+
 @dataclass(frozen=True)
 class QueueItem:
     """One room in the queue."""
@@ -59,8 +63,10 @@ class QueueState:
 
 
 TERMINAL_ITEM_STATUSES = {"completed", "skipped", "needs_attention"}
+ITEM_STATUSES = {"pending", "running", "canceled", *TERMINAL_ITEM_STATUSES}
 FAILED_RUN_STATES = {"out_of_sync", "blocked"}
 TERMINAL_RUN_STATES = {"completed", "canceled", *FAILED_RUN_STATES}
+RUN_STATES = {"idle", "running", "waiting_for_tanks", *TERMINAL_RUN_STATES}
 
 
 def new_state() -> QueueState:
@@ -329,3 +335,102 @@ def _find_first_pending_index(items: list[QueueItem]) -> int | None:
         if item.status == "pending":
             return idx
     return None
+
+
+def queue_state_to_dict(state: QueueState) -> dict[str, Any]:
+    """Return JSON-safe data that queue_state_from_dict reads back into the same state."""
+    dispatch = state.dispatch
+    return {
+        "run_state": state.run_state,
+        "run_id": state.run_id,
+        "current_item_id": state.current_item_id,
+        "items": [
+            {
+                "item_id": item.item_id,
+                "room_id": item.room_id,
+                "room_name": item.room_name,
+                "status": item.status,
+                "overrides": dict(item.overrides),
+                "result": item.result,
+            }
+            for item in state.items
+        ],
+        "dispatch": None
+        if dispatch is None
+        else {
+            "last_command_at": dispatch.last_command_at.isoformat(),
+            "dispatch_retry_count": dispatch.dispatch_retry_count,
+            "active_room_confirmed_since_dispatch": dispatch.active_room_confirmed_since_dispatch,
+            "task_status_cleared_since_dispatch": dispatch.task_status_cleared_since_dispatch,
+            "post_run_maintenance_seen": dispatch.post_run_maintenance_seen,
+        },
+    }
+
+
+def queue_state_from_dict(data: object) -> QueueState:
+    """Read stored queue data back into a queue state, rejecting anything malformed."""
+    data = _mapping(data, "queue")
+    run_state = _field(data, "run_state", str)
+    if run_state not in RUN_STATES:
+        raise InvalidQueueData(f"Unknown run state: {run_state}")
+    items = data.get("items")
+    if not isinstance(items, list):
+        raise InvalidQueueData("Queue items are not a list")
+    dispatch = data.get("dispatch")
+    return QueueState(
+        run_state=run_state,
+        run_id=_field(data, "run_id", str, optional=True),
+        items=tuple(_item_from_dict(item) for item in items),
+        current_item_id=_field(data, "current_item_id", str, optional=True),
+        dispatch=None if dispatch is None else _dispatch_from_dict(dispatch),
+    )
+
+
+def _item_from_dict(data: object) -> QueueItem:
+    data = _mapping(data, "queue item")
+    status = _field(data, "status", str)
+    if status not in ITEM_STATUSES:
+        raise InvalidQueueData(f"Unknown queue item status: {status}")
+    return QueueItem(
+        item_id=_field(data, "item_id", str),
+        room_id=_field(data, "room_id", int),
+        room_name=_field(data, "room_name", str),
+        status=status,
+        overrides=dict(_field(data, "overrides", dict)),
+        result=_field(data, "result", str, optional=True),
+    )
+
+
+def _dispatch_from_dict(data: object) -> DispatchTracking:
+    data = _mapping(data, "dispatch tracking")
+    try:
+        last_command_at = datetime.fromisoformat(_field(data, "last_command_at", str))
+    except ValueError as err:
+        raise InvalidQueueData("Dispatch time is not an ISO datetime") from err
+    if last_command_at.tzinfo is None:
+        raise InvalidQueueData("Dispatch time has no time zone")
+    return DispatchTracking(
+        last_command_at=last_command_at,
+        dispatch_retry_count=_field(data, "dispatch_retry_count", int),
+        active_room_confirmed_since_dispatch=_field(
+            data, "active_room_confirmed_since_dispatch", bool
+        ),
+        task_status_cleared_since_dispatch=_field(data, "task_status_cleared_since_dispatch", bool),
+        post_run_maintenance_seen=_field(data, "post_run_maintenance_seen", bool),
+    )
+
+
+def _mapping(data: object, what: str) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        raise InvalidQueueData(f"Stored {what} is not an object")
+    return data
+
+
+def _field(data: dict[str, Any], key: str, kind: type, *, optional: bool = False) -> Any:
+    value = data.get(key)
+    if value is None and optional:
+        return None
+    # bool is an int subclass; a stored flag must not pass as a room id or count.
+    if not isinstance(value, kind) or (kind is int and isinstance(value, bool)):
+        raise InvalidQueueData(f"Stored {key} is not a {kind.__name__}")
+    return value
