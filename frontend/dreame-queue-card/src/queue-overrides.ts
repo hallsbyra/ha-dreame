@@ -8,18 +8,19 @@ export type OverrideOption = {
 type OverridesDict = Record<string, unknown>;
 
 const FIELD_OPTIONS: Record<OverrideField, OverrideOption[]> = {
+  // Off is last so one click from Default never turns vacuuming or mopping off.
   water_volume: [
-    { value: 0, label: "Off" },
     { value: 1, label: "Min" },
     { value: 2, label: "Med" },
     { value: 3, label: "Max" },
+    { value: 0, label: "Off" },
   ],
   suction_level: [
-    { value: -1, label: "Off" },
     { value: 0, label: "Min" },
     { value: 1, label: "Med" },
     { value: 2, label: "Max" },
     { value: 3, label: "Turbo" },
+    { value: -1, label: "Off" },
   ],
   repeats: [
     { value: 1, label: "x1" },
