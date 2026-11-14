@@ -18,7 +18,6 @@ from custom_components.ha_dreame.queue_core import (
     remove_item,
     skip_current_room,
     start_run,
-    terminal_run_state_for_reason,
     update_item_overrides,
 )
 
@@ -133,16 +132,13 @@ def test_add_room_after_terminal_run_starts_fresh_pending_queue(
     assert state.items[0].overrides == {}
 
 
-@pytest.mark.parametrize(
-    "reason",
-    ["vacuum_route_error:expected_1:observed_5", "stopped_from_app"],
-)
-def test_add_room_after_failed_run_keeps_room_needing_review(reason: str) -> None:
+@pytest.mark.parametrize("blocked", [True, False])
+def test_add_room_after_failed_run_keeps_room_needing_review(blocked: bool) -> None:
     """Test a new room does not hide the room the robot may still be cleaning."""
     state = start_run(_seed_three_rooms())
     state = complete_current_room(state)
     state = update_item_overrides(state, item_id=state.items[2].item_id, overrides={"repeats": 2})
-    state = external_takeover(state, reason=reason)
+    state = external_takeover(state, reason="stopped_from_app", blocked=blocked)
 
     state = add_room(state, room_id=7, room_name="Bathroom")
 
@@ -153,7 +149,7 @@ def test_add_room_after_failed_run_keeps_room_needing_review(reason: str) -> Non
         ("Hall", "needs_attention"),
         ("Bathroom", "pending"),
     ]
-    assert state.items[0].result == reason
+    assert state.items[0].result == "stopped_from_app"
     assert state.items[1].overrides == {}
 
     state = start_run(state)
@@ -345,14 +341,11 @@ def test_clear_pending_keeps_running_item_and_resets_non_running_queue() -> None
     assert clear_pending(inconsistent) == new_state()
 
 
-@pytest.mark.parametrize(
-    "reason",
-    ["vacuum_route_error:expected_1:observed_5", "stopped_from_app"],
-)
-def test_clear_pending_resets_failed_terminal_queue(reason: str) -> None:
+@pytest.mark.parametrize("blocked", [True, False])
+def test_clear_pending_resets_failed_terminal_queue(blocked: bool) -> None:
     """Test clear pending recovers a blocked or out-of-sync queue to an empty idle queue."""
-    failed = external_takeover(start_run(_seed_three_rooms()), reason=reason)
-    assert failed.run_state in {"blocked", "out_of_sync"}
+    failed = external_takeover(start_run(_seed_three_rooms()), reason="stopped", blocked=blocked)
+    assert failed.run_state == ("blocked" if blocked else "out_of_sync")
     assert any(item.status == "needs_attention" for item in failed.items)
 
     assert clear_pending(failed) == new_state()
@@ -399,7 +392,13 @@ def test_external_takeover_marks_current_uncertain_and_preserves_pending_rooms()
     assert [item.result for item in state.items[1:]] == [None, None]
 
 
-def test_terminal_run_state_for_reason_handles_route_blocks() -> None:
-    """Test route failures map to blocked while other reasons map to out_of_sync."""
-    assert terminal_run_state_for_reason("stopped_from_app") == "out_of_sync"
-    assert terminal_run_state_for_reason("vacuum_route_error:expected_1:observed_7") == "blocked"
+def test_external_takeover_can_end_the_run_blocked() -> None:
+    """Test a route failure ends the run blocked instead of out of sync."""
+    state = external_takeover(
+        start_run(_seed_three_rooms()),
+        reason="vacuum_route_error:expected_1:observed_7",
+        blocked=True,
+    )
+
+    assert state.run_state == "blocked"
+    assert [item.status for item in state.items] == ["needs_attention", "pending", "pending"]

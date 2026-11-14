@@ -19,7 +19,7 @@ from .const import (
     companion_entity_id,
     optional_entity_id,
 )
-from .runtime_reconcile_observation import RuntimeReconcileObservation
+from .reconcile_core import Observation
 
 
 ABSENT_STATES = {"", "unknown", "unavailable", "none", "null"}
@@ -83,7 +83,7 @@ def build_runtime_reconcile_observation(
     vacuum_entity_id: str,
     entity_ids: RuntimeObservationEntityIds | None = None,
     task_status_override: str | None = None,
-) -> RuntimeReconcileObservation:
+) -> Observation:
     """Build a read-only reconcile observation from Home Assistant state.
 
     A task status override replaces the sensor state, for a transition captured by an
@@ -134,7 +134,7 @@ def build_runtime_reconcile_observation(
     )
     observed_room_id, observed_room_name = _current_room(current_room_state)
 
-    return RuntimeReconcileObservation(
+    return Observation(
         vacuum_state=vacuum_state,
         task_status=task_status,
         vacuum_error_code=error_code,

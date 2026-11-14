@@ -1,15 +1,25 @@
 """Tests for pure reconciliation decisions."""
 
+from datetime import UTC, datetime
+
 import pytest
 
-from custom_components.ha_dreame.queue_core import (
-    ReconcileDecision,
-    evaluate_reconcile_tick,
+from custom_components.ha_dreame.queue_core import QueueItem
+from custom_components.ha_dreame.reconcile_core import Decision, Observation, decide
+from custom_components.ha_dreame.runtime_state import QueueRunTracking
+
+NOW = datetime(2026, 5, 17, 8, 0, tzinfo=UTC)
+TRACKING_FIELDS = (
+    "task_status_cleared_since_dispatch",
+    "dispatch_retry_count",
+    "post_run_maintenance_seen",
+    "active_room_confirmed_since_dispatch",
 )
 
 
-def _decision(**overrides: object) -> ReconcileDecision:
-    kwargs = {
+def _decision(**overrides: object) -> Decision:
+    """Decide for an observation, the awaited room and its tracking given as flat values."""
+    values: dict = {
         "vacuum_state": "cleaning",
         "task_status": "room_cleaning",
         "seconds_since_last_command": 5,
@@ -19,18 +29,31 @@ def _decision(**overrides: object) -> ReconcileDecision:
         "observed_room_id": 1,
         "is_dock_prep_state": False,
     }
-    kwargs.update(overrides)
-    return evaluate_reconcile_tick(**kwargs)
+    values.update(overrides)
+    item = QueueItem(
+        item_id="item-1",
+        room_id=values.pop("expected_room_id"),
+        room_name=values.pop("expected_room_name", None) or "",
+        status="running",
+    )
+    seconds = values.pop("seconds_since_last_command")
+    tracking = QueueRunTracking(
+        run_id="run-1",
+        current_item_id="item-1",
+        last_command_at=NOW,
+        **{key: values.pop(key) for key in TRACKING_FIELDS if key in values},
+    )
+    return decide(Observation(**values), item, tracking, seconds)
 
 
 def test_reconcile_sets_task_status_cleared_after_dispatch() -> None:
     """Test non-completed task status enables later completion."""
     decision = _decision(task_status_cleared_since_dispatch=False)
 
-    assert decision.set_task_status_cleared_since_dispatch is True
-    assert decision.complete_current_room is False
-    assert decision.retry_current_room is False
-    assert decision.event_reasons == ("task_status_cleared_after_dispatch",)
+    assert decision.tracking.task_status_cleared_since_dispatch is True
+    assert decision.action != "complete"
+    assert decision.action != "retry"
+    assert decision.reasons == ("task_status_cleared_after_dispatch",)
 
 
 def test_reconcile_stale_completed_status_does_not_complete_room() -> None:
@@ -42,10 +65,10 @@ def test_reconcile_stale_completed_status_does_not_complete_room() -> None:
         seconds_since_last_command=10,
     )
 
-    assert decision.complete_current_room is False
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.event_reasons == ("task_status_completed_ignored_not_cleared_after_dispatch",)
+    assert decision.action != "complete"
+    assert decision.action != "retry"
+    assert decision.fail_reason is None
+    assert decision.reasons == ("task_status_completed_ignored_not_cleared_after_dispatch",)
 
 
 def test_reconcile_completed_after_status_cleared_completes_room() -> None:
@@ -57,10 +80,10 @@ def test_reconcile_completed_after_status_cleared_completes_room() -> None:
         seconds_since_last_command=30,
     )
 
-    assert decision.complete_current_room is True
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.event_reasons == ("task_status_completed",)
+    assert decision.action == "complete"
+    assert decision.action != "retry"
+    assert decision.fail_reason is None
+    assert decision.reasons == ("task_status_completed",)
 
 
 def test_reconcile_completed_unconfirmed_wrong_room_marks_out_of_sync() -> None:
@@ -77,12 +100,10 @@ def test_reconcile_completed_unconfirmed_wrong_room_marks_out_of_sync() -> None:
         seconds_since_last_command=30,
     )
 
-    assert decision.complete_current_room is False
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason == (
-        "task_completed_unconfirmed_room:expected_3:observed_1"
-    )
-    assert decision.event_reasons == ("task_status_completed_unconfirmed_room",)
+    assert decision.action != "complete"
+    assert decision.action != "retry"
+    assert decision.fail_reason == ("task_completed_unconfirmed_room:expected_3:observed_1")
+    assert decision.reasons == ("task_status_completed_unconfirmed_room",)
 
 
 def test_reconcile_completed_unconfirmed_wrong_room_right_after_dispatch_waits() -> None:
@@ -99,10 +120,10 @@ def test_reconcile_completed_unconfirmed_wrong_room_right_after_dispatch_waits()
         seconds_since_last_command=3,
     )
 
-    assert decision.complete_current_room is False
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.event_reasons == ("task_status_completed_unconfirmed_room_waiting",)
+    assert decision.action != "complete"
+    assert decision.action != "retry"
+    assert decision.fail_reason is None
+    assert decision.reasons == ("task_status_completed_unconfirmed_room_waiting",)
 
 
 def test_reconcile_unconfirmed_completion_with_unknown_room_right_after_dispatch_waits() -> None:
@@ -116,9 +137,9 @@ def test_reconcile_unconfirmed_completion_with_unknown_room_right_after_dispatch
         seconds_since_last_command=3,
     )
 
-    assert decision.complete_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.event_reasons == ("task_status_completed_unconfirmed_room_waiting",)
+    assert decision.action != "complete"
+    assert decision.fail_reason is None
+    assert decision.reasons == ("task_status_completed_unconfirmed_room_waiting",)
 
 
 def test_reconcile_unconfirmed_completion_with_unknown_room_completes_after_interval() -> None:
@@ -132,7 +153,7 @@ def test_reconcile_unconfirmed_completion_with_unknown_room_completes_after_inte
         seconds_since_last_command=30,
     )
 
-    assert decision.complete_current_room is True
+    assert decision.action == "complete"
 
 
 @pytest.mark.parametrize("cleaning_progress", [None, 3, 40])
@@ -150,11 +171,9 @@ def test_reconcile_room_flip_after_confirmation_never_redispatches(
         seconds_since_last_command=300,
     )
 
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.event_reasons == (
-        "active_room_mismatch_after_confirmation:expected_3:observed_4",
-    )
+    assert decision.action != "retry"
+    assert decision.fail_reason is None
+    assert decision.reasons == ("active_room_mismatch_after_confirmation:expected_3:observed_4",)
 
 
 def test_reconcile_stale_completed_status_retries_after_interval() -> None:
@@ -166,10 +185,10 @@ def test_reconcile_stale_completed_status_retries_after_interval() -> None:
         seconds_since_last_command=30,
     )
 
-    assert decision.complete_current_room is False
-    assert decision.retry_current_room is True
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.event_reasons == (
+    assert decision.action != "complete"
+    assert decision.action == "retry"
+    assert decision.fail_reason is None
+    assert decision.reasons == (
         "task_status_completed_ignored_not_cleared_after_dispatch",
         "retry_dispatch_requested:1",
     )
@@ -187,12 +206,10 @@ def test_reconcile_stale_completed_status_escalates_after_retry_budget() -> None
         observed_room_id=7,
     )
 
-    assert decision.complete_current_room is False
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason == (
-        "dispatch_retry_exhausted:expected_1:observed_7:vacuum_idle"
-    )
-    assert decision.event_reasons == (
+    assert decision.action != "complete"
+    assert decision.action != "retry"
+    assert decision.fail_reason == ("dispatch_retry_exhausted:expected_1:observed_7:vacuum_idle")
+    assert decision.reasons == (
         "task_status_completed_ignored_not_cleared_after_dispatch",
         "dispatch_retry_exhausted",
     )
@@ -208,10 +225,10 @@ def test_reconcile_stale_completed_status_waits_during_dock_prep() -> None:
         seconds_since_last_command=120,
     )
 
-    assert decision.complete_current_room is False
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.event_reasons == ("task_status_completed_ignored_not_cleared_after_dispatch",)
+    assert decision.action != "complete"
+    assert decision.action != "retry"
+    assert decision.fail_reason is None
+    assert decision.reasons == ("task_status_completed_ignored_not_cleared_after_dispatch",)
 
 
 def test_reconcile_route_error_marks_blocked() -> None:
@@ -224,10 +241,12 @@ def test_reconcile_route_error_marks_blocked() -> None:
         observed_room_id=7,
     )
 
-    assert decision.complete_current_room is False
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason == "vacuum_route_error:expected_1:observed_7"
-    assert decision.event_reasons == ("vacuum_error_route_blocked",)
+    assert decision.action != "complete"
+    assert decision.action != "retry"
+    assert decision.action == "fail"
+    assert decision.blocked is True
+    assert decision.fail_reason == "vacuum_route_error:expected_1:observed_7"
+    assert decision.reasons == ("vacuum_error_route_blocked",)
 
 
 def test_reconcile_error_state_ignores_completed_status() -> None:
@@ -240,11 +259,11 @@ def test_reconcile_error_state_ignores_completed_status() -> None:
         seconds_since_last_command=120,
     )
 
-    assert decision.complete_current_room is False
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.reset_dispatch_retry_count is True
-    assert decision.event_reasons == (
+    assert decision.action != "complete"
+    assert decision.action != "retry"
+    assert decision.fail_reason is None
+    assert decision.tracking.dispatch_retry_count == 0
+    assert decision.reasons == (
         "task_status_completed_ignored_due_vacuum_error:water_tank_dry",
         "vacuum_error_waiting_user_action",
     )
@@ -260,11 +279,11 @@ def test_reconcile_error_state_with_stale_completed_waits_for_recovery() -> None
         dispatch_retry_count=2,
     )
 
-    assert decision.complete_current_room is False
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.reset_dispatch_retry_count is True
-    assert decision.event_reasons == (
+    assert decision.action != "complete"
+    assert decision.action != "retry"
+    assert decision.fail_reason is None
+    assert decision.tracking.dispatch_retry_count == 0
+    assert decision.reasons == (
         "task_status_completed_ignored_not_cleared_after_dispatch",
         "vacuum_error_waiting_user_action",
     )
@@ -280,11 +299,11 @@ def test_reconcile_recoverable_error_waits_and_resets_retry_count() -> None:
         seconds_since_last_command=120,
     )
 
-    assert decision.complete_current_room is False
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.reset_dispatch_retry_count is True
-    assert decision.event_reasons == ("vacuum_error_waiting_user_action",)
+    assert decision.action != "complete"
+    assert decision.action != "retry"
+    assert decision.fail_reason is None
+    assert decision.tracking.dispatch_retry_count == 0
+    assert decision.reasons == ("vacuum_error_waiting_user_action",)
 
 
 def test_reconcile_dock_prep_pause_waits_for_resume_ready() -> None:
@@ -298,10 +317,10 @@ def test_reconcile_dock_prep_pause_waits_for_resume_ready() -> None:
         seconds_since_last_command=120,
     )
 
-    assert decision.retry_current_room is False
-    assert decision.resume_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.event_reasons == ("dock_prep_paused_waiting_resume_ready",)
+    assert decision.action != "retry"
+    assert decision.action != "resume"
+    assert decision.fail_reason is None
+    assert decision.reasons == ("dock_prep_paused_waiting_resume_ready",)
 
 
 def test_reconcile_dock_prep_pause_with_blocking_error_waits_for_user_action() -> None:
@@ -316,10 +335,10 @@ def test_reconcile_dock_prep_pause_with_blocking_error_waits_for_user_action() -
         seconds_since_last_command=120,
     )
 
-    assert decision.retry_current_room is False
-    assert decision.resume_current_room is False
-    assert decision.reset_dispatch_retry_count is True
-    assert decision.event_reasons == ("vacuum_error_waiting_user_action",)
+    assert decision.action != "retry"
+    assert decision.action != "resume"
+    assert decision.tracking.dispatch_retry_count == 0
+    assert decision.reasons == ("vacuum_error_waiting_user_action",)
 
 
 def test_reconcile_dock_prep_pause_waits_for_retry_interval() -> None:
@@ -333,9 +352,9 @@ def test_reconcile_dock_prep_pause_waits_for_retry_interval() -> None:
         seconds_since_last_command=10,
     )
 
-    assert decision.retry_current_room is False
-    assert decision.resume_current_room is False
-    assert decision.event_reasons == ("dock_prep_paused_waiting_retry_interval",)
+    assert decision.action != "retry"
+    assert decision.action != "resume"
+    assert decision.reasons == ("dock_prep_paused_waiting_retry_interval",)
 
 
 def test_reconcile_mop_remove_transition_waits_without_retry_or_out_of_sync() -> None:
@@ -356,11 +375,11 @@ def test_reconcile_mop_remove_transition_waits_without_retry_or_out_of_sync() ->
         is_dock_prep_state=False,
     )
 
-    assert decision.complete_current_room is False
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.reset_dispatch_retry_count is False
-    assert decision.event_reasons == ("mop_maintenance_waiting",)
+    assert decision.action != "complete"
+    assert decision.action != "retry"
+    assert decision.fail_reason is None
+    assert decision.tracking.dispatch_retry_count == 2
+    assert decision.reasons == ("mop_maintenance_waiting",)
 
 
 def test_reconcile_mop_install_robot_state_suppresses_active_room_mismatch_retry() -> None:
@@ -381,10 +400,10 @@ def test_reconcile_mop_install_robot_state_suppresses_active_room_mismatch_retry
         is_mop_maintenance_state=True,
     )
 
-    assert decision.complete_current_room is False
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.event_reasons == ("mop_maintenance_waiting",)
+    assert decision.action != "complete"
+    assert decision.action != "retry"
+    assert decision.fail_reason is None
+    assert decision.reasons == ("mop_maintenance_waiting",)
 
 
 def test_reconcile_dock_prep_pause_requests_resume_when_ready() -> None:
@@ -398,9 +417,9 @@ def test_reconcile_dock_prep_pause_requests_resume_when_ready() -> None:
         seconds_since_last_command=120,
     )
 
-    assert decision.retry_current_room is False
-    assert decision.resume_current_room is True
-    assert decision.event_reasons == ("dock_prep_paused_resume_requested",)
+    assert decision.action != "retry"
+    assert decision.action == "resume"
+    assert decision.reasons == ("dock_prep_paused_resume_requested",)
 
 
 def test_reconcile_paused_robot_waits_without_retry() -> None:
@@ -411,9 +430,9 @@ def test_reconcile_paused_robot_waits_without_retry() -> None:
         seconds_since_last_command=120,
     )
 
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.event_reasons == ("vacuum_paused_waiting",)
+    assert decision.action != "retry"
+    assert decision.fail_reason is None
+    assert decision.reasons == ("vacuum_paused_waiting",)
 
 
 def test_reconcile_paused_robot_with_blocking_error_waits_for_user_action() -> None:
@@ -425,10 +444,10 @@ def test_reconcile_paused_robot_with_blocking_error_waits_for_user_action() -> N
         seconds_since_last_command=120,
     )
 
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.reset_dispatch_retry_count is True
-    assert decision.event_reasons == ("vacuum_error_waiting_user_action",)
+    assert decision.action != "retry"
+    assert decision.fail_reason is None
+    assert decision.tracking.dispatch_retry_count == 0
+    assert decision.reasons == ("vacuum_error_waiting_user_action",)
 
 
 def test_reconcile_matching_room_names_suppress_room_id_mismatch() -> None:
@@ -442,9 +461,9 @@ def test_reconcile_matching_room_names_suppress_room_id_mismatch() -> None:
         seconds_since_last_command=120,
     )
 
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert not any(reason.startswith("active_room_mismatch") for reason in decision.event_reasons)
+    assert decision.action != "retry"
+    assert decision.fail_reason is None
+    assert not any(reason.startswith("active_room_mismatch") for reason in decision.reasons)
 
 
 def test_reconcile_room_id_mismatch_retries_when_names_are_missing() -> None:
@@ -458,10 +477,8 @@ def test_reconcile_room_id_mismatch_retries_when_names_are_missing() -> None:
         seconds_since_last_command=120,
     )
 
-    assert decision.retry_current_room is True
-    assert any(
-        reason.startswith("active_room_mismatch_retry:") for reason in decision.event_reasons
-    )
+    assert decision.action == "retry"
+    assert any(reason.startswith("active_room_mismatch_retry:") for reason in decision.reasons)
 
 
 def test_reconcile_early_room_mismatch_waits_for_min_progress() -> None:
@@ -475,10 +492,9 @@ def test_reconcile_early_room_mismatch_waits_for_min_progress() -> None:
         seconds_since_last_command=120,
     )
 
-    assert decision.retry_current_room is False
+    assert decision.action != "retry"
     assert any(
-        reason.startswith("active_room_mismatch_waiting_progress:")
-        for reason in decision.event_reasons
+        reason.startswith("active_room_mismatch_waiting_progress:") for reason in decision.reasons
     )
 
 
@@ -494,11 +510,11 @@ def test_reconcile_unconfirmed_late_room_mismatch_marks_out_of_sync() -> None:
         seconds_since_last_command=120,
     )
 
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason == (
+    assert decision.action != "retry"
+    assert decision.fail_reason == (
         "active_room_mismatch_unconfirmed_near_completion:expected_1:observed_7"
     )
-    assert decision.event_reasons == (
+    assert decision.reasons == (
         "active_room_mismatch_unconfirmed_near_completion:expected_1:observed_7:progress_95:max_90",
     )
 
@@ -514,11 +530,9 @@ def test_reconcile_confirmed_late_room_mismatch_waits_near_completion() -> None:
         seconds_since_last_command=120,
     )
 
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.event_reasons == (
-        "active_room_mismatch_after_confirmation:expected_1:observed_1",
-    )
+    assert decision.action != "retry"
+    assert decision.fail_reason is None
+    assert decision.reasons == ("active_room_mismatch_after_confirmation:expected_1:observed_1",)
 
 
 def test_reconcile_room_mismatch_waits_for_retry_interval() -> None:
@@ -531,10 +545,10 @@ def test_reconcile_room_mismatch_waits_for_retry_interval() -> None:
         seconds_since_last_command=5,
     )
 
-    assert decision.retry_current_room is False
+    assert decision.action != "retry"
     assert any(
         reason.startswith("active_room_mismatch_waiting_retry_interval:")
-        for reason in decision.event_reasons
+        for reason in decision.reasons
     )
 
 
@@ -549,11 +563,9 @@ def test_reconcile_room_mismatch_retries_after_interval() -> None:
         seconds_since_last_command=120,
     )
 
-    assert decision.retry_current_room is True
-    assert decision.mark_out_of_sync_reason is None
-    assert any(
-        reason.startswith("active_room_mismatch_retry:2:") for reason in decision.event_reasons
-    )
+    assert decision.action == "retry"
+    assert decision.fail_reason is None
+    assert any(reason.startswith("active_room_mismatch_retry:2:") for reason in decision.reasons)
 
 
 def test_reconcile_room_mismatch_exhausts_retry_budget() -> None:
@@ -569,11 +581,9 @@ def test_reconcile_room_mismatch_exhausts_retry_budget() -> None:
         seconds_since_last_command=120,
     )
 
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason == (
-        "active_room_mismatch_retry_exhausted:expected_3:observed_1"
-    )
-    assert decision.event_reasons == ("active_room_mismatch_retry_exhausted",)
+    assert decision.action != "retry"
+    assert decision.fail_reason == ("active_room_mismatch_retry_exhausted:expected_3:observed_1")
+    assert decision.reasons == ("active_room_mismatch_retry_exhausted",)
 
 
 def test_reconcile_non_active_state_retries_after_interval() -> None:
@@ -585,9 +595,10 @@ def test_reconcile_non_active_state_retries_after_interval() -> None:
         dispatch_retry_count=0,
     )
 
-    assert decision.retry_current_room is True
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.event_reasons == ("retry_dispatch_requested:1",)
+    assert decision.action == "retry"
+    assert decision.tracking.dispatch_retry_count == 1
+    assert decision.fail_reason is None
+    assert decision.reasons == ("retry_dispatch_requested:1",)
 
 
 def test_reconcile_non_active_state_escalates_after_retry_budget() -> None:
@@ -601,11 +612,11 @@ def test_reconcile_non_active_state_escalates_after_retry_budget() -> None:
         observed_room_id=7,
     )
 
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason == (
-        "dispatch_retry_exhausted:expected_1:observed_7:vacuum_idle"
-    )
-    assert decision.event_reasons == ("dispatch_retry_exhausted",)
+    assert decision.action != "retry"
+    assert decision.fail_reason == ("dispatch_retry_exhausted:expected_1:observed_7:vacuum_idle")
+    assert decision.action == "fail"
+    assert decision.blocked is False
+    assert decision.reasons == ("dispatch_retry_exhausted",)
 
 
 def test_reconcile_unavailable_vacuum_waits_without_consuming_retry_budget() -> None:
@@ -617,10 +628,10 @@ def test_reconcile_unavailable_vacuum_waits_without_consuming_retry_budget() -> 
         dispatch_retry_count=2,
     )
 
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.reset_dispatch_retry_count is False
-    assert decision.event_reasons == ("vacuum_unavailable_waiting",)
+    assert decision.action != "retry"
+    assert decision.fail_reason is None
+    assert decision.tracking.dispatch_retry_count == 2
+    assert decision.reasons == ("vacuum_unavailable_waiting",)
 
 
 def test_reconcile_completed_task_survives_unavailable_vacuum_observation() -> None:
@@ -633,10 +644,10 @@ def test_reconcile_completed_task_survives_unavailable_vacuum_observation() -> N
         seconds_since_last_command=120,
     )
 
-    assert decision.complete_current_room is True
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.event_reasons == ("task_status_completed",)
+    assert decision.action == "complete"
+    assert decision.action != "retry"
+    assert decision.fail_reason is None
+    assert decision.reasons == ("task_status_completed",)
 
 
 def test_reconcile_active_room_confirmation_resets_retry_budget() -> None:
@@ -649,11 +660,11 @@ def test_reconcile_active_room_confirmation_resets_retry_budget() -> None:
         observed_room_id=1,
     )
 
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.reset_dispatch_retry_count is True
-    assert decision.set_active_room_confirmed_since_dispatch is True
-    assert decision.event_reasons == ("dispatch_retry_reset_after_active_confirmation",)
+    assert decision.action != "retry"
+    assert decision.fail_reason is None
+    assert decision.tracking.dispatch_retry_count == 0
+    assert decision.tracking.active_room_confirmed_since_dispatch is True
+    assert decision.reasons == ("dispatch_retry_reset_after_active_confirmation",)
 
 
 def test_reconcile_active_state_without_room_confirmation_preserves_retry_budget() -> None:
@@ -667,9 +678,9 @@ def test_reconcile_active_state_without_room_confirmation_preserves_retry_budget
         observed_room_name=None,
     )
 
-    assert decision.retry_current_room is False
-    assert decision.reset_dispatch_retry_count is False
-    assert decision.event_reasons == ()
+    assert decision.action != "retry"
+    assert decision.tracking.dispatch_retry_count == 1
+    assert decision.reasons == ()
 
 
 def test_reconcile_active_room_mismatch_does_not_reset_retry_budget() -> None:
@@ -684,9 +695,9 @@ def test_reconcile_active_room_mismatch_does_not_reset_retry_budget() -> None:
         seconds_since_last_command=5,
     )
 
-    assert decision.retry_current_room is False
-    assert decision.reset_dispatch_retry_count is False
-    assert decision.event_reasons == (
+    assert decision.action != "retry"
+    assert decision.tracking.dispatch_retry_count == 1
+    assert decision.reasons == (
         "active_room_mismatch_waiting_retry_interval:expected_1:observed_7",
     )
 
@@ -701,10 +712,10 @@ def test_reconcile_dock_prep_preserves_retry_history_while_active() -> None:
         dispatch_retry_count=2,
     )
 
-    assert decision.retry_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.reset_dispatch_retry_count is False
-    assert decision.event_reasons == ()
+    assert decision.action != "retry"
+    assert decision.fail_reason is None
+    assert decision.tracking.dispatch_retry_count == 2
+    assert decision.reasons == ()
 
 
 def test_reconcile_post_run_maintenance_holds_without_resuming_or_retrying() -> None:
@@ -720,13 +731,13 @@ def test_reconcile_post_run_maintenance_holds_without_resuming_or_retrying() -> 
         dispatch_retry_count=2,
     )
 
-    assert decision.complete_current_room is False
-    assert decision.retry_current_room is False
-    assert decision.resume_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.reset_dispatch_retry_count is True
-    assert decision.set_post_run_maintenance_seen is True
-    assert decision.event_reasons == ("post_run_maintenance_waiting",)
+    assert decision.action != "complete"
+    assert decision.action != "retry"
+    assert decision.action != "resume"
+    assert decision.fail_reason is None
+    assert decision.tracking.dispatch_retry_count == 0
+    assert decision.tracking.post_run_maintenance_seen is True
+    assert decision.reasons == ("post_run_maintenance_waiting",)
 
 
 def test_reconcile_does_not_bind_stale_maintenance_to_unconfirmed_room() -> None:
@@ -741,13 +752,13 @@ def test_reconcile_does_not_bind_stale_maintenance_to_unconfirmed_room() -> None
         dispatch_retry_count=1,
     )
 
-    assert decision.complete_current_room is False
-    assert decision.retry_current_room is False
-    assert decision.resume_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.reset_dispatch_retry_count is False
-    assert decision.set_post_run_maintenance_seen is False
-    assert decision.event_reasons == (
+    assert decision.action != "complete"
+    assert decision.action != "retry"
+    assert decision.action != "resume"
+    assert decision.fail_reason is None
+    assert decision.tracking.dispatch_retry_count == 1
+    assert decision.tracking.post_run_maintenance_seen is False
+    assert decision.reasons == (
         "task_status_completed_ignored_not_cleared_after_dispatch",
         "post_run_maintenance_waiting",
     )
@@ -763,9 +774,52 @@ def test_reconcile_remembers_post_run_maintenance_until_completion() -> None:
         dispatch_retry_count=0,
     )
 
-    assert decision.complete_current_room is False
-    assert decision.retry_current_room is False
-    assert decision.resume_current_room is False
-    assert decision.mark_out_of_sync_reason is None
-    assert decision.reset_dispatch_retry_count is False
-    assert decision.event_reasons == ("post_run_completion_waiting",)
+    assert decision.action != "complete"
+    assert decision.action != "retry"
+    assert decision.action != "resume"
+    assert decision.fail_reason is None
+    assert decision.tracking.dispatch_retry_count == 0
+    assert decision.reasons == ("post_run_completion_waiting",)
+
+
+def test_reconcile_paused_robot_is_paused_unless_in_error() -> None:
+    """Test pause evidence beyond the vacuum state holds the room as paused."""
+    decision = _decision(vacuum_state="cleaning", robot_paused=True, seconds_since_last_command=300)
+
+    assert decision.action == "hold"
+    assert decision.reasons == ("vacuum_paused_waiting",)
+
+    decision = _decision(vacuum_state="error", robot_paused=True, vacuum_error_code="route")
+
+    assert decision.action == "fail"
+    assert decision.blocked is True
+
+
+def test_paused_drying_never_automatically_resumes_after_tank_recovery() -> None:
+    """Test paused drying is not resumable dock preparation, even when refill is ready."""
+    decision = _decision(
+        vacuum_state="docked",
+        task_status="room_cleaning",
+        robot_paused=True,
+        is_drying_state=True,
+        is_dock_prep_state=True,
+        is_dock_prep_paused=True,
+        dock_prep_resume_ready=True,
+        seconds_since_last_command=600,
+    )
+
+    assert decision.action == "hold"
+    assert "vacuum_paused_waiting" in decision.reasons
+
+
+def test_dirty_tank_blocks_automatic_dispatch_retry() -> None:
+    """Test a tank problem holds instead of redispatching after the retry interval."""
+    decision = _decision(
+        vacuum_state="idle",
+        task_status="room_cleaning",
+        water_tank_block_reason="dirty_water_tank_not_ready",
+        seconds_since_last_command=600,
+    )
+
+    assert decision.action == "hold"
+    assert decision.reasons == ("dirty_water_tank_not_ready",)

@@ -32,9 +32,7 @@ from .queue_core import QueueState, new_state
 from .audit import automatic_audit, register_external_command_audit
 from .runtime import HaDreameRuntimeData
 from .runtime_observation import ABSENT_STATES, RuntimeObservationEntityIds, normalize_signal
-from .runtime_reconcile_runner import (
-    async_evaluate_and_apply_runtime_reconcile_under_lock,
-)
+from .reconcile import async_reconcile_under_lock
 from .runtime_state import QueueRunTracking
 from .services import async_register_services, async_remove_services, async_start_waiting_queue
 
@@ -272,19 +270,12 @@ def _register_current_room_listener(
 
 
 def _active_reconcile_context(runtime_data: HaDreameRuntimeData) -> tuple[str, str] | None:
-    """Return the active queue context when runtime tracking matches it."""
-    queue_state = runtime_data.queue_state
-    run_tracking = runtime_data.run_tracking
-    if (
-        queue_state.run_state != "running"
-        or queue_state.run_id is None
-        or queue_state.current_item_id is None
-        or run_tracking is None
-        or run_tracking.run_id != queue_state.run_id
-        or run_tracking.current_item_id != queue_state.current_item_id
-    ):
+    """Return the (run, item) whose completion the robot is being watched for."""
+    item = runtime_data.awaited_item()
+    run_id = runtime_data.queue_state.run_id
+    if item is None or run_id is None:
         return None
-    return queue_state.run_id, queue_state.current_item_id
+    return run_id, item.item_id
 
 
 async def _async_auto_reconcile_tick(
@@ -319,7 +310,7 @@ async def _async_auto_reconcile_tick(
                 if runtime_data.queue_state.run_state == "waiting_for_tanks":
                     await async_start_waiting_queue(hass, entry)
                     return
-                await async_evaluate_and_apply_runtime_reconcile_under_lock(
+                await async_reconcile_under_lock(
                     hass,
                     runtime_data,
                     task_status_override=task_status_override,

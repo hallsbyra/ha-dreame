@@ -10,9 +10,9 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .queue_core import QueueState
+from .queue_core import QueueItem, QueueState, current_item
 from .runtime_observation import RuntimeObservationEntityIds, build_runtime_reconcile_observation
-from .runtime_reconcile_observation import RuntimeReconcileObservation
+from .reconcile_core import Observation
 from .runtime_state import QueueRunTracking
 
 
@@ -35,7 +35,7 @@ class HaDreameRuntimeData:
         hass: HomeAssistant,
         *,
         task_status_override: str | None = None,
-    ) -> RuntimeReconcileObservation:
+    ) -> Observation:
         """Read one robot observation from this entry's companion entities."""
         return build_runtime_reconcile_observation(
             hass,
@@ -43,6 +43,22 @@ class HaDreameRuntimeData:
             entity_ids=self.observation_entity_ids,
             task_status_override=task_status_override,
         )
+
+    def awaited_item(self) -> QueueItem | None:
+        """Return the running room while it awaits completion under matching run tracking."""
+        queue_state = self.queue_state
+        run_tracking = self.run_tracking
+        item = current_item(queue_state)
+        if (
+            queue_state.run_state != "running"
+            or item is None
+            or item.status != "running"
+            or run_tracking is None
+            or run_tracking.run_id != queue_state.run_id
+            or run_tracking.current_item_id != item.item_id
+        ):
+            return None
+        return item
 
     @property
     def queue_state(self) -> QueueState:

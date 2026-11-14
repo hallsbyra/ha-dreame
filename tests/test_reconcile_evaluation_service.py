@@ -131,17 +131,7 @@ async def test_evaluate_reconcile_returns_noop_for_idle_queue(
     assert response["observation"]["task_status"] == ""
     assert response["evaluation"]["awaiting_completion_event"] is False
     assert response["evaluation"]["expected_room_id"] is None
-    assert response["decision"] == {
-        "complete_current_room": False,
-        "retry_current_room": False,
-        "resume_current_room": False,
-        "mark_out_of_sync_reason": None,
-        "set_active_room_confirmed_since_dispatch": False,
-        "set_post_run_maintenance_seen": False,
-        "set_task_status_cleared_since_dispatch": False,
-        "reset_dispatch_retry_count": False,
-        "event_reasons": [],
-    }
+    assert response["decision"] is None
     assert entry.runtime_data.queue_state == QueueState()
     assert entry.runtime_data.run_tracking is None
 
@@ -171,8 +161,8 @@ async def test_evaluate_reconcile_returns_decision_for_running_queue(
     assert response["evaluation"]["awaiting_completion_event"] is True
     assert response["evaluation"]["expected_room_id"] == 1
     assert response["evaluation"]["expected_room_name"] == "Kitchen"
-    assert response["decision"]["complete_current_room"] is True
-    assert response["decision"]["event_reasons"] == ["task_status_completed"]
+    assert response["decision"]["action"] == "complete"
+    assert response["decision"]["reasons"] == ("task_status_completed",)
     assert entry.runtime_data.queue_state == queue_state
     assert entry.runtime_data.run_tracking == run_tracking
 
@@ -211,8 +201,8 @@ async def test_evaluate_reconcile_uses_configured_observation_entities(
 
     assert response["observation"]["task_status"] == "completed"
     assert response["observation"]["observed_room_id"] == 1
-    assert response["decision"]["complete_current_room"] is True
-    assert response["decision"]["event_reasons"] == ["task_status_completed"]
+    assert response["decision"]["action"] == "complete"
+    assert response["decision"]["reasons"] == ("task_status_completed",)
     assert entry.runtime_data.queue_state == queue_state
     assert entry.runtime_data.run_tracking == run_tracking
 
@@ -240,6 +230,6 @@ async def test_evaluate_reconcile_does_not_call_vacuum_services(
 
     response = await _call_evaluate_reconcile_service(hass, entry.entry_id)
 
-    assert response["decision"]["retry_current_room"] is True
+    assert response["decision"]["action"] == "retry"
     assert calls == []
     assert entry.runtime_data.queue_state == queue_state

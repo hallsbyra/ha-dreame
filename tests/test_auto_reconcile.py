@@ -225,7 +225,7 @@ async def test_auto_reconcile_logs_late_room_mismatch_as_debug_hold(
     """Test ignored late room flips are diagnostic debug, not normal log noise."""
     caplog.set_level(
         logging.DEBUG,
-        "custom_components.ha_dreame.runtime_reconcile_runner",
+        "custom_components.ha_dreame.reconcile",
     )
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
@@ -250,14 +250,13 @@ async def test_auto_reconcile_logs_late_room_mismatch_as_debug_hold(
     assert entry.runtime_data.run_tracking == run_tracking
     assert any(
         record.levelno == logging.DEBUG
-        and record.name == "custom_components.ha_dreame.runtime_reconcile_runner"
+        and record.name == "custom_components.ha_dreame.reconcile"
         and "action=hold" in record.message
         and "active_room_mismatch_after_confirmation" in record.message
         for record in caplog.records
     )
     assert not any(
-        record.name == "custom_components.ha_dreame.runtime_reconcile_runner"
-        and record.levelno >= logging.INFO
+        record.name == "custom_components.ha_dreame.reconcile" and record.levelno >= logging.INFO
         for record in caplog.records
     )
 
@@ -274,7 +273,7 @@ async def test_auto_reconcile_logs_retry_dispatch_as_info(
 
     caplog.set_level(
         logging.INFO,
-        "custom_components.ha_dreame.runtime_reconcile_runner",
+        "custom_components.ha_dreame.reconcile",
     )
     hass.services.async_register(
         DREAME_VACUUM_DOMAIN,
@@ -304,7 +303,7 @@ async def test_auto_reconcile_logs_retry_dispatch_as_info(
     assert calls == [{"entity_id": vacuum_entity_id, "segments": [1]}]
     assert any(
         record.levelno == logging.INFO
-        and record.name == "custom_components.ha_dreame.runtime_reconcile_runner"
+        and record.name == "custom_components.ha_dreame.reconcile"
         and "action=retry_dispatch" in record.message
         and "active_room_mismatch_retry:1:expected_1:observed_7" in record.message
         for record in caplog.records
@@ -318,7 +317,7 @@ async def test_auto_reconcile_logs_terminal_problem_as_warning(
     """Test terminal reconcile problem states are warning-level events."""
     caplog.set_level(
         logging.WARNING,
-        "custom_components.ha_dreame.runtime_reconcile_runner",
+        "custom_components.ha_dreame.reconcile",
     )
     vacuum_entity_id, entry = await _setup_loaded_entry(
         hass,
@@ -344,7 +343,7 @@ async def test_auto_reconcile_logs_terminal_problem_as_warning(
     assert entry.runtime_data.run_tracking is None
     assert any(
         record.levelno == logging.WARNING
-        and record.name == "custom_components.ha_dreame.runtime_reconcile_runner"
+        and record.name == "custom_components.ha_dreame.reconcile"
         and "action=out_of_sync" in record.message
         and "dispatch_retry_exhausted" in record.message
         for record in caplog.records

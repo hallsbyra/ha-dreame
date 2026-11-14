@@ -162,12 +162,7 @@ async def test_apply_reconcile_noop_returns_observation_without_mutating(
     assert response[CONF_CONFIG_ENTRY_ID] == entry.entry_id
     assert response["observation"]["vacuum_state"] == "cleaning"
     assert response["evaluation"]["awaiting_completion_event"] is False
-    assert response["decision"]["event_reasons"] == []
-    assert response["applied"] == {
-        "command_intent": None,
-        "command_item_id": None,
-        "event_reasons": [],
-    }
+    assert response["decision"] is None
     assert response["queue"]["run_state"] == "idle"
     assert entry.runtime_data.queue_state == QueueState()
     assert entry.runtime_data.run_tracking is None
@@ -199,8 +194,8 @@ async def test_apply_reconcile_updates_tracking_only_decision_without_robot_call
     response = await _call_apply_reconcile_service(hass, entry.entry_id)
 
     assert calls == []
-    assert response["decision"]["set_task_status_cleared_since_dispatch"] is True
-    assert response["applied"]["command_intent"] is None
+    assert response["decision"]["action"] == "hold"
+    assert response["decision"]["tracking"]["task_status_cleared_since_dispatch"] is True
     assert entry.runtime_data.queue_state == queue_state
     assert entry.runtime_data.run_tracking is not None
     assert entry.runtime_data.run_tracking.task_status_cleared_since_dispatch is True
@@ -234,12 +229,8 @@ async def test_apply_reconcile_completion_dispatches_next_room(
 
     next_item = entry.runtime_data.queue_state.items[1]
     assert calls == [{"entity_id": vacuum_entity_id, "segments": [2]}]
-    assert response["decision"]["complete_current_room"] is True
-    assert response["applied"] == {
-        "command_intent": "dispatch_current_room",
-        "command_item_id": next_item.item_id,
-        "event_reasons": ["task_status_completed"],
-    }
+    assert response["decision"]["action"] == "complete"
+    assert response["decision"]["reasons"] == ("task_status_completed",)
     assert response["queue"][ATTR_COMPLETED_ITEMS] == 1
     assert response["queue"][ATTR_RUNNING_ITEMS] == 1
     assert response["queue"][ATTR_PENDING_ITEMS] == 0
@@ -292,8 +283,7 @@ async def test_apply_reconcile_uses_configured_observation_entities(
     assert calls == [{"entity_id": vacuum_entity_id, "segments": [2]}]
     assert response["observation"]["task_status"] == "completed"
     assert response["observation"]["observed_room_id"] == 1
-    assert response["decision"]["complete_current_room"] is True
-    assert response["applied"]["command_item_id"] == next_item.item_id
+    assert response["decision"]["action"] == "complete"
     assert entry.runtime_data.queue_state.current_item_id == next_item.item_id
 
 
@@ -353,15 +343,11 @@ async def test_apply_reconcile_resume_intent_calls_vacuum_start(
     response = await _call_apply_reconcile_service(hass, entry.entry_id)
 
     assert calls == [{"entity_id": vacuum_entity_id}]
-    assert response["decision"]["resume_current_room"] is True
-    assert response["applied"] == {
-        "command_intent": "resume_current_room",
-        "command_item_id": queue_state.current_item_id,
-        "event_reasons": [
-            "task_status_cleared_after_dispatch",
-            "dock_prep_paused_resume_requested",
-        ],
-    }
+    assert response["decision"]["action"] == "resume"
+    assert response["decision"]["reasons"] == (
+        "task_status_cleared_after_dispatch",
+        "dock_prep_paused_resume_requested",
+    )
     assert entry.runtime_data.queue_state == queue_state
     assert entry.runtime_data.run_tracking is not None
     assert entry.runtime_data.run_tracking.current_item_id == queue_state.current_item_id

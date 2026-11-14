@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
 import logging
 from typing import Any
@@ -68,7 +68,6 @@ from .queue_core import (
     clear_pending,
     current_item,
     external_takeover,
-    is_meaningful_error,
     move_item,
     remove_item,
     skip_current_room,
@@ -77,16 +76,9 @@ from .queue_core import (
 )
 from .queue_snapshot import count_queue_items, queue_item_snapshots
 from .runtime import HaDreameRuntimeData
+from .reconcile import ReconcileEvaluation, async_reconcile, evaluate_reconcile
+from .reconcile_core import Observation, is_meaningful_error
 from .runtime_observation import normalize_signal
-from .runtime_reconcile import RuntimeReconcileResult
-from .runtime_reconcile_observation import (
-    RuntimeReconcileEvaluation,
-    RuntimeReconcileObservation,
-)
-from .runtime_reconcile_runner import (
-    async_evaluate_and_apply_runtime_reconcile,
-    evaluate_runtime_reconcile,
-)
 from .runtime_state import QueueRunTracking
 
 _LOGGER = logging.getLogger(__name__)
@@ -489,16 +481,9 @@ async def _async_apply_reconcile_response(
 
     _require_commands(runtime_data)
 
-    outcome = await async_evaluate_and_apply_runtime_reconcile(
-        hass,
-        runtime_data,
-    )
+    evaluation = await async_reconcile(hass, runtime_data)
     return {
-        CONF_CONFIG_ENTRY_ID: entry.entry_id,
-        "applied": _reconcile_result_response(outcome.applied_result),
-        "decision": _reconcile_decision_response(outcome.evaluation),
-        "evaluation": _reconcile_evaluation_response(outcome.evaluation),
-        "observation": _reconcile_observation_response(outcome.observation),
+        **_reconcile_response(entry, evaluation),
         "queue": _queue_status_response(entry),
     }
 
@@ -736,7 +721,7 @@ async def _async_update_running_override_response(
 async def _async_start_queue_response(
     hass: HomeAssistant,
     config_entry_id: str,
-    observation: RuntimeReconcileObservation | None = None,
+    observation: Observation | None = None,
 ) -> dict[str, Any]:
     """Start queue execution and dispatch the first pending room."""
     entry = _runtime_entry(hass, config_entry_id)
@@ -978,7 +963,7 @@ def _runtime_status_response(hass: HomeAssistant, config_entry_id: str) -> dict[
     }
 
 
-def _robot_status_response(observation: RuntimeReconcileObservation) -> dict[str, Any]:
+def _robot_status_response(observation: Observation) -> dict[str, Any]:
     """Return robot interruption status derived from read-only companion entities."""
     vacuum_state = normalize_signal(observation.vacuum_state)
     task_status = normalize_signal(observation.task_status)
@@ -1013,78 +998,27 @@ def _robot_status_response(observation: RuntimeReconcileObservation) -> dict[str
 def _evaluate_reconcile_response(hass: HomeAssistant, config_entry_id: str) -> dict[str, Any]:
     """Return a read-only runtime reconcile observation and decision."""
     entry = _runtime_entry(hass, config_entry_id)
-    observation, evaluation = evaluate_runtime_reconcile(hass, entry.runtime_data)
+    return _reconcile_response(entry, evaluate_reconcile(hass, entry.runtime_data))
 
+
+def _reconcile_response(entry: ConfigEntry, evaluation: ReconcileEvaluation) -> dict[str, Any]:
+    """Return a serializable debug snapshot of one reconcile evaluation."""
+    decision = evaluation.decision
+    item = evaluation.item
     return {
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
-        "decision": _reconcile_decision_response(evaluation),
-        "evaluation": _reconcile_evaluation_response(evaluation),
-        "observation": _reconcile_observation_response(observation),
-    }
-
-
-def _reconcile_observation_response(
-    observation: RuntimeReconcileObservation,
-) -> dict[str, Any]:
-    """Return a serializable reconcile observation snapshot."""
-    return {
-        "cleaning_progress": observation.cleaning_progress,
-        "dock_prep_resume_ready": observation.dock_prep_resume_ready,
-        "robot_paused": observation.robot_paused,
-        "is_drying_state": observation.is_drying_state,
-        "water_tank_block_reason": observation.water_tank_block_reason,
-        "is_dock_prep_paused": observation.is_dock_prep_paused,
-        "is_dock_prep_state": observation.is_dock_prep_state,
-        "is_mop_maintenance_state": observation.is_mop_maintenance_state,
-        "is_post_run_maintenance_state": observation.is_post_run_maintenance_state,
-        "observed_room_id": observation.observed_room_id,
-        "observed_room_name": observation.observed_room_name,
-        "task_status": observation.task_status,
-        "vacuum_error_code": observation.vacuum_error_code,
-        "vacuum_state": observation.vacuum_state,
-    }
-
-
-def _reconcile_evaluation_response(
-    evaluation: RuntimeReconcileEvaluation,
-) -> dict[str, Any]:
-    """Return serializable reconcile evaluation metadata."""
-    return {
-        "awaiting_completion_event": evaluation.awaiting_completion_event,
-        "expected_room_id": evaluation.expected_room_id,
-        "expected_room_name": evaluation.expected_room_name,
-        "observed_room_id": evaluation.observed_room_id,
-        "observed_room_name": evaluation.observed_room_name,
-        "seconds_since_last_command": evaluation.seconds_since_last_command,
-    }
-
-
-def _reconcile_decision_response(
-    evaluation: RuntimeReconcileEvaluation,
-) -> dict[str, Any]:
-    """Return a serializable reconcile decision snapshot."""
-    decision = evaluation.decision
-    return {
-        "complete_current_room": decision.complete_current_room,
-        "event_reasons": list(decision.event_reasons),
-        "mark_out_of_sync_reason": decision.mark_out_of_sync_reason,
-        "reset_dispatch_retry_count": decision.reset_dispatch_retry_count,
-        "resume_current_room": decision.resume_current_room,
-        "retry_current_room": decision.retry_current_room,
-        "set_active_room_confirmed_since_dispatch": (
-            decision.set_active_room_confirmed_since_dispatch
+        "decision": (
+            None
+            if decision is None
+            else {**asdict(decision), "tracking": _run_tracking_response(decision.tracking)}
         ),
-        "set_post_run_maintenance_seen": decision.set_post_run_maintenance_seen,
-        "set_task_status_cleared_since_dispatch": decision.set_task_status_cleared_since_dispatch,
-    }
-
-
-def _reconcile_result_response(result: RuntimeReconcileResult) -> dict[str, Any]:
-    """Return a serializable applied reconcile result snapshot."""
-    return {
-        "command_intent": result.command_intent,
-        "command_item_id": result.command_item_id,
-        "event_reasons": list(result.event_reasons),
+        "evaluation": {
+            "awaiting_completion_event": decision is not None,
+            "expected_room_id": item.room_id if item else None,
+            "expected_room_name": item.room_name if item else None,
+            "seconds_since_last_command": evaluation.seconds_since_command,
+        },
+        "observation": asdict(evaluation.observation),
     }
 
 
