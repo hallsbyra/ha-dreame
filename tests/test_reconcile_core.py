@@ -86,6 +86,7 @@ def test_reconcile_completed_unconfirmed_wrong_room_marks_out_of_sync() -> None:
         expected_room_name="Dining Room",
         observed_room_name="Porch",
         active_room_confirmed_since_dispatch=False,
+        seconds_since_last_command=30,
     )
 
     assert decision.complete_current_room is False
@@ -94,6 +95,27 @@ def test_reconcile_completed_unconfirmed_wrong_room_marks_out_of_sync() -> None:
         "task_completed_unconfirmed_room:expected_3:observed_1"
     )
     assert decision.event_reasons == ("task_status_completed_unconfirmed_room",)
+
+
+def test_reconcile_completed_unconfirmed_wrong_room_right_after_dispatch_waits() -> None:
+    """Test a reconnect replay of the previous task's completion cannot end a fresh dispatch."""
+    decision = _decision(
+        vacuum_state="docked",
+        task_status="completed",
+        task_status_cleared_since_dispatch=True,
+        expected_room_id=3,
+        observed_room_id=7,
+        expected_room_name="Dining Room",
+        observed_room_name="Hall",
+        active_room_confirmed_since_dispatch=False,
+        seconds_since_last_command=3,
+        dispatch_retry_interval_sec=20,
+    )
+
+    assert decision.complete_current_room is False
+    assert decision.retry_current_room is False
+    assert decision.mark_out_of_sync_reason is None
+    assert decision.event_reasons == ("task_status_completed_unconfirmed_room_waiting",)
 
 
 def test_reconcile_completed_after_manual_pause_return_marks_out_of_sync() -> None:

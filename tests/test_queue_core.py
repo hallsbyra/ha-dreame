@@ -133,6 +133,37 @@ def test_add_room_after_terminal_run_starts_fresh_pending_queue(
     assert state.items[0].overrides == {}
 
 
+@pytest.mark.parametrize(
+    "reason",
+    ["vacuum_route_error:expected_1:observed_5", "stopped_from_app"],
+)
+def test_add_room_after_failed_run_keeps_room_needing_review(reason: str) -> None:
+    """Test a new room does not hide the room the robot may still be cleaning."""
+    state = start_run(_seed_three_rooms())
+    state = complete_current_room(state)
+    state = update_item_overrides(state, item_id=state.items[2].item_id, overrides={"repeats": 2})
+    state = external_takeover(state, reason=reason)
+
+    state = add_room(state, room_id=7, room_name="Bathroom")
+
+    assert state.run_state == "idle"
+    assert state.run_id is None
+    assert state.current_item_id is None
+    assert [(item.room_name, item.status) for item in state.items] == [
+        ("Hall", "needs_attention"),
+        ("Bathroom", "pending"),
+    ]
+    assert state.items[0].result == reason
+    assert state.items[1].overrides == {}
+
+    state = start_run(state)
+
+    assert [(item.room_name, item.status) for item in state.items] == [
+        ("Hall", "needs_attention"),
+        ("Bathroom", "running"),
+    ]
+
+
 def test_start_run_sets_run_state_and_first_room_running() -> None:
     """Test starting a run marks the first pending room as running."""
     state = start_run(_seed_three_rooms())
