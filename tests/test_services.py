@@ -1876,14 +1876,19 @@ async def test_skip_current_room_service_advances_and_dispatches_next_room(
 async def test_skip_current_room_service_sends_final_skipped_room_home(
     hass: HomeAssistant,
 ) -> None:
-    """Test skipping the final running room sends the robot home."""
+    """Test skipping the final running room stops the robot before sending it home."""
     clean_calls: list[dict[str, object]] = []
     dock_calls: list[dict[str, object]] = []
+    robot_calls: list[str] = []
+
+    async def _record_stop(call: ServiceCall) -> None:
+        robot_calls.append("stop")
 
     async def _record_clean_segment(call: ServiceCall) -> None:
         clean_calls.append(dict(call.data))
 
     async def _record_return_to_base(call: ServiceCall) -> None:
+        robot_calls.append("return_to_base")
         dock_calls.append(dict(call.data))
 
     hass.services.async_register(
@@ -1891,6 +1896,7 @@ async def test_skip_current_room_service_sends_final_skipped_room_home(
         "vacuum_clean_segment",
         _record_clean_segment,
     )
+    hass.services.async_register("vacuum", "stop", _record_stop)
     hass.services.async_register("vacuum", "return_to_base", _record_return_to_base)
     vacuum_entity_id = register_entity(hass, "vacuum.dreame_robot")
     entry = mock_entry(
@@ -1916,6 +1922,7 @@ async def test_skip_current_room_service_sends_final_skipped_room_home(
     skipped_item = queue_state.items[0]
     assert clean_calls == [{"entity_id": vacuum_entity_id, "segments": [7]}]
     assert dock_calls == [{"entity_id": vacuum_entity_id}]
+    assert robot_calls == ["stop", "return_to_base"]
     assert queue_state.run_state == "completed"
     assert queue_state.current_item_id is None
     assert skipped_item.status == "skipped"

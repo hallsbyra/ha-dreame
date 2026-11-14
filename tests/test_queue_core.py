@@ -256,6 +256,17 @@ def test_remove_rejects_running_and_terminal_items() -> None:
         remove_item(state, item_id="missing")
 
 
+def test_removing_last_pending_room_while_waiting_for_tanks_disarms_start() -> None:
+    """Test a tank wait without pending rooms returns to idle instead of staying armed."""
+    review = QueueItem(item_id="review", room_id=1, room_name="Kitchen", status="needs_attention")
+    pending = QueueItem(item_id="pending", room_id=2, room_name="Hall")
+    state = QueueState(run_state="waiting_for_tanks", items=(review, pending))
+
+    state = remove_item(state, item_id="pending")
+
+    assert state == QueueState(items=(review,))
+
+
 def test_move_item_before_run_changes_order() -> None:
     """Test pending rooms can be reordered before the run starts."""
     state = _seed_three_rooms()

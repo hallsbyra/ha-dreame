@@ -1,5 +1,7 @@
 """Tests for pure reconciliation decisions."""
 
+import pytest
+
 from custom_components.ha_dreame.queue_core import (
     ReconcileDecision,
     evaluate_reconcile_tick,
@@ -116,6 +118,63 @@ def test_reconcile_completed_unconfirmed_wrong_room_right_after_dispatch_waits()
     assert decision.retry_current_room is False
     assert decision.mark_out_of_sync_reason is None
     assert decision.event_reasons == ("task_status_completed_unconfirmed_room_waiting",)
+
+
+def test_reconcile_unconfirmed_completion_with_unknown_room_right_after_dispatch_waits() -> None:
+    """Test a replayed completion cannot end a fresh dispatch while the room sensor is missing."""
+    decision = _decision(
+        vacuum_state="docked",
+        task_status="completed",
+        task_status_cleared_since_dispatch=True,
+        observed_room_id=None,
+        active_room_confirmed_since_dispatch=False,
+        seconds_since_last_command=3,
+        dispatch_retry_interval_sec=20,
+    )
+
+    assert decision.complete_current_room is False
+    assert decision.mark_out_of_sync_reason is None
+    assert decision.event_reasons == ("task_status_completed_unconfirmed_room_waiting",)
+
+
+def test_reconcile_unconfirmed_completion_with_unknown_room_completes_after_interval() -> None:
+    """Test installs without a room signal can still complete rooms."""
+    decision = _decision(
+        vacuum_state="docked",
+        task_status="completed",
+        task_status_cleared_since_dispatch=True,
+        observed_room_id=None,
+        active_room_confirmed_since_dispatch=False,
+        seconds_since_last_command=30,
+        dispatch_retry_interval_sec=20,
+    )
+
+    assert decision.complete_current_room is True
+
+
+@pytest.mark.parametrize("cleaning_progress", [None, 3, 40])
+def test_reconcile_room_flip_after_confirmation_never_redispatches(
+    cleaning_progress: int | None,
+) -> None:
+    """Test a confirmed room is not redispatched when the room sensor flips mid-run."""
+    decision = _decision(
+        vacuum_state="cleaning",
+        task_status="room_cleaning",
+        expected_room_id=3,
+        observed_room_id=4,
+        active_room_confirmed_since_dispatch=True,
+        cleaning_progress=cleaning_progress,
+        seconds_since_last_command=300,
+        active_room_mismatch_required_streak=1,
+        active_room_mismatch_min_progress=1,
+        active_room_mismatch_max_progress=90,
+    )
+
+    assert decision.retry_current_room is False
+    assert decision.mark_out_of_sync_reason is None
+    assert decision.event_reasons == (
+        "active_room_mismatch_after_confirmation:expected_3:observed_4",
+    )
 
 
 def test_reconcile_completed_after_manual_pause_return_marks_out_of_sync() -> None:
