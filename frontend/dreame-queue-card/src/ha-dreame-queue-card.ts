@@ -11,7 +11,11 @@ import {
   type HomeAssistantLike,
 } from "./card-view";
 import { queueRunStateLabel } from "./queue";
-import { cycledOverrides, type OverrideField } from "./queue-overrides";
+import {
+  cycledOverrides,
+  DEFAULT_OVERRIDE_LABEL,
+  type OverrideField,
+} from "./queue-overrides";
 
 class HaDreameQueueCard extends LitElement {
   static properties = {
@@ -604,7 +608,7 @@ class HaDreameQueueCard extends LitElement {
   }
 
   private _renderOverrideValue(field: OverrideField, valueLabel: string) {
-    if (field === "repeats") {
+    if (field === "repeats" || valueLabel === DEFAULT_OVERRIDE_LABEL) {
       return html`<span>${valueLabel}</span>`;
     }
 

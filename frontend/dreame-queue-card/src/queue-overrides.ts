@@ -28,11 +28,9 @@ const FIELD_OPTIONS: Record<OverrideField, OverrideOption[]> = {
   ],
 };
 
-const FIELD_FALLBACK_VALUE: Record<OverrideField, number> = {
-  water_volume: 2,
-  suction_level: 1,
-  repeats: 1,
-};
+// Shown for a field the item does not override: dispatch then leaves the robot's own
+// current setting in place.
+export const DEFAULT_OVERRIDE_LABEL = "Default";
 
 function toIntOrNull(value: unknown): number | null {
   if (value === null || value === undefined) {
@@ -54,28 +52,29 @@ function definedOverrides(overrides: OverridesDict | undefined): OverridesDict {
   );
 }
 
-export function resolvedOverrideValue(
-  field: OverrideField,
-  overrides: OverridesDict | undefined,
-): number {
-  return toIntOrNull(overrides?.[field]) ?? FIELD_FALLBACK_VALUE[field];
-}
-
 export function overrideLabel(field: OverrideField, overrides: OverridesDict | undefined): string {
-  const value = resolvedOverrideValue(field, overrides);
+  const value = toIntOrNull(overrides?.[field]);
+  if (value === null) {
+    return DEFAULT_OVERRIDE_LABEL;
+  }
   const option = FIELD_OPTIONS[field].find((item) => item.value === value);
   return option ? option.label : String(value);
 }
 
+/** Step a field to its next option; after the last option the field returns to Default. */
 export function cycledOverrides(
   field: OverrideField,
   overrides: OverridesDict | undefined,
 ): OverridesDict {
   const next = definedOverrides(overrides);
   const options = FIELD_OPTIONS[field];
-  const current = resolvedOverrideValue(field, next);
-  const currentIndex = options.findIndex((option) => option.value === current);
-  const nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % options.length;
-  next[field] = options[nextIndex].value;
+  const current = toIntOrNull(next[field]);
+  const currentIndex =
+    current === null ? -1 : options.findIndex((option) => option.value === current);
+  if (currentIndex < options.length - 1) {
+    next[field] = options[currentIndex + 1].value;
+  } else {
+    delete next[field];
+  }
   return next;
 }

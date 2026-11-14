@@ -291,13 +291,17 @@ examples only.
 ### Queue Editing Preserves Visible And Previous Settings
 
 - Confidence: `Observed`
-- Behavior: an override control with no stored value still displays its field fallback. Its first
-  click advances from that displayed value. A room added to a non-terminal queue inherits the
-  previous queue item's overrides unless explicit overrides are supplied.
-- Controller implication: cycle controls from their resolved display value and copy the latest
-  item's overrides when appending a room. Do not carry overrides across a terminal queue reset.
-- Test implication: cover the first click for missing overrides, inherited overrides for appended
-  rooms, explicit empty overrides, and fresh queues after terminal states.
+- Behavior: a room added to a non-terminal queue inherits the previous queue item's overrides
+  unless explicit overrides are supplied. A field without a stored override is not sent at
+  dispatch, so the robot keeps its own current setting for it.
+- Controller implication: copy the latest item's overrides when appending a room, and do not carry
+  overrides across a terminal queue reset. An override control without a stored value shows
+  `Default` rather than a made-up level. Its first click advances from `Default` to the field's
+  first option, and stepping past the last option returns the field to `Default` by leaving it out
+  of the item's overrides (`update_queue_item_overrides` replaces the whole dict).
+- Test implication: cover `Default` and the first click for missing overrides, the step back to
+  `Default`, inherited overrides for appended rooms, explicit empty overrides, and fresh queues
+  after terminal states.
 
 ### Mop Remove/Install Transitions Are In-Run Maintenance
 
