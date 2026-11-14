@@ -5,6 +5,7 @@ import {
   CARD_EDITOR_TAG,
   CARD_ELEMENT_TAG,
   defaultCardConfig,
+  serviceErrorText,
   type ActiveQueueService,
   type CardOverrideControl,
   type HaDreameQueueCardConfig,
@@ -727,10 +728,7 @@ class HaDreameQueueCard extends LitElement {
         config_entry_id: configEntryId,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error ?? "");
-      this._serviceError = message.includes("previous robot task is still active")
-        ? "Robot is still finishing a previous task. Try again when it is ready."
-        : "The queue command failed. Check Home Assistant for details.";
+      this._serviceError = serviceErrorText(error);
     }
   }
 

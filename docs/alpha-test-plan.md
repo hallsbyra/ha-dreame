@@ -133,11 +133,11 @@ Do not let two integration instances or controllers send robot commands to the s
 1. Confirm no other integration instance or controller is about to start or continue a run.
 2. Add one low-risk room to the `ha_dreame` queue.
 3. Call `ha_dreame.get_control_readiness` and confirm the queue has a pending
-   item, the selected vacuum is available, and only `allow_robot_commands` is
-   blocking control readiness.
+   item, the selected vacuum is available, and `blocked_reasons.start_queue` is
+   `commands_disabled`.
 4. Enable `allow_robot_commands`.
 5. Call `ha_dreame.get_control_readiness` again and confirm `start_queue` is in
-   `available_actions`.
+   `allowed_actions`.
 6. Start the queue from `ha_dreame`. Automatic reconciliation completes the
    room and dispatches any next room while robot commands stay allowed.
 7. Observe the queue status sensor, robot state, task status, and Home Assistant

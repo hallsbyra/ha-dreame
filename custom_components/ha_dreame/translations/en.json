@@ -22,7 +22,7 @@
     "step": {
       "init": {
         "title": "HA Dreame options",
-        "description": "Robot command dispatch is disabled by default while testing HA Dreame beside another controller.",
+        "description": "Robot command dispatch is disabled by default. Allowing it also lets HA Dreame reconcile the running queue with the robot automatically.",
         "data": {
           "allow_robot_commands": "Allow HA Dreame to send robot commands",
           "clean_water_tank_status_entity_id": "Clean water tank status sensor",
@@ -37,6 +37,35 @@
     },
     "error": {
       "entity_not_found": "The selected entity does not exist."
+    }
+  },
+  "exceptions": {
+    "commands_disabled": {
+      "message": "HA Dreame robot commands are disabled."
+    },
+    "robot_unavailable": {
+      "message": "The robot is unavailable."
+    },
+    "robot_busy": {
+      "message": "The robot is still busy with a previous task."
+    },
+    "robot_error": {
+      "message": "The robot reports an error."
+    },
+    "tank_attention": {
+      "message": "A water tank needs attention."
+    },
+    "queue_empty": {
+      "message": "The queue has no pending rooms."
+    },
+    "run_active": {
+      "message": "The queue is already running."
+    },
+    "not_running": {
+      "message": "The queue is not running."
+    },
+    "not_interrupted": {
+      "message": "The robot is not waiting for user action."
     }
   }
 }

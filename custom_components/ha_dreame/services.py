@@ -18,6 +18,8 @@ from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
     ATTR_ACTIVE_ROOM_CONFIRMED_SINCE_DISPATCH,
+    ATTR_ALLOWED_ACTIONS,
+    ATTR_BLOCKED_REASONS,
     ATTR_COMPLETED_ITEMS,
     ATTR_CURRENT_ITEM_ID,
     ATTR_DISPATCH_RETRY_COUNT,
@@ -57,6 +59,20 @@ from .const import (
     VACUUM_DOMAIN,
     companion_entity_id,
 )
+from .control_core import (
+    COMMANDS_DISABLED,
+    INAPPLICABLE_REASONS,
+    NOT_INTERRUPTED,
+    NOT_RUNNING,
+    QUEUE_EMPTY,
+    ROBOT_BUSY,
+    ROBOT_ERROR,
+    ROBOT_UNAVAILABLE,
+    RUN_ACTIVE,
+    TANK_ATTENTION,
+    robot_status,
+    start_readiness,
+)
 from .dispatch_executor import async_dispatch_current_room, current_room_dispatch_plan
 from .audit import async_call_robot_service, service_audit
 from .queue_core import (
@@ -77,8 +93,7 @@ from .queue_core import (
 from .queue_snapshot import count_queue_items, queue_item_snapshots
 from .runtime import HaDreameRuntimeData
 from .reconcile import ReconcileEvaluation, evaluate_reconcile
-from .reconcile_core import Observation, is_meaningful_error
-from .runtime_observation import normalize_signal
+from .reconcile_core import Observation
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -159,10 +174,38 @@ def async_remove_services(hass: HomeAssistant) -> None:
         hass.services.async_remove(DOMAIN, name)
 
 
-def _require_commands(runtime_data: HaDreameRuntimeData) -> None:
-    """Reject a command handler before it changes queue state without the robot."""
-    if not runtime_data.commands_enabled:
-        raise HomeAssistantError("HA Dreame robot commands are disabled")
+REASON_MESSAGES = {
+    COMMANDS_DISABLED: "HA Dreame robot commands are disabled",
+    ROBOT_UNAVAILABLE: "Robot is unavailable",
+    ROBOT_BUSY: "Cannot start queue while a previous robot task is still active",
+    ROBOT_ERROR: "Robot reports an error",
+    TANK_ATTENTION: "A water tank needs attention",
+    QUEUE_EMPTY: "Queue has no pending rooms",
+    RUN_ACTIVE: "Queue is already running",
+    NOT_RUNNING: "Queue is not running",
+    NOT_INTERRUPTED: "Robot is not waiting for user action",
+}
+
+
+def _require_allowed(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    action: str,
+    observation: Observation | None = None,
+) -> Observation:
+    """Reject an action the control state blocks, carrying its reason code.
+
+    The reason is the error's translation key. Returns the observation it decided on.
+    """
+    runtime_data: HaDreameRuntimeData = entry.runtime_data
+    if observation is None:
+        observation = runtime_data.observe(hass)
+    reason = runtime_data.control_state(hass, observation).reason(action)
+    if reason is not None:
+        raise HomeAssistantError(
+            REASON_MESSAGES[reason], translation_domain=DOMAIN, translation_key=reason
+        )
+    return observation
 
 
 def _runtime_entry(hass: HomeAssistant, config_entry_id: str) -> ConfigEntry:
@@ -221,8 +264,7 @@ async def _async_cancel_queue(
 ) -> dict[str, Any]:
     """Cancel the runtime queue and send the robot back to base."""
     runtime_data = entry.runtime_data
-
-    _require_commands(runtime_data)
+    _require_allowed(hass, entry, SERVICE_CANCEL_QUEUE)
 
     if runtime_data.queue_state.run_state == "waiting_for_tanks":
         runtime_data.set_queue_state(cancel_run(runtime_data.queue_state))
@@ -257,6 +299,7 @@ async def _async_skip_current_room(
 ) -> dict[str, Any]:
     """Skip the current room and continue or finish the runtime queue."""
     runtime_data = entry.runtime_data
+    _require_allowed(hass, entry, SERVICE_SKIP_CURRENT_ROOM)
 
     try:
         queue_state = skip_current_room(runtime_data.queue_state, reason="skip_pressed")
@@ -297,20 +340,9 @@ async def _async_resume_queue(
 ) -> dict[str, Any]:
     """Resume an interrupted active queue run through the vacuum start command."""
     runtime_data = entry.runtime_data
-
-    if runtime_data.queue_state.run_state != "running":
-        raise HomeAssistantError("Queue is not running")
-
+    observation = _require_allowed(hass, entry, SERVICE_RESUME_QUEUE)
     dispatch = runtime_data.queue_state.dispatch
-    if dispatch is None:
-        raise HomeAssistantError("Queue run tracking is not active")
-
-    observation = runtime_data.observe(hass)
-    robot_status = _robot_status_response(observation)
-    if observation.water_tank_block_reason:
-        raise HomeAssistantError(observation.water_tank_block_reason)
-    if not robot_status["interrupted"]:
-        raise HomeAssistantError("Robot is not waiting for user action")
+    assert dispatch is not None
 
     await async_call_robot_service(
         hass,
@@ -334,7 +366,7 @@ async def _async_resume_queue(
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
         CONF_VACUUM_ENTITY_ID: runtime_data.vacuum_entity_id,
         "resumed": True,
-        "robot_status": robot_status,
+        "robot_status": robot_status(observation),
     }
 
 
@@ -373,13 +405,7 @@ async def _async_start_queue(
 ) -> dict[str, Any]:
     """Start queue execution and dispatch the first pending room."""
     runtime_data: HaDreameRuntimeData = entry.runtime_data
-
-    _require_commands(runtime_data)
-
-    if observation is None:
-        observation = runtime_data.observe(hass)
-    if observation.task_status and normalize_signal(observation.task_status) != "completed":
-        raise HomeAssistantError("Cannot start queue while a previous robot task is still active")
+    observation = _require_allowed(hass, entry, SERVICE_START_QUEUE, observation)
     try:
         queue_state = start_run(runtime_data.queue_state)
     except QueueError as err:
@@ -387,9 +413,7 @@ async def _async_start_queue(
     # Validate the room's profile before accepting a deferred start.
     plan = current_room_dispatch_plan(hass, runtime_data, queue_state)
 
-    if observation.water_tank_block_reason:
-        if not _entity_available(hass, runtime_data.vacuum_entity_id):
-            raise HomeAssistantError("Robot is unavailable")
+    if start_readiness(observation) == TANK_ATTENTION:
         runtime_data.set_queue_state(
             replace(runtime_data.queue_state, run_state="waiting_for_tanks")
         )
@@ -415,14 +439,7 @@ async def async_start_waiting_queue(hass: HomeAssistant, entry: ConfigEntry) -> 
     if runtime_data.queue_state.run_state != "waiting_for_tanks":
         return
     observation = runtime_data.observe(hass)
-    if (
-        observation.water_tank_block_reason
-        or normalize_signal(observation.vacuum_state)
-        in {"", "unknown", "unavailable", "error", "paused", "cleaning", "returning"}
-        or observation.robot_paused
-        or normalize_signal(observation.task_status) != "completed"
-        or is_meaningful_error(normalize_signal(observation.vacuum_error_code))
-    ):
+    if start_readiness(observation) is not None:
         return
     # Disarm before dispatch: a service failure must not create an invisible retry loop.
     runtime_data.set_queue_state(replace(runtime_data.queue_state, run_state="idle"))
@@ -475,8 +492,9 @@ async def _async_control_readiness(
     """Return a read-only manual control preflight snapshot."""
     runtime_data = entry.runtime_data
     queue_state = runtime_data.queue_state
-    pending_items = count_queue_items(queue_state, "pending")
-    running_items = count_queue_items(queue_state, "running")
+    observation = runtime_data.observe(hass)
+    control = runtime_data.control_state(hass, observation)
+    status = robot_status(observation)
     vacuum_available = _entity_available(hass, runtime_data.vacuum_entity_id)
     companion_entities = _running_override_companion_entities(
         hass,
@@ -485,60 +503,43 @@ async def _async_control_readiness(
     running_override_ready = queue_state.run_state == "running" and all(
         entity["available"] for entity in companion_entities.values()
     )
-    robot_status = _robot_status_response(runtime_data.observe(hass))
-    available_actions: list[str] = []
-    blocking_reasons: list[str] = []
-
-    if not vacuum_available:
-        blocking_reasons.append("vacuum_entity_unavailable")
-    if not runtime_data.commands_enabled:
-        blocking_reasons.append("robot_commands_disabled")
-
-    can_offer_command_actions = runtime_data.commands_enabled and vacuum_available
-    tank_block = any(
-        reason.endswith("_tank_not_ready") for reason in robot_status["interruption_reasons"]
-    )
-    if tank_block:
-        blocking_reasons.extend(
+    available_actions = list(control.allowed_actions)
+    if (
+        running_override_ready
+        and runtime_data.commands_enabled
+        and vacuum_available
+        and not status["interrupted"]
+    ):
+        available_actions.append(SERVICE_UPDATE_RUNNING_OVERRIDE)
+    blocking_reasons = list(
+        dict.fromkeys(
             reason
-            for reason in robot_status["interruption_reasons"]
-            if reason.endswith("_tank_not_ready")
+            for reason in control.blocked_reasons.values()
+            if reason not in INAPPLICABLE_REASONS
         )
-    if queue_state.run_state == "idle":
-        if can_offer_command_actions and pending_items > 0:
-            available_actions.append(SERVICE_START_QUEUE)
-        elif pending_items == 0:
-            blocking_reasons.append("queue_has_no_pending_items")
-    elif queue_state.run_state == "waiting_for_tanks":
-        available_actions.append(SERVICE_CANCEL_QUEUE)
-    elif queue_state.run_state == "running":
-        if can_offer_command_actions:
-            if robot_status["interrupted"]:
-                if not tank_block:
-                    available_actions.append(SERVICE_RESUME_QUEUE)
-                available_actions.append(SERVICE_CANCEL_QUEUE)
-            else:
-                available_actions.extend([SERVICE_CANCEL_QUEUE, SERVICE_SKIP_CURRENT_ROOM])
-            if running_override_ready and not robot_status["interrupted"]:
-                available_actions.append(SERVICE_UPDATE_RUNNING_OVERRIDE)
-        if not running_override_ready and not robot_status["interrupted"]:
-            blocking_reasons.append("running_override_entities_unavailable")
-    elif can_offer_command_actions:
-        blocking_reasons.append("queue_state_not_actionable")
+    )
+    if (
+        queue_state.run_state == "running"
+        and not running_override_ready
+        and not status["interrupted"]
+    ):
+        blocking_reasons.append("running_override_entities_unavailable")
 
     return {
         CONF_ALLOW_ROBOT_COMMANDS: runtime_data.commands_enabled,
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
         CONF_VACUUM_ENTITY_ID: runtime_data.vacuum_entity_id,
-        ATTR_PENDING_ITEMS: pending_items,
-        ATTR_RUNNING_ITEMS: running_items,
+        ATTR_PENDING_ITEMS: count_queue_items(queue_state, "pending"),
+        ATTR_RUNNING_ITEMS: count_queue_items(queue_state, "running"),
+        ATTR_ALLOWED_ACTIONS: list(control.allowed_actions),
         "available_actions": available_actions,
+        ATTR_BLOCKED_REASONS: dict(control.blocked_reasons),
         "blocking_reasons": blocking_reasons,
         "companion_entities": companion_entities,
         "queue_run_state": queue_state.run_state,
         "ready_for_control_window": bool(available_actions),
         "ready_for_read_only_observation": vacuum_available,
-        "robot_status": robot_status,
+        "robot_status": status,
         "running_override_ready": running_override_ready,
         "vacuum_available": vacuum_available,
     }
@@ -594,40 +595,8 @@ async def _async_runtime_status(
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
         ATTR_RUN_TRACKING: _run_tracking_response(runtime_data.queue_state),
         "recent_activity": list(runtime_data.recent_activity),
-        "robot_status": _robot_status_response(runtime_data.observe(hass)),
+        "robot_status": robot_status(runtime_data.observe(hass)),
         CONF_VACUUM_ENTITY_ID: runtime_data.vacuum_entity_id,
-    }
-
-
-def _robot_status_response(observation: Observation) -> dict[str, Any]:
-    """Return robot interruption status derived from read-only companion entities."""
-    vacuum_state = normalize_signal(observation.vacuum_state)
-    task_status = normalize_signal(observation.task_status)
-    error_code = normalize_signal(observation.vacuum_error_code)
-
-    interruption_reasons: list[str] = []
-    if vacuum_state == "paused":
-        interruption_reasons.append("vacuum_paused")
-    elif observation.robot_paused:
-        interruption_reasons.append("robot_paused")
-    if observation.water_tank_block_reason:
-        interruption_reasons.append(observation.water_tank_block_reason)
-    if task_status.endswith("_paused"):
-        interruption_reasons.append("task_status_paused")
-    interruption_context = bool(interruption_reasons) or vacuum_state == "error"
-    if vacuum_state == "error":
-        interruption_reasons.append(
-            f"vacuum_error:{error_code}" if is_meaningful_error(error_code) else "vacuum_error"
-        )
-    elif interruption_context and is_meaningful_error(error_code):
-        interruption_reasons.append(f"vacuum_error:{error_code}")
-
-    return {
-        "error_code": error_code,
-        "interruption_reasons": interruption_reasons,
-        "interrupted": bool(interruption_reasons),
-        "task_status": task_status,
-        "vacuum_state": vacuum_state,
     }
 
 

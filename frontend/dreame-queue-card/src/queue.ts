@@ -10,6 +10,10 @@ export type QueueItem = {
 export type QueueSnapshot = {
   runState: string;
   allowRobotCommands: boolean | null;
+  /** Queue services the backend allows now; null when the backend does not publish them. */
+  allowedActions: string[] | null;
+  /** Reason code per blocked queue service; null when the backend does not publish them. */
+  blockedReasons: Record<string, string> | null;
   configEntryId: string | null;
   vacuumEntityId: string | null;
   pendingItems: number;
@@ -47,6 +51,18 @@ function nonNegativeInt(value: unknown): number | null {
 
 function optionalBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
+}
+
+function stringList(value: unknown): string[] | null {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string")
+    ? [...value]
+    : null;
+}
+
+function stringRecord(value: unknown): Record<string, string> | null {
+  return isRecord(value) && Object.values(value).every((entry) => typeof entry === "string")
+    ? { ...(value as Record<string, string>) }
+    : null;
 }
 
 function countByStatus(items: QueueItem[], status: string): number {
@@ -131,6 +147,8 @@ export function parseQueueSnapshot(stateObject: HomeAssistantState | undefined):
   return {
     runState: normalizedRunState(stateObject?.state) || "unknown",
     allowRobotCommands: optionalBoolean(attrs["allow_robot_commands"]),
+    allowedActions: stringList(attrs["allowed_actions"]),
+    blockedReasons: stringRecord(attrs["blocked_reasons"]),
     configEntryId:
       typeof attrs["config_entry_id"] === "string" ? attrs["config_entry_id"] : null,
     vacuumEntityId:

@@ -50,6 +50,34 @@ the config entry. It reports the command gate, selected vacuum availability,
 queue state, companion entities for running overrides, and the actions that are
 currently safe to test without sending any robot command.
 
+### What The User May Do Now
+
+One decision covers the queue actions `start_queue`, `resume_queue`,
+`skip_current_room` and `cancel_queue`. The services enforce it, the queue status
+sensor publishes it, `get_control_readiness` returns it and the card renders it:
+
+- `allowed_actions`: the queue services allowed now.
+- `blocked_reasons`: a mapping from each other queue service to a reason code.
+
+The sensor recomputes both when the queue or the robot's observed state changes. A
+rejected service call carries the reason code as its error translation key.
+
+| Reason code | Meaning |
+|---|---|
+| `commands_disabled` | `allow_robot_commands` is off. |
+| `robot_unavailable` | The vacuum is missing, `unknown` or `unavailable`. |
+| `robot_busy` | A previous robot task is still active, or the robot is cleaning, returning or paused. |
+| `robot_error` | The robot reports an error. |
+| `tank_attention` | A water tank needs attention, so the run cannot continue yet. |
+| `queue_empty` | No pending rooms to start. |
+| `run_active` | The queue is already running. |
+| `not_running` | No run is active, so there is nothing to resume, skip or cancel. |
+| `not_interrupted` | The robot is not waiting for user action, so there is nothing to resume. |
+
+Start with a water tank problem is allowed: it arms a waiting start that begins
+automatically once the tanks and robot are ready. Canceling a waiting start needs no
+robot command and is always allowed.
+
 ## Dashboard Card
 
 The integration serves the packaged queue card from:

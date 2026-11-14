@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Any
 
 from homeassistant.core import HomeAssistant, State
@@ -75,6 +75,18 @@ class RuntimeObservationEntityIds:
                 for option, suffix in OBSERVATION_SENSOR_SUFFIXES.items()
             }
         )
+
+
+def observed_entity_ids(
+    vacuum_entity_id: str, entity_ids: RuntimeObservationEntityIds
+) -> tuple[str, ...]:
+    """Return every entity an observation of this vacuum reads."""
+    return (
+        vacuum_entity_id,
+        *(getattr(entity_ids, field.name) for field in fields(entity_ids)),
+        companion_entity_id(vacuum_entity_id, "sensor", "dirty_water_tank_status"),
+        companion_entity_id(vacuum_entity_id, "sensor", "status"),
+    )
 
 
 def build_runtime_reconcile_observation(

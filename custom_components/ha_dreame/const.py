@@ -1,6 +1,8 @@
 """Constants for HA Dreame."""
 
 ATTR_ACTIVE_ROOM_CONFIRMED_SINCE_DISPATCH = "active_room_confirmed_since_dispatch"
+ATTR_ALLOWED_ACTIONS = "allowed_actions"
+ATTR_BLOCKED_REASONS = "blocked_reasons"
 ATTR_COMPLETED_ITEMS = "completed_items"
 ATTR_CURRENT_ITEM_ID = "current_item_id"
 ATTR_DISPATCH_RETRY_COUNT = "dispatch_retry_count"

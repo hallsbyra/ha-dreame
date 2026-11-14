@@ -10,8 +10,13 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
+from .control_core import ControlState, control_state
 from .queue_core import QueueItem, QueueState, current_item
-from .runtime_observation import RuntimeObservationEntityIds, build_runtime_reconcile_observation
+from .runtime_observation import (
+    RuntimeObservationEntityIds,
+    build_runtime_reconcile_observation,
+    observed_entity_ids,
+)
 from .reconcile_core import Observation
 
 
@@ -39,6 +44,21 @@ class HaDreameRuntimeData:
             vacuum_entity_id=self.vacuum_entity_id,
             entity_ids=self.observation_entity_ids,
             task_status_override=task_status_override,
+        )
+
+    @property
+    def observed_entity_ids(self) -> tuple[str, ...]:
+        """Return every entity whose state feeds an observation of this robot."""
+        return observed_entity_ids(self.vacuum_entity_id, self.observation_entity_ids)
+
+    def control_state(
+        self, hass: HomeAssistant, observation: Observation | None = None
+    ) -> ControlState:
+        """Return which queue actions the user may take now."""
+        return control_state(
+            self.queue_state,
+            self.observe(hass) if observation is None else observation,
+            self.commands_enabled,
         )
 
     def awaited_item(self) -> QueueItem | None:

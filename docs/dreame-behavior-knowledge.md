@@ -71,6 +71,31 @@ examples only.
   reconcile option, other
   robot states and failed dispatch.
 
+### One Control State Decides What The User May Do
+
+- Confidence: `Inferred`: a design rule that applies the observed Start and tank-wait
+  entries below to every place that offers queue actions.
+- Behavior: the service guards, the control readiness service and the card each
+  derived whether Start, Continue, Skip and Cancel were possible, and disagreed. The
+  readiness service offered Start while the previous robot task was still active,
+  Start checked vacuum availability only for a tank-blocked queue, Start accepted an
+  absent task status while the tank-wait release demanded `completed`, and the card
+  recognized one backend rejection by matching its English message.
+- Controller implication: a pure `control_state(queue, observation, commands_enabled)`
+  allows each queue action or blocks it with a stable reason code. Services reject
+  with that code, the queue status sensor publishes `allowed_actions` and
+  `blocked_reasons` (recomputed on robot state changes, written only when they change),
+  and the card renders them. Start and the tank-wait release share one readiness rule:
+  the vacuum is available, no previous task is active (an absent task status counts as
+  none), and the robot is not cleaning, returning, paused or in error. A tank problem
+  turns Start into a waiting start instead of a rejection. Start therefore no longer
+  dispatches to a paused robot or one that reports an error with a settled task, which
+  it used to. Cancel applies only to a running or waiting queue, and canceling a waiting
+  start needs no command gate because it sends no robot command.
+- Test implication: pure control-state coverage per reason, service rejections carrying
+  the reason, readiness and sensor attributes, sensor recomputation on robot changes,
+  and card rendering from the attributes with a fail-safe for an older backend.
+
 ### Paused Tasks Hidden By Docked/Drying State (2026-09-05)
 
 - Confidence: `Observed`.

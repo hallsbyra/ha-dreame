@@ -57,10 +57,39 @@ export type CardActiveControl = {
   service: ActiveQueueService;
 };
 
-type StartBlock = {
-  control: CardActiveControl;
-  summary: string;
+type ControlBase = Pick<CardActiveControl, "ariaLabel" | "label" | "service">;
+
+export const CONTROLS_UNAVAILABLE_REASON = "Queue controls are unavailable";
+const UNKNOWN_REASON = "Not available right now";
+const REASON_TEXTS: Record<string, string> = {
+  commands_disabled: "Robot commands disabled",
+  robot_unavailable: "Robot is unavailable",
+  robot_busy: "Waiting for the previous robot task to finish",
+  robot_error: "Robot reports an error",
+  tank_attention: "Check the water tanks",
+  queue_empty: "No rooms are queued",
+  run_active: "Queue is already running",
+  not_running: "Queue is not running",
+  not_interrupted: "Robot is not waiting for user action",
 };
+const SERVICE_ERROR_TEXTS: Record<string, string> = {
+  robot_busy: "Robot is still finishing a previous task. Try again when it is ready.",
+};
+const SERVICE_ERROR_FALLBACK = "The queue command failed. Check Home Assistant for details.";
+
+/** Text for a backend reason code that blocks a queue action. */
+export function blockedReasonText(code: unknown): string {
+  return typeof code === "string" ? REASON_TEXTS[code] ?? UNKNOWN_REASON : UNKNOWN_REASON;
+}
+
+/** Text for a rejected queue service call, from the reason code the backend attaches. */
+export function serviceErrorText(error: unknown): string {
+  const code = isRecord(error) ? error["translation_key"] : undefined;
+  if (typeof code !== "string" || !(code in REASON_TEXTS)) {
+    return SERVICE_ERROR_FALLBACK;
+  }
+  return SERVICE_ERROR_TEXTS[code] ?? `${REASON_TEXTS[code]}.`;
+}
 
 export type CardOverrideControl = {
   controlType: "pending" | "running";
@@ -151,7 +180,6 @@ export function buildCardViewModel(
 
   const snapshot = parseQueueSnapshot(queueState);
   const activity = buildActivity(hass, snapshot);
-  const startBlock = buildStartBlock(hass, snapshot);
   const rooms = buildRooms(hass, snapshot);
 
   return {
@@ -159,10 +187,10 @@ export function buildCardViewModel(
     status: "ready",
     entityId,
     message: null,
-    summary: buildSummary(snapshot, activity, startBlock),
+    summary: buildSummary(hass, snapshot, activity),
     snapshot,
     activity,
-    activeControls: buildActiveControls(snapshot, activity, startBlock),
+    activeControls: buildActiveControls(snapshot, activity),
     canClearPending: snapshot.pendingItems > 0 && !isTerminalQueueFailure(snapshot.runState),
     rooms,
     rows: cardQueueRows(hass, snapshot, activity),
@@ -292,18 +320,37 @@ function progressPercent(value: unknown): number | null {
   return Math.max(0, Math.min(100, Math.round(parsed)));
 }
 
+/** A control as the backend's control state allows or blocks it now. */
+function gatedControl(
+  snapshot: QueueSnapshot,
+  activity: RunActivity | null,
+  base: ControlBase,
+): CardActiveControl {
+  if (snapshot.allowedActions === null) {
+    return { ...base, disabled: true, disabledReason: CONTROLS_UNAVAILABLE_REASON };
+  }
+  if (snapshot.allowedActions.includes(base.service)) {
+    return base;
+  }
+  const code = snapshot.blockedReasons?.[base.service];
+  return {
+    ...base,
+    disabled: true,
+    disabledReason:
+      code === "tank_attention" && activity?.resumeBlockedReason
+        ? activity.resumeBlockedReason
+        : blockedReasonText(code),
+  };
+}
+
 function buildActiveControls(
   snapshot: QueueSnapshot,
   activity: RunActivity | null,
-  startBlock: StartBlock | null,
 ): CardActiveControl[] {
-  const disabledState =
-    snapshot.allowRobotCommands === false
-      ? { disabled: true, disabledReason: "Robot commands disabled" }
-      : {};
+  const gated = (base: ControlBase) => gatedControl(snapshot, activity, base);
 
   if (snapshot.runState === "waiting_for_tanks") {
-    return [{ariaLabel: "Cancel waiting start", label: "Cancel", service: "cancel_queue"}];
+    return [gated({ariaLabel: "Cancel waiting start", label: "Cancel", service: "cancel_queue"})];
   }
 
   // Resetting only discards queue state; it sends no robot command, so it is not command-gated.
@@ -314,73 +361,38 @@ function buildActiveControls(
   if (snapshot.runState === "running") {
     if (activity?.phase === "paused" || activity?.phase === "error") {
       return [
-        {
-          ariaLabel: "Continue robot run",
-          label: "Continue",
-          service: "resume_queue",
-          ...disabledState,
-          ...(activity.resumeBlockedReason ? {disabled: true, disabledReason: activity.resumeBlockedReason} : {}),
-        },
-        {
-          ariaLabel: "End robot run",
-          label: "End",
-          service: "cancel_queue",
-          ...disabledState,
-        },
+        gated({ariaLabel: "Continue robot run", label: "Continue", service: "resume_queue"}),
+        gated({ariaLabel: "End robot run", label: "End", service: "cancel_queue"}),
       ];
     }
 
     return [
-      {
-        ariaLabel: "Cancel queue",
-        label: "Cancel",
-        service: "cancel_queue",
-        ...disabledState,
-      },
-      {
-        ariaLabel: "Skip current room",
-        label: "Skip",
-        service: "skip_current_room",
-        ...disabledState,
-      },
+      gated({ariaLabel: "Cancel queue", label: "Cancel", service: "cancel_queue"}),
+      gated({ariaLabel: "Skip current room", label: "Skip", service: "skip_current_room"}),
     ];
   }
 
   if (snapshot.runState === "idle" && snapshot.pendingItems > 0) {
-    const startControl =
-      snapshot.allowRobotCommands === false
-        ? {
-            ariaLabel: "Start queue",
-            label: "Start",
-            service: "start_queue" as const,
-          }
-        : startBlock?.control;
-    return [
-      {
-        ...(startControl ?? {
-          ariaLabel: "Start queue",
-          label: "Start",
-          service: "start_queue" as const,
-        }),
-        ...disabledState,
-      },
-    ];
+    return [gated({ariaLabel: "Start queue", label: "Start", service: "start_queue"})];
   }
 
   return [];
 }
 
 function buildSummary(
+  hass: HomeAssistantLike | undefined,
   snapshot: QueueSnapshot,
   activity: RunActivity | null,
-  startBlock: StartBlock | null,
 ): string {
   if (activity) {
     return activity.label;
   }
 
-  if (snapshot.runState === "idle" && snapshot.pendingItems > 0 && startBlock) {
-    return startBlock.summary;
+  if (snapshot.runState === "idle" && snapshot.pendingItems > 0) {
+    const startSummary = startSummaryText(hass, snapshot);
+    if (startSummary) {
+      return startSummary;
+    }
   }
 
   switch (snapshot.runState) {
@@ -409,70 +421,39 @@ function buildSummary(
   }
 }
 
-function buildStartBlock(
+/** Explain what Start will do, or why the backend blocks it. */
+function startSummaryText(
   hass: HomeAssistantLike | undefined,
   snapshot: QueueSnapshot,
-): StartBlock | null {
-  if (!hass || snapshot.runState !== "idle" || snapshot.pendingItems < 1) {
-    return null;
-  }
-
+): string | null {
   const vacuumEntityId = snapshot.vacuumEntityId;
-  if (!vacuumEntityId) {
-    return null;
+  if (snapshot.allowedActions?.includes("start_queue")) {
+    const tankBlock = hass && vacuumEntityId
+      ? waterTankBlockReason(
+          stateValue(hass, sensorEntityIdForVacuum(vacuumEntityId, "dirty_water_tank_status")),
+          stateValue(hass, sensorEntityIdForVacuum(vacuumEntityId, "clean_water_tank_status")),
+        )
+      : null;
+    return tankBlock
+      ? `${tankBlock}. Press Start to start automatically after fixing the tanks.`
+      : null;
   }
 
-  const vacuumState = normalizedString(stateValue(hass, vacuumEntityId)).toLowerCase();
-  const tankBlock = waterTankBlockReason(
-    stateValue(hass, sensorEntityIdForVacuum(vacuumEntityId, "dirty_water_tank_status")),
-    stateValue(hass, sensorEntityIdForVacuum(vacuumEntityId, "clean_water_tank_status")),
-  );
-  const taskStatus = normalizedString(
-    stateValue(hass, sensorEntityIdForVacuum(vacuumEntityId, "task_status")),
-  ).toLowerCase();
-
-  if (
-    vacuumState === "unavailable" ||
-    vacuumState === "unknown" ||
-    taskStatus === "unavailable" ||
-    taskStatus === "unknown"
-  ) {
-    return {
-      control: {
-        ariaLabel: "Start queue",
-        disabled: true,
-        disabledReason: "Robot is unavailable",
-        label: "Start",
-        service: "start_queue",
-      },
-      summary: "Robot is unavailable. Check its connection before starting.",
-    };
+  switch (snapshot.blockedReasons?.["start_queue"]) {
+    case "robot_unavailable":
+      return "Robot is unavailable. Check its connection before starting.";
+    case "robot_busy": {
+      const vacuumState = hass && vacuumEntityId
+        ? normalizedString(stateValue(hass, vacuumEntityId)).toLowerCase() : "";
+      return vacuumState === "returning"
+        ? "Robot is returning to base before the queue can start."
+        : "Robot is finishing a previous task before the queue can start.";
+    }
+    case "robot_error":
+      return "Robot reports an error. Check it before starting.";
+    default:
+      return null;
   }
-
-  if (taskStatus && taskStatus !== "completed") {
-    return {
-      control: {
-        ariaLabel: "Start queue",
-        disabled: true,
-        disabledReason: "Waiting for the previous robot task to finish",
-        label: "Start",
-        service: "start_queue",
-      },
-      summary:
-        vacuumState === "returning"
-          ? "Robot is returning to base before the queue can start."
-          : "Robot is finishing a previous task before the queue can start.",
-    };
-  }
-
-  if (tankBlock) {
-    return {
-      control: {ariaLabel: "Start queue", label: "Start", service: "start_queue"},
-      summary: `${tankBlock}. Press Start to start automatically after fixing the tanks.`,
-    };
-  }
-
-  return null;
 }
 
 function buildOverrideControls(overrides: Record<string, unknown>): CardOverrideControl[] {
