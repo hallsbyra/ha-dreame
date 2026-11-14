@@ -1172,10 +1172,10 @@ async def test_start_queue_service_rejects_unavailable_robot_without_tank_proble
     assert readiness["blocked_reasons"][SERVICE_START_QUEUE] == "robot_unavailable"
 
 
-async def test_cancel_queue_service_rejects_a_queue_without_a_run(
+async def test_cancel_queue_service_stops_the_robot_without_a_queue_run(
     hass: HomeAssistant,
 ) -> None:
-    """Test cancel only applies to a running or waiting queue and sends nothing otherwise."""
+    """Test cancel stops the robot even when the queue is not running, e.g. an app-started job."""
     calls: list[str] = []
 
     async def _record(call: ServiceCall) -> None:
@@ -1191,16 +1191,13 @@ async def test_cancel_queue_service_rejects_a_queue_without_a_run(
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    hass.states.async_set(vacuum_entity_id, "docked")
+    hass.states.async_set(vacuum_entity_id, "cleaning")
     await _call_add_queue_room_service(hass, entry.entry_id)
-    queue_state = entry.runtime_data.queue_state
 
-    with pytest.raises(HomeAssistantError, match="Queue is not running") as err:
-        await _call_cancel_queue_service(hass, entry.entry_id)
+    await _call_cancel_queue_service(hass, entry.entry_id)
 
-    assert err.value.translation_key == "not_running"
-    assert calls == []
-    assert entry.runtime_data.queue_state == queue_state
+    assert calls == ["stop", "return_to_base"]
+    assert entry.runtime_data.queue_state.run_state == "canceled"
 
 
 async def test_start_queue_service_leaves_queue_idle_when_dispatch_fails(
