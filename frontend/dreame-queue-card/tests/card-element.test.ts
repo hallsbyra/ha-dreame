@@ -264,11 +264,45 @@ describe("ha-dreame-queue-card", () => {
 
     const shadowRoot = element.shadowRoot as ShadowRoot | null;
     expect(element.shadowRoot?.textContent).toContain(
-      "Queue out of sync. Review robot state, then reset the queue.",
+      "Queue out of sync. Review robot state, then run the remaining rooms or reset the queue.",
     );
     expect(
       shadowRoot?.querySelector<HTMLButtonElement>('button[aria-label="Start queue"]'),
     ).toBeNull();
+  });
+
+  it("runs the remaining rooms of a failed run through the start service", async () => {
+    const callService = vi.fn();
+    const element = document.createElement(CARD_ELEMENT_TAG) as any;
+    element.setConfig({ entity: "sensor.robot_queue_status" });
+    element.hass = {
+      ...idleHass,
+      callService,
+      states: {
+        ...idleHass.states,
+        "sensor.robot_queue_status": {
+          ...idleHass.states["sensor.robot_queue_status"],
+          state: "out_of_sync",
+        },
+      },
+    };
+    document.body.append(element);
+
+    await element.updateComplete;
+
+    const shadowRoot = element.shadowRoot as ShadowRoot | null;
+    const runRemaining = shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Run remaining rooms"]',
+    );
+    expect(runRemaining?.disabled).toBe(false);
+    expect(runRemaining?.querySelector("ha-icon")?.getAttribute("icon")).toBe("mdi:playlist-play");
+    expect(shadowRoot?.querySelector('button[aria-label="Reset queue"]')).not.toBeNull();
+
+    runRemaining?.click();
+
+    expect(callService).toHaveBeenCalledWith("ha_dreame", "start_queue", {
+      config_entry_id: "config-entry-1",
+    });
   });
 
   it("resets a blocked queue through the ha_dreame queue service", async () => {

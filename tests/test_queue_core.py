@@ -137,8 +137,13 @@ def test_add_room_after_terminal_run_starts_fresh_pending_queue(
 
 
 @pytest.mark.parametrize("blocked", [True, False])
-def test_add_room_after_failed_run_keeps_room_needing_review(blocked: bool) -> None:
-    """Test a new room does not hide the room the robot may still be cleaning."""
+def test_add_room_after_failed_run_keeps_review_and_remaining_rooms(blocked: bool) -> None:
+    """Test a new room joins the rooms a failed run left, after them.
+
+    The room needing review may still be cleaned by the robot, and the untouched rooms can
+    still run, so neither disappears. The new room inherits the last remaining room's
+    overrides, as any appended room does.
+    """
     state = start_run(_seed_three_rooms())
     state = complete_current_room(state)
     state = update_item_overrides(state, item_id=state.items[2].item_id, overrides={"repeats": 2})
@@ -151,22 +156,55 @@ def test_add_room_after_failed_run_keeps_room_needing_review(blocked: bool) -> N
     assert state.current_item_id is None
     assert [(item.room_name, item.status) for item in state.items] == [
         ("Hall", "needs_attention"),
+        ("Office", "pending"),
         ("Bathroom", "pending"),
     ]
     assert state.items[0].result == "stopped_from_app"
-    assert state.items[1].overrides == {}
+    assert state.items[2].overrides == {"repeats": 2}
 
     state = start_run(state)
 
     assert [(item.room_name, item.status) for item in state.items] == [
         ("Hall", "needs_attention"),
-        ("Bathroom", "running"),
+        ("Office", "running"),
+        ("Bathroom", "pending"),
     ]
 
-    state = complete_current_room(state)
+    state = complete_current_room(complete_current_room(state))
+    assert state.run_state == "completed"
     state = add_room(state, room_id=1, room_name="Kitchen")
 
     assert [(item.room_name, item.status) for item in state.items] == [("Kitchen", "pending")]
+
+
+def test_add_room_after_failed_run_without_remaining_rooms_does_not_inherit() -> None:
+    """Test only a remaining pending room passes its overrides to a new room."""
+    state = add_room(new_state(), room_id=2, room_name="Hall", overrides={"repeats": 3})
+    state = external_takeover(start_run(state), reason="stopped_from_app")
+
+    state = add_room(state, room_id=7, room_name="Bathroom")
+
+    assert [(item.room_name, item.status) for item in state.items] == [
+        ("Hall", "needs_attention"),
+        ("Bathroom", "pending"),
+    ]
+    assert state.items[1].overrides == {}
+
+
+@pytest.mark.parametrize("blocked", [True, False])
+def test_failed_run_can_start_its_remaining_rooms(blocked: bool) -> None:
+    """Test Run remaining starts the first untouched room and keeps the review row."""
+    state = start_run(_seed_three_rooms())
+    state = external_takeover(state, reason="stopped_from_app", blocked=blocked)
+
+    state = start_run(state)
+
+    assert state.run_state == "running"
+    assert [(item.room_name, item.status) for item in state.items] == [
+        ("Kitchen", "needs_attention"),
+        ("Hall", "running"),
+        ("Office", "pending"),
+    ]
 
 
 def test_start_run_sets_run_state_and_first_room_running() -> None:

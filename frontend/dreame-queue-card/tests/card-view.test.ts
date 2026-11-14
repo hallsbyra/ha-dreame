@@ -596,29 +596,22 @@ describe("card view model", () => {
     expect(view.activeControls).toEqual([]);
   });
 
-  it("offers only a queue reset in failure states", () => {
-    const outOfSync = buildCardViewModel(
-      hassWithQueueState("out_of_sync", {
-        queue_items: [queueAttributes.queue_items[1]],
-        pending_items: 1,
+  it("offers only a queue reset in failure states without remaining rooms", () => {
+    const failed = (state: string) => buildCardViewModel(
+      hassWithQueueState(state, {
+        queue_items: [{...queueAttributes.queue_items[0], status: "needs_attention"}],
+        pending_items: 0,
         running_items: 0,
         total_items: 1,
+        allowed_actions: [],
+        blocked_reasons: { ...notRunning, start_queue: "queue_empty" },
       }),
       {
         entity: "sensor.robot_queue_status",
       },
     );
-    const blocked = buildCardViewModel(
-      hassWithQueueState("blocked", {
-        queue_items: [queueAttributes.queue_items[1]],
-        pending_items: 1,
-        running_items: 0,
-        total_items: 1,
-      }),
-      {
-        entity: "sensor.robot_queue_status",
-      },
-    );
+    const outOfSync = failed("out_of_sync");
+    const blocked = failed("blocked");
 
     const resetControl = {
       ariaLabel: "Reset queue",
@@ -632,6 +625,47 @@ describe("card view model", () => {
     expect(blocked.summary).toBe("Route blocked. Review room access, then reset the queue.");
     expect(blocked.activeControls).toEqual([resetControl]);
     expect(blocked.canClearPending).toBe(false);
+  });
+
+  it("offers Run remaining next to Reset after a failed run with pending rooms", () => {
+    const failed = (state: string, controls: Record<string, unknown>) => buildCardViewModel(
+      hassWithQueueState(state, {
+        queue_items: [
+          {...queueAttributes.queue_items[0], status: "needs_attention"},
+          queueAttributes.queue_items[1],
+        ],
+        pending_items: 1,
+        running_items: 0,
+        total_items: 2,
+        ...controls,
+      }),
+      { entity: "sensor.robot_queue_status" },
+    );
+    const runRemaining = {
+      ariaLabel: "Run remaining rooms",
+      label: "Run remaining",
+      service: "start_queue",
+    };
+    const resetControl = {ariaLabel: "Reset queue", label: "Reset", service: "clear_pending_queue"};
+
+    const outOfSync = failed("out_of_sync", {allowed_actions: ["start_queue"], blocked_reasons: notRunning});
+    expect(outOfSync.activeControls).toEqual([runRemaining, resetControl]);
+    expect(outOfSync.summary).toBe(
+      "Queue out of sync. Review robot state, then run the remaining rooms or reset the queue.",
+    );
+    expect(outOfSync.rows.map((row) => row.statusLabel)).toEqual(["Needs review", "Queued"]);
+
+    const blocked = failed("blocked", {
+      allowed_actions: [],
+      blocked_reasons: { ...notRunning, start_queue: "robot_busy" },
+    });
+    expect(blocked.activeControls).toEqual([
+      {...runRemaining, disabled: true, disabledReason: "Waiting for the previous robot task to finish"},
+      resetControl,
+    ]);
+    expect(blocked.summary).toBe(
+      "Route blocked. Review room access, then run the remaining rooms or reset the queue.",
+    );
   });
 
   it("keeps queue reset available when robot commands are disabled", () => {

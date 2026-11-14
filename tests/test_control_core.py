@@ -15,6 +15,7 @@ from custom_components.ha_dreame.queue_core import (
     DispatchTracking,
     QueueState,
     add_room,
+    external_takeover,
     start_run,
 )
 from custom_components.ha_dreame.reconcile_core import Observation
@@ -218,3 +219,23 @@ def test_finished_queue_without_pending_rooms_offers_nothing(run_state: str) -> 
 
     assert state.allowed_actions == ()
     assert state.reason(START) == "queue_empty"
+
+
+@pytest.mark.parametrize("blocked", [True, False])
+def test_failed_run_with_remaining_rooms_may_run_them_under_the_start_rules(
+    blocked: bool,
+) -> None:
+    failed = external_takeover(_running(), reason="stopped_from_app", blocked=blocked)
+
+    assert _decide(failed, READY).allowed_actions == (START,)
+    assert _decide(failed, TANK).allows(START)
+    assert _decide(failed, replace(READY, task_status="room_cleaning")).reason(START) == (
+        "robot_busy"
+    )
+    assert _decide(failed, READY, commands=False).reason(START) == "commands_disabled"
+
+
+def test_failed_run_without_remaining_rooms_cannot_start() -> None:
+    failed = external_takeover(start_run(_pending()), reason="stopped_from_app")
+
+    assert _decide(failed, READY).reason(START) == "queue_empty"

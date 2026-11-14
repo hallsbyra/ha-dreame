@@ -6,6 +6,7 @@ from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.ha_dreame import _async_auto_reconcile_tick
 from custom_components.ha_dreame.const import DOMAIN
+from custom_components.ha_dreame.queue_core import external_takeover, start_run
 from .helpers import mock_entry, register_entity
 
 pytestmark = pytest.mark.usefixtures("mock_dreame_vacuum_dependency")
@@ -150,3 +151,43 @@ async def test_tank_wait_can_be_canceled_after_commands_are_disabled(hass: HomeA
     await command(hass, entry, "cancel_queue")
     assert not calls
     assert entry.runtime_data.queue_state.run_state == "canceled"
+
+
+async def test_failed_run_runs_its_remaining_rooms_after_a_tank_wait(hass: HomeAssistant):
+    """Run remaining after a failed run follows the normal Start rules, tank wait included."""
+    entry, calls = await setup_waiting_robot(hass)
+    await command(hass, entry, "add_queue_room", room_id=7, room_name="Room 7")
+    runtime = entry.runtime_data
+    runtime.set_queue_state(
+        external_takeover(start_run(runtime.queue_state), reason="stopped_from_app", blocked=True)
+    )
+
+    await command(hass, entry, "start_queue")
+    assert runtime.queue_state.run_state == "waiting_for_tanks"
+    hass.states.async_set("sensor.dreame_robot_clean_water_tank_status", "installed")
+    await _async_auto_reconcile_tick(hass, entry)
+
+    assert [call.data["segments"] for call in calls] == [[7]]
+    assert runtime.queue_state.run_state == "running"
+    assert [(item.room_id, item.status) for item in runtime.queue_state.items] == [
+        (6, "needs_attention"),
+        (7, "running"),
+    ]
+
+
+async def test_failed_run_runs_its_remaining_rooms_at_once_when_ready(hass: HomeAssistant):
+    entry, calls = await setup_waiting_robot(hass)
+    hass.states.async_set("sensor.dreame_robot_clean_water_tank_status", "installed")
+    await command(hass, entry, "add_queue_room", room_id=7, room_name="Room 7")
+    runtime = entry.runtime_data
+    runtime.set_queue_state(
+        external_takeover(start_run(runtime.queue_state), reason="stopped_from_app")
+    )
+
+    await command(hass, entry, "start_queue")
+
+    assert [call.data["segments"] for call in calls] == [[7]]
+    assert [(item.room_id, item.status) for item in runtime.queue_state.items] == [
+        (6, "needs_attention"),
+        (7, "running"),
+    ]
