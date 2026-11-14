@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
 import logging
-from typing import Any
+from typing import Any, NamedTuple
 
 import voluptuous as vol
 
@@ -78,48 +78,22 @@ from .queue_core import (
 )
 from .queue_snapshot import count_queue_items, queue_item_snapshots
 from .runtime import HaDreameRuntimeData
-from .reconcile import ReconcileEvaluation, async_reconcile, evaluate_reconcile
+from .reconcile import ReconcileEvaluation, async_reconcile_under_lock, evaluate_reconcile
 from .reconcile_core import Observation, is_meaningful_error
 from .runtime_observation import normalize_signal
 
 _LOGGER = logging.getLogger(__name__)
 
-ADD_QUEUE_ROOM_SCHEMA = vol.Schema(
+ENTRY_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
+ADD_QUEUE_ROOM_SCHEMA = ENTRY_SCHEMA.extend(
     {
-        vol.Required(CONF_CONFIG_ENTRY_ID): str,
         vol.Required(CONF_ROOM_ID): vol.Coerce(int),
         vol.Required(CONF_ROOM_NAME): vol.All(str, vol.Length(min=1)),
     }
 )
-APPLY_RECONCILE_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
-CANCEL_QUEUE_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
-CLEAR_PENDING_QUEUE_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
-EVALUATE_RECONCILE_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
-GET_CONTROL_READINESS_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
-GET_RUNTIME_STATUS_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
-MOVE_QUEUE_ITEM_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_CONFIG_ENTRY_ID): str,
-        vol.Required(CONF_ITEM_ID): vol.All(str, vol.Length(min=1)),
-        vol.Required(CONF_NEW_POSITION): vol.Coerce(int),
-    }
-)
-REMOVE_QUEUE_ITEM_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_CONFIG_ENTRY_ID): str,
-        vol.Required(CONF_ITEM_ID): vol.All(str, vol.Length(min=1)),
-    }
-)
-RESUME_QUEUE_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
-SKIP_CURRENT_ROOM_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
-START_QUEUE_SCHEMA = vol.Schema({vol.Required(CONF_CONFIG_ENTRY_ID): str})
-UPDATE_QUEUE_ITEM_OVERRIDES_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_CONFIG_ENTRY_ID): str,
-        vol.Required(CONF_ITEM_ID): vol.All(str, vol.Length(min=1)),
-        vol.Required(CONF_OVERRIDES): dict,
-    }
-)
+ITEM_SCHEMA = ENTRY_SCHEMA.extend({vol.Required(CONF_ITEM_ID): vol.All(str, vol.Length(min=1))})
+MOVE_QUEUE_ITEM_SCHEMA = ITEM_SCHEMA.extend({vol.Required(CONF_NEW_POSITION): vol.Coerce(int)})
+UPDATE_QUEUE_ITEM_OVERRIDES_SCHEMA = ITEM_SCHEMA.extend({vol.Required(CONF_OVERRIDES): dict})
 RUNNING_OVERRIDE_SUCTION_OPTIONS = {
     0: "quiet",
     1: "standard",
@@ -132,269 +106,59 @@ RUNNING_OVERRIDE_WATER_VALUES = {
     3: 24,
 }
 RUNNING_OVERRIDE_FIELDS = ("suction_level", "water_volume")
-UPDATE_RUNNING_OVERRIDE_SCHEMA = vol.Schema(
+UPDATE_RUNNING_OVERRIDE_SCHEMA = ENTRY_SCHEMA.extend(
     {
-        vol.Required(CONF_CONFIG_ENTRY_ID): str,
         vol.Required(CONF_FIELD): vol.In(RUNNING_OVERRIDE_FIELDS),
         vol.Required(CONF_VALUE): vol.Coerce(int),
     }
 )
 
 
+ServiceHandler = Callable[
+    [HomeAssistant, ConfigEntry, Mapping[str, Any]], Awaitable[dict[str, Any]]
+]
+
+
+class _Service(NamedTuple):
+    """One HA Dreame service.
+
+    Read-only services answer without the operation lock and audit trail. All others
+    serialize queue mutations and robot commands per entry and are audited.
+    """
+
+    handler: ServiceHandler
+    schema: vol.Schema = ENTRY_SCHEMA
+    read_only: bool = False
+
+
 def async_register_services(hass: HomeAssistant) -> None:
     """Register HA Dreame services."""
-    if not hass.services.has_service(DOMAIN, SERVICE_ADD_QUEUE_ROOM):
+    for name, service in SERVICES.items():
+        if hass.services.has_service(DOMAIN, name):
+            continue
 
-        async def _async_add_queue_room(call: ServiceCall) -> ServiceResponse:
-            config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
-            async with _async_runtime_operation(hass, config_entry_id, call):
-                return _add_queue_room_response(
-                    hass,
-                    config_entry_id,
-                    room_id=call.data[CONF_ROOM_ID],
-                    room_name=call.data[CONF_ROOM_NAME],
-                )
-
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_ADD_QUEUE_ROOM,
-            _async_add_queue_room,
-            schema=ADD_QUEUE_ROOM_SCHEMA,
-            supports_response=SupportsResponse.OPTIONAL,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_APPLY_RECONCILE):
-
-        async def _async_apply_reconcile(call: ServiceCall) -> ServiceResponse:
+        async def _async_handle(call: ServiceCall, service: _Service = service) -> ServiceResponse:
             entry = _runtime_entry(hass, call.data[CONF_CONFIG_ENTRY_ID])
-            with service_audit(entry.runtime_data, call):
-                return await _async_apply_reconcile_response(hass, call.data[CONF_CONFIG_ENTRY_ID])
+            if service.read_only:
+                return await service.handler(hass, entry, call.data)
+            async with _async_runtime_operation(hass, entry, call):
+                return await service.handler(hass, entry, call.data)
 
         hass.services.async_register(
             DOMAIN,
-            SERVICE_APPLY_RECONCILE,
-            _async_apply_reconcile,
-            schema=APPLY_RECONCILE_SCHEMA,
-            supports_response=SupportsResponse.OPTIONAL,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_CANCEL_QUEUE):
-
-        async def _async_cancel_queue(call: ServiceCall) -> ServiceResponse:
-            config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
-            async with _async_runtime_operation(hass, config_entry_id, call):
-                return await _async_cancel_queue_response(hass, config_entry_id)
-
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_CANCEL_QUEUE,
-            _async_cancel_queue,
-            schema=CANCEL_QUEUE_SCHEMA,
-            supports_response=SupportsResponse.OPTIONAL,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_CLEAR_PENDING_QUEUE):
-
-        async def _async_clear_pending_queue(call: ServiceCall) -> ServiceResponse:
-            config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
-            async with _async_runtime_operation(hass, config_entry_id, call):
-                return _clear_pending_queue_response(hass, config_entry_id)
-
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_CLEAR_PENDING_QUEUE,
-            _async_clear_pending_queue,
-            schema=CLEAR_PENDING_QUEUE_SCHEMA,
-            supports_response=SupportsResponse.OPTIONAL,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_GET_RUNTIME_STATUS):
-
-        async def _async_get_runtime_status(call: ServiceCall) -> ServiceResponse:
-            return _runtime_status_response(hass, call.data[CONF_CONFIG_ENTRY_ID])
-
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_GET_RUNTIME_STATUS,
-            _async_get_runtime_status,
-            schema=GET_RUNTIME_STATUS_SCHEMA,
-            supports_response=SupportsResponse.ONLY,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_GET_CONTROL_READINESS):
-
-        async def _async_get_control_readiness(call: ServiceCall) -> ServiceResponse:
-            return _control_readiness_response(hass, call.data[CONF_CONFIG_ENTRY_ID])
-
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_GET_CONTROL_READINESS,
-            _async_get_control_readiness,
-            schema=GET_CONTROL_READINESS_SCHEMA,
-            supports_response=SupportsResponse.ONLY,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_EVALUATE_RECONCILE):
-
-        async def _async_evaluate_reconcile(call: ServiceCall) -> ServiceResponse:
-            return _evaluate_reconcile_response(
-                hass,
-                call.data[CONF_CONFIG_ENTRY_ID],
-            )
-
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_EVALUATE_RECONCILE,
-            _async_evaluate_reconcile,
-            schema=EVALUATE_RECONCILE_SCHEMA,
-            supports_response=SupportsResponse.ONLY,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM):
-
-        async def _async_remove_queue_item(call: ServiceCall) -> ServiceResponse:
-            config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
-            async with _async_runtime_operation(hass, config_entry_id, call):
-                return _remove_queue_item_response(
-                    hass,
-                    config_entry_id,
-                    item_id=call.data[CONF_ITEM_ID],
-                )
-
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_REMOVE_QUEUE_ITEM,
-            _async_remove_queue_item,
-            schema=REMOVE_QUEUE_ITEM_SCHEMA,
-            supports_response=SupportsResponse.OPTIONAL,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_MOVE_QUEUE_ITEM):
-
-        async def _async_move_queue_item(call: ServiceCall) -> ServiceResponse:
-            config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
-            async with _async_runtime_operation(hass, config_entry_id, call):
-                return _move_queue_item_response(
-                    hass,
-                    config_entry_id,
-                    item_id=call.data[CONF_ITEM_ID],
-                    new_position=call.data[CONF_NEW_POSITION],
-                )
-
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_MOVE_QUEUE_ITEM,
-            _async_move_queue_item,
-            schema=MOVE_QUEUE_ITEM_SCHEMA,
-            supports_response=SupportsResponse.OPTIONAL,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_SKIP_CURRENT_ROOM):
-
-        async def _async_skip_current_room(call: ServiceCall) -> ServiceResponse:
-            config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
-            async with _async_runtime_operation(hass, config_entry_id, call):
-                return await _async_skip_current_room_response(hass, config_entry_id)
-
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_SKIP_CURRENT_ROOM,
-            _async_skip_current_room,
-            schema=SKIP_CURRENT_ROOM_SCHEMA,
-            supports_response=SupportsResponse.OPTIONAL,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_RESUME_QUEUE):
-
-        async def _async_resume_queue(call: ServiceCall) -> ServiceResponse:
-            config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
-            async with _async_runtime_operation(hass, config_entry_id, call):
-                return await _async_resume_queue_response(hass, config_entry_id)
-
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_RESUME_QUEUE,
-            _async_resume_queue,
-            schema=RESUME_QUEUE_SCHEMA,
-            supports_response=SupportsResponse.OPTIONAL,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_START_QUEUE):
-
-        async def _async_start_queue(call: ServiceCall) -> ServiceResponse:
-            config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
-            async with _async_runtime_operation(hass, config_entry_id, call):
-                return await _async_start_queue_response(hass, config_entry_id)
-
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_START_QUEUE,
-            _async_start_queue,
-            schema=START_QUEUE_SCHEMA,
-            supports_response=SupportsResponse.OPTIONAL,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES):
-
-        async def _async_update_queue_item_overrides(
-            call: ServiceCall,
-        ) -> ServiceResponse:
-            config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
-            async with _async_runtime_operation(hass, config_entry_id, call):
-                return _update_queue_item_overrides_response(
-                    hass,
-                    config_entry_id,
-                    item_id=call.data[CONF_ITEM_ID],
-                    overrides=call.data[CONF_OVERRIDES],
-                )
-
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES,
-            _async_update_queue_item_overrides,
-            schema=UPDATE_QUEUE_ITEM_OVERRIDES_SCHEMA,
-            supports_response=SupportsResponse.OPTIONAL,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_UPDATE_RUNNING_OVERRIDE):
-
-        async def _async_update_running_override(
-            call: ServiceCall,
-        ) -> ServiceResponse:
-            config_entry_id = call.data[CONF_CONFIG_ENTRY_ID]
-            async with _async_runtime_operation(hass, config_entry_id, call):
-                return await _async_update_running_override_response(
-                    hass,
-                    config_entry_id,
-                    field=call.data[CONF_FIELD],
-                    value=call.data[CONF_VALUE],
-                )
-
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_UPDATE_RUNNING_OVERRIDE,
-            _async_update_running_override,
-            schema=UPDATE_RUNNING_OVERRIDE_SCHEMA,
-            supports_response=SupportsResponse.OPTIONAL,
+            name,
+            _async_handle,
+            schema=service.schema,
+            supports_response=(
+                SupportsResponse.ONLY if service.read_only else SupportsResponse.OPTIONAL
+            ),
         )
 
 
 def async_remove_services(hass: HomeAssistant) -> None:
     """Remove all HA Dreame services."""
-    hass.services.async_remove(DOMAIN, SERVICE_ADD_QUEUE_ROOM)
-    hass.services.async_remove(DOMAIN, SERVICE_APPLY_RECONCILE)
-    hass.services.async_remove(DOMAIN, SERVICE_CANCEL_QUEUE)
-    hass.services.async_remove(DOMAIN, SERVICE_CLEAR_PENDING_QUEUE)
-    hass.services.async_remove(DOMAIN, SERVICE_EVALUATE_RECONCILE)
-    hass.services.async_remove(DOMAIN, SERVICE_GET_CONTROL_READINESS)
-    hass.services.async_remove(DOMAIN, SERVICE_GET_RUNTIME_STATUS)
-    hass.services.async_remove(DOMAIN, SERVICE_MOVE_QUEUE_ITEM)
-    hass.services.async_remove(DOMAIN, SERVICE_REMOVE_QUEUE_ITEM)
-    hass.services.async_remove(DOMAIN, SERVICE_RESUME_QUEUE)
-    hass.services.async_remove(DOMAIN, SERVICE_SKIP_CURRENT_ROOM)
-    hass.services.async_remove(DOMAIN, SERVICE_START_QUEUE)
-    hass.services.async_remove(DOMAIN, SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES)
-    hass.services.async_remove(DOMAIN, SERVICE_UPDATE_RUNNING_OVERRIDE)
+    for name in SERVICES:
+        hass.services.async_remove(DOMAIN, name)
 
 
 def _require_commands(runtime_data: HaDreameRuntimeData) -> None:
@@ -414,87 +178,62 @@ def _runtime_entry(hass: HomeAssistant, config_entry_id: str) -> ConfigEntry:
 @asynccontextmanager
 async def _async_runtime_operation(
     hass: HomeAssistant,
-    config_entry_id: str,
-    call: ServiceCall | None = None,
+    entry: ConfigEntry,
+    call: ServiceCall,
 ) -> AsyncIterator[None]:
     """Serialize one queue mutation or robot command for a loaded entry."""
-    entry = _runtime_entry(hass, config_entry_id)
     runtime_data = entry.runtime_data
     async with runtime_data.operation_lock:
         if (
-            hass.data.get(DOMAIN, {}).get(config_entry_id) is not entry
+            hass.data.get(DOMAIN, {}).get(entry.entry_id) is not entry
             or getattr(entry, "runtime_data", None) is not runtime_data
             or runtime_data.unload_requested.is_set()
         ):
-            raise HomeAssistantError(f"HA Dreame entry is not loaded: {config_entry_id}")
+            raise HomeAssistantError(f"HA Dreame entry is not loaded: {entry.entry_id}")
         with service_audit(runtime_data, call):
             yield
 
 
-def _add_queue_room_response(
-    hass: HomeAssistant,
-    config_entry_id: str,
-    *,
-    room_id: int,
-    room_name: str,
-) -> dict[str, Any]:
-    """Append one room to the runtime queue and return a queue snapshot."""
-    entry = _runtime_entry(hass, config_entry_id)
-    runtime_data = entry.runtime_data
-
+def _mutate_queue(
+    runtime_data: HaDreameRuntimeData,
+    mutation: Callable[..., QueueState],
+    **kwargs: Any,
+) -> None:
+    """Apply one pure queue transition to the runtime queue."""
     try:
-        queue_state = add_room(
-            runtime_data.queue_state,
-            room_id=room_id,
-            room_name=room_name,
-        )
+        runtime_data.set_queue_state(mutation(runtime_data.queue_state, **kwargs))
     except QueueError as err:
         raise HomeAssistantError(str(err)) from err
 
-    runtime_data.set_queue_state(queue_state)
-    return _queue_status_response(entry)
+
+def _queue_mutation(mutation: Callable[..., QueueState], *fields: str) -> ServiceHandler:
+    """Return a handler that applies a queue transition with call fields as arguments."""
+
+    async def _async_handle(
+        hass: HomeAssistant, entry: ConfigEntry, data: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        _mutate_queue(entry.runtime_data, mutation, **{field: data[field] for field in fields})
+        return _queue_status_response(entry)
+
+    return _async_handle
 
 
-def _clear_pending_queue_response(
-    hass: HomeAssistant,
-    config_entry_id: str,
-) -> dict[str, Any]:
-    """Clear pending queue items and return a queue snapshot."""
-    entry = _runtime_entry(hass, config_entry_id)
-    runtime_data = entry.runtime_data
-
-    try:
-        queue_state = clear_pending(runtime_data.queue_state)
-    except QueueError as err:
-        raise HomeAssistantError(str(err)) from err
-
-    runtime_data.set_queue_state(queue_state)
-    return _queue_status_response(entry)
-
-
-async def _async_apply_reconcile_response(
-    hass: HomeAssistant,
-    config_entry_id: str,
+async def _async_apply_reconcile(
+    hass: HomeAssistant, entry: ConfigEntry, data: Mapping[str, Any]
 ) -> dict[str, Any]:
     """Evaluate and apply one manual runtime reconcile decision."""
-    entry = _runtime_entry(hass, config_entry_id)
-    runtime_data = entry.runtime_data
-
-    _require_commands(runtime_data)
-
-    evaluation = await async_reconcile(hass, runtime_data)
+    _require_commands(entry.runtime_data)
+    evaluation = await async_reconcile_under_lock(hass, entry.runtime_data)
     return {
         **_reconcile_response(entry, evaluation),
         "queue": _queue_status_response(entry),
     }
 
 
-async def _async_cancel_queue_response(
-    hass: HomeAssistant,
-    config_entry_id: str,
+async def _async_cancel_queue(
+    hass: HomeAssistant, entry: ConfigEntry, data: Mapping[str, Any]
 ) -> dict[str, Any]:
     """Cancel the runtime queue and send the robot back to base."""
-    entry = _runtime_entry(hass, config_entry_id)
     runtime_data = entry.runtime_data
 
     _require_commands(runtime_data)
@@ -527,12 +266,10 @@ async def _async_cancel_queue_response(
     return _queue_status_response(entry)
 
 
-async def _async_skip_current_room_response(
-    hass: HomeAssistant,
-    config_entry_id: str,
+async def _async_skip_current_room(
+    hass: HomeAssistant, entry: ConfigEntry, data: Mapping[str, Any]
 ) -> dict[str, Any]:
     """Skip the current room and continue or finish the runtime queue."""
-    entry = _runtime_entry(hass, config_entry_id)
     runtime_data = entry.runtime_data
 
     try:
@@ -569,12 +306,10 @@ async def _async_skip_current_room_response(
     return _queue_status_response(entry)
 
 
-async def _async_resume_queue_response(
-    hass: HomeAssistant,
-    config_entry_id: str,
+async def _async_resume_queue(
+    hass: HomeAssistant, entry: ConfigEntry, data: Mapping[str, Any]
 ) -> dict[str, Any]:
     """Resume an interrupted active queue run through the vacuum start command."""
-    entry = _runtime_entry(hass, config_entry_id)
     runtime_data = entry.runtime_data
 
     if runtime_data.queue_state.run_state != "running":
@@ -617,88 +352,17 @@ async def _async_resume_queue_response(
     }
 
 
-def _remove_queue_item_response(
-    hass: HomeAssistant,
-    config_entry_id: str,
-    *,
-    item_id: str,
-) -> dict[str, Any]:
-    """Remove one pending queue item and return a queue snapshot."""
-    entry = _runtime_entry(hass, config_entry_id)
-    runtime_data = entry.runtime_data
-
-    try:
-        queue_state = remove_item(runtime_data.queue_state, item_id=item_id)
-    except QueueError as err:
-        raise HomeAssistantError(str(err)) from err
-
-    runtime_data.set_queue_state(queue_state)
-    return _queue_status_response(entry)
-
-
-def _move_queue_item_response(
-    hass: HomeAssistant,
-    config_entry_id: str,
-    *,
-    item_id: str,
-    new_position: int,
-) -> dict[str, Any]:
-    """Move one pending queue item and return a queue snapshot."""
-    entry = _runtime_entry(hass, config_entry_id)
-    runtime_data = entry.runtime_data
-
-    try:
-        queue_state = move_item(
-            runtime_data.queue_state,
-            item_id=item_id,
-            new_position=new_position,
-        )
-    except QueueError as err:
-        raise HomeAssistantError(str(err)) from err
-
-    runtime_data.set_queue_state(queue_state)
-    return _queue_status_response(entry)
-
-
-def _update_queue_item_overrides_response(
-    hass: HomeAssistant,
-    config_entry_id: str,
-    *,
-    item_id: str,
-    overrides: dict[str, Any],
-) -> dict[str, Any]:
-    """Update one pending queue item's overrides and return a queue snapshot."""
-    entry = _runtime_entry(hass, config_entry_id)
-    runtime_data = entry.runtime_data
-
-    try:
-        queue_state = update_item_overrides(
-            runtime_data.queue_state,
-            item_id=item_id,
-            overrides=overrides,
-        )
-    except QueueError as err:
-        raise HomeAssistantError(str(err)) from err
-
-    runtime_data.set_queue_state(queue_state)
-    return _queue_status_response(entry)
-
-
-async def _async_update_running_override_response(
-    hass: HomeAssistant,
-    config_entry_id: str,
-    *,
-    field: str,
-    value: int,
+async def _async_update_running_override(
+    hass: HomeAssistant, entry: ConfigEntry, data: Mapping[str, Any]
 ) -> dict[str, Any]:
     """Update a live running override through command-gated companion entities."""
-    entry = _runtime_entry(hass, config_entry_id)
     runtime_data = entry.runtime_data
+    field, value = data[CONF_FIELD], data[CONF_VALUE]
 
     if runtime_data.queue_state.run_state != "running":
         raise HomeAssistantError("Queue is not running")
 
-    entity_id, domain, service, data = _running_override_service_call(
+    entity_id, domain, service, service_data = _running_override_service_call(
         runtime_data.vacuum_entity_id,
         field=field,
         value=value,
@@ -706,7 +370,7 @@ async def _async_update_running_override_response(
     if hass.states.get(entity_id) is None:
         raise HomeAssistantError(f"Running override entity is not available: {entity_id}")
 
-    await async_call_robot_service(hass, runtime_data, domain, service, data)
+    await async_call_robot_service(hass, runtime_data, domain, service, service_data)
     return {
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
         CONF_FIELD: field,
@@ -715,13 +379,13 @@ async def _async_update_running_override_response(
     }
 
 
-async def _async_start_queue_response(
+async def _async_start_queue(
     hass: HomeAssistant,
-    config_entry_id: str,
+    entry: ConfigEntry,
+    data: Mapping[str, Any] | None = None,
     observation: Observation | None = None,
 ) -> dict[str, Any]:
     """Start queue execution and dispatch the first pending room."""
-    entry = _runtime_entry(hass, config_entry_id)
     runtime_data: HaDreameRuntimeData = entry.runtime_data
 
     _require_commands(runtime_data)
@@ -782,7 +446,7 @@ async def async_start_waiting_queue(hass: HomeAssistant, entry: ConfigEntry) -> 
     # Disarm before dispatch: a service failure must not create an invisible retry loop.
     runtime_data.set_queue_state(replace(runtime_data.queue_state, run_state="idle"))
     try:
-        await _async_start_queue_response(hass, entry.entry_id, observation)
+        await _async_start_queue(hass, entry, observation=observation)
     except Exception:
         runtime_data.set_queue_state(
             external_takeover(runtime_data.queue_state, reason="deferred_start_dispatch_failed")
@@ -824,12 +488,10 @@ def _running_override_service_call(
     raise HomeAssistantError(f"Invalid running override field: {field}")
 
 
-def _control_readiness_response(
-    hass: HomeAssistant,
-    config_entry_id: str,
+async def _async_control_readiness(
+    hass: HomeAssistant, entry: ConfigEntry, data: Mapping[str, Any]
 ) -> dict[str, Any]:
     """Return a read-only manual control preflight snapshot."""
-    entry = _runtime_entry(hass, config_entry_id)
     runtime_data = entry.runtime_data
     queue_state = runtime_data.queue_state
     pending_items = count_queue_items(queue_state, "pending")
@@ -945,9 +607,10 @@ def _entity_available(hass: HomeAssistant, entity_id: str) -> bool:
     return state is not None and state.state not in {STATE_UNAVAILABLE, STATE_UNKNOWN}
 
 
-def _runtime_status_response(hass: HomeAssistant, config_entry_id: str) -> dict[str, Any]:
+async def _async_runtime_status(
+    hass: HomeAssistant, entry: ConfigEntry, data: Mapping[str, Any]
+) -> dict[str, Any]:
     """Return read-only runtime status for one HA Dreame entry."""
-    entry = _runtime_entry(hass, config_entry_id)
 
     runtime_data = entry.runtime_data
     return {
@@ -992,9 +655,10 @@ def _robot_status_response(observation: Observation) -> dict[str, Any]:
     }
 
 
-def _evaluate_reconcile_response(hass: HomeAssistant, config_entry_id: str) -> dict[str, Any]:
+async def _async_evaluate_reconcile(
+    hass: HomeAssistant, entry: ConfigEntry, data: Mapping[str, Any]
+) -> dict[str, Any]:
     """Return a read-only runtime reconcile observation and decision."""
-    entry = _runtime_entry(hass, config_entry_id)
     return _reconcile_response(entry, evaluate_reconcile(hass, entry.runtime_data))
 
 
@@ -1053,3 +717,30 @@ def _dispatch_response(dispatch: DispatchTracking) -> dict[str, Any]:
         ATTR_POST_RUN_MAINTENANCE_SEEN: dispatch.post_run_maintenance_seen,
         ATTR_TASK_STATUS_CLEARED_SINCE_DISPATCH: dispatch.task_status_cleared_since_dispatch,
     }
+
+
+SERVICES: dict[str, _Service] = {
+    SERVICE_ADD_QUEUE_ROOM: _Service(
+        _queue_mutation(add_room, CONF_ROOM_ID, CONF_ROOM_NAME), ADD_QUEUE_ROOM_SCHEMA
+    ),
+    SERVICE_APPLY_RECONCILE: _Service(_async_apply_reconcile),
+    SERVICE_CANCEL_QUEUE: _Service(_async_cancel_queue),
+    SERVICE_CLEAR_PENDING_QUEUE: _Service(_queue_mutation(clear_pending)),
+    SERVICE_EVALUATE_RECONCILE: _Service(_async_evaluate_reconcile, read_only=True),
+    SERVICE_GET_CONTROL_READINESS: _Service(_async_control_readiness, read_only=True),
+    SERVICE_GET_RUNTIME_STATUS: _Service(_async_runtime_status, read_only=True),
+    SERVICE_MOVE_QUEUE_ITEM: _Service(
+        _queue_mutation(move_item, CONF_ITEM_ID, CONF_NEW_POSITION), MOVE_QUEUE_ITEM_SCHEMA
+    ),
+    SERVICE_REMOVE_QUEUE_ITEM: _Service(_queue_mutation(remove_item, CONF_ITEM_ID), ITEM_SCHEMA),
+    SERVICE_RESUME_QUEUE: _Service(_async_resume_queue),
+    SERVICE_SKIP_CURRENT_ROOM: _Service(_async_skip_current_room),
+    SERVICE_START_QUEUE: _Service(_async_start_queue),
+    SERVICE_UPDATE_QUEUE_ITEM_OVERRIDES: _Service(
+        _queue_mutation(update_item_overrides, CONF_ITEM_ID, CONF_OVERRIDES),
+        UPDATE_QUEUE_ITEM_OVERRIDES_SCHEMA,
+    ),
+    SERVICE_UPDATE_RUNNING_OVERRIDE: _Service(
+        _async_update_running_override, UPDATE_RUNNING_OVERRIDE_SCHEMA
+    ),
+}

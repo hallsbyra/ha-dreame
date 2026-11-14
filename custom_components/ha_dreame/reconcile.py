@@ -8,7 +8,6 @@ import logging
 
 from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.core import Context, HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
 
 from .audit import async_call_robot_service, record_activity
 from .const import VACUUM_DOMAIN
@@ -59,17 +58,6 @@ def evaluate_reconcile(
         seconds,
         decide(observation, item, tracking, seconds),
     )
-
-
-async def async_reconcile(
-    hass: HomeAssistant,
-    runtime_data: HaDreameRuntimeData,
-) -> ReconcileEvaluation:
-    """Run one reconcile pass under the runtime operation lock."""
-    async with runtime_data.operation_lock:
-        if runtime_data.unload_requested.is_set():
-            raise HomeAssistantError("HA Dreame runtime is unloading")
-        return await async_reconcile_under_lock(hass, runtime_data)
 
 
 async def async_reconcile_under_lock(
