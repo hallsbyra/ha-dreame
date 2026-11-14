@@ -256,8 +256,23 @@ examples only.
   or `blocked`, adding a new room is intended to begin a fresh pending queue rather than append to
   stale terminal items.
 - Controller implication: reset queue run metadata and stale items before accepting the new pending
-  room.
-- Test implication: cover add-room behavior after each terminal run state.
+  room. After `out_of_sync` or `blocked`, keep the `needs_attention` room: the robot may still be
+  cleaning it after a false alarm, and dropping it hides the only trace of that work. Drop it again
+  once a later run reaches a terminal state that is not a failure.
+- Test implication: cover add-room behavior after each terminal run state, and that a room needing
+  review survives one add after a failed run but not after a later completed run.
+
+### Cloud Reconnect Can Replay The Previous Completion Right After Dispatch
+
+- Confidence: `Observed`
+- Behavior: during unstable cloud connectivity the vacuum briefly turns `unavailable`. Right after it
+  returns, and seconds after the next room was dispatched and briefly showed `room_cleaning`, the
+  integration can report `docked` with `task_status=completed` and a stale current room from an
+  earlier task. A few seconds later the robot reports `cleaning` in the dispatched room again.
+- Controller implication: a completion in the wrong room without active-room confirmation is
+  inconclusive until one dispatch retry interval has passed since the command. Hold instead of
+  marking the queue `out_of_sync`; a persistent foreign completion still ends the run after that.
+- Test implication: cover an unconfirmed wrong-room completion inside and after the retry interval.
 
 ### Route Error Ends The Robot Task And Leaves A Blocked Queue
 

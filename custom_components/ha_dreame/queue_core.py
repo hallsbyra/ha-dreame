@@ -57,7 +57,8 @@ class ReconcileDecision:
 
 
 TERMINAL_ITEM_STATUSES = {"completed", "skipped", "needs_attention"}
-TERMINAL_RUN_STATES = {"completed", "canceled", "out_of_sync", "blocked"}
+FAILED_RUN_STATES = {"out_of_sync", "blocked"}
+TERMINAL_RUN_STATES = {"completed", "canceled", *FAILED_RUN_STATES}
 MOP_MAINTENANCE_TASK_STATUSES = {
     "returning_to_remove_mop",
     "returning_to_install_mop",
@@ -84,9 +85,20 @@ def add_room(
     room_name: str,
     overrides: dict[str, Any] | None = None,
 ) -> QueueState:
-    """Append one pending room, inheriting the previous item's overrides by default."""
+    """Append one pending room, inheriting the previous item's overrides by default.
+
+    Adding after a finished run starts a fresh queue. After a failed run it keeps the rooms that
+    need review: the robot may still be cleaning them, and hiding them loses the only trace.
+    """
     if state.run_state in TERMINAL_RUN_STATES:
-        state = QueueState()
+        kept = (
+            tuple(item for item in state.items if item.status == "needs_attention")
+            if state.run_state in FAILED_RUN_STATES
+            else ()
+        )
+        state = QueueState(items=kept)
+        if overrides is None:
+            overrides = {}
 
     if overrides is None:
         overrides = state.items[-1].overrides if state.items else {}
@@ -355,6 +367,18 @@ def evaluate_reconcile_tick(
                 normalized_observed_room_name=normalized_observed_room_name,
             )
             if completed_room_mismatch and not active_room_confirmed_since_dispatch:
+                # A cloud reconnect can replay the previous task's completion seconds after a
+                # fresh dispatch. Give the robot one retry interval to show the new room.
+                if (
+                    seconds_since_last_command is not None
+                    and seconds_since_last_command < dispatch_retry_interval_sec
+                ):
+                    return ReconcileDecision(
+                        set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
+                        event_reasons=tuple(
+                            event_reasons + ["task_status_completed_unconfirmed_room_waiting"]
+                        ),
+                    )
                 return ReconcileDecision(
                     mark_out_of_sync_reason=(
                         "task_completed_unconfirmed_room:"
