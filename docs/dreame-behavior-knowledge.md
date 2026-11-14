@@ -206,8 +206,9 @@ examples only.
 - Confidence: `Observed`
 - Behavior: low non-zero progress can appear while `current_room` still reports a different room,
   then self-correct.
-- Controller implication: use a sustained mismatch and a meaningful progress threshold before
-  issuing stop and redispatch.
+- Controller implication: never redispatch on a mismatch before one retry interval has passed
+  since the command, wait while progress is zero, and never redispatch once the queued room was
+  confirmed active.
 - Test implication: cover low-progress mismatch as wait/reconcile, not immediate retry.
 
 ### Late Room Flips Near Completion
