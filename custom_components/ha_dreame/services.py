@@ -58,12 +58,10 @@ from .const import (
     SERVICE_UPDATE_RUNNING_OVERRIDE,
     VACUUM_DOMAIN,
 )
-from .dispatch_executor import async_execute_dispatch_plan, observed_cleaning_mode
+from .dispatch_executor import async_dispatch_current_room, current_room_dispatch_plan
 from .audit import async_call_robot_service, service_audit
-from .dispatch_plan import build_room_dispatch_plan
 from .queue_core import (
     QueueError,
-    QueueState,
     add_room,
     cancel_run,
     clear_pending,
@@ -553,35 +551,16 @@ async def _async_skip_current_room_response(
 
     try:
         queue_state = skip_current_room(runtime_data.queue_state, reason="skip_pressed")
-        item = current_item(queue_state)
-        plan = (
-            build_room_dispatch_plan(
-                item,
-                vacuum_entity_id=runtime_data.vacuum_entity_id,
-                current_cleaning_mode=observed_cleaning_mode(hass, runtime_data.vacuum_entity_id),
-            )
-            if item is not None
-            else None
-        )
     except QueueError as err:
         raise HomeAssistantError(str(err)) from err
+    plan = (
+        current_room_dispatch_plan(hass, runtime_data, queue_state)
+        if queue_state.run_state == "running"
+        else None
+    )
 
-    if queue_state.run_state == "running":
-        await async_call_robot_service(
-            hass,
-            runtime_data,
-            VACUUM_DOMAIN,
-            "stop",
-            {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
-        )
-        if plan is None:
-            raise HomeAssistantError("No next room to dispatch")
-        await async_execute_dispatch_plan(hass, runtime_data, plan)
-        runtime_data.set_queue_state(queue_state)
-        runtime_data.set_run_tracking(_new_run_tracking(queue_state))
-        return _queue_status_response(entry)
-
-    # Stop first, as cancel does: a bare dock command is ignored during dock preparation.
+    # Stop the skipped room first, before the next dispatch or, as cancel does, before
+    # docking: a bare dock command is ignored during dock preparation.
     await async_call_robot_service(
         hass,
         runtime_data,
@@ -589,6 +568,10 @@ async def _async_skip_current_room_response(
         "stop",
         {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
     )
+    if plan is not None:
+        await async_dispatch_current_room(hass, runtime_data, queue_state, plan=plan)
+        return _queue_status_response(entry)
+
     await async_call_robot_service(
         hass,
         runtime_data,
@@ -765,16 +748,10 @@ async def _async_start_queue_response(
         raise HomeAssistantError("Cannot start queue while a previous robot task is still active")
     try:
         queue_state = start_run(runtime_data.queue_state)
-        item = current_item(queue_state)
-        if item is None:
-            raise HomeAssistantError("No current room to dispatch")
-        plan = build_room_dispatch_plan(
-            item,
-            vacuum_entity_id=runtime_data.vacuum_entity_id,
-            current_cleaning_mode=observed_cleaning_mode(hass, runtime_data.vacuum_entity_id),
-        )
     except QueueError as err:
         raise HomeAssistantError(str(err)) from err
+    # Validate the room's profile before accepting a deferred start.
+    plan = current_room_dispatch_plan(hass, runtime_data, queue_state)
 
     if observation.water_tank_block_reason:
         if not _entity_available(hass, runtime_data.vacuum_entity_id):
@@ -789,10 +766,9 @@ async def _async_start_queue_response(
         )
         return _queue_status_response(entry)
 
-    await async_execute_dispatch_plan(hass, runtime_data, plan)
-
-    runtime_data.set_queue_state(queue_state)
-    runtime_data.set_run_tracking(_new_run_tracking(queue_state))
+    await async_dispatch_current_room(hass, runtime_data, queue_state, plan=plan)
+    item = current_item(queue_state)
+    assert item is not None
     _LOGGER.info(
         ("HA Dreame queue started vacuum=%s run_id=%s item_id=%s room_id=%s room_name=%s"),
         runtime_data.vacuum_entity_id,
@@ -1167,18 +1143,6 @@ def _queue_status_response(entry: ConfigEntry) -> dict[str, Any]:
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
         "run_state": queue_state.run_state,
     }
-
-
-def _new_run_tracking(queue_state: QueueState) -> QueueRunTracking:
-    """Build run tracking for a queue state that has just been dispatched."""
-    if queue_state.run_id is None or queue_state.current_item_id is None:
-        raise HomeAssistantError("Queue run tracking requires an active run")
-
-    return QueueRunTracking(
-        run_id=queue_state.run_id,
-        current_item_id=queue_state.current_item_id,
-        last_command_at=datetime.now(UTC),
-    )
 
 
 def _run_tracking_response(run_tracking: QueueRunTracking | None) -> dict[str, Any] | None:
