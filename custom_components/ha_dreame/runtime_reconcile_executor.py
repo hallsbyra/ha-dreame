@@ -111,7 +111,7 @@ async def _async_resume_current_room_intent(
         result,
         run_tracking=replace(
             result.run_tracking,
-            last_command_at=datetime.now(UTC).isoformat(),
+            last_command_at=datetime.now(UTC),
         ),
     )
 
@@ -125,7 +125,7 @@ def _new_dispatched_run_tracking(result: RuntimeReconcileResult) -> QueueRunTrac
     return QueueRunTracking(
         run_id=result.queue_state.run_id,
         current_item_id=result.command_item_id,
-        last_command_at=datetime.now(UTC).isoformat(),
+        last_command_at=datetime.now(UTC),
         dispatch_retry_count=dispatch_retry_count,
     )
 

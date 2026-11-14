@@ -1,5 +1,7 @@
 """Tests for applying reconcile decisions to runtime state."""
 
+from datetime import datetime
+
 from custom_components.ha_dreame.queue_core import (
     QueueState,
     ReconcileDecision,
@@ -36,7 +38,7 @@ def _tracking(state: QueueState, **overrides: object) -> QueueRunTracking:
     values = {
         "run_id": state.run_id,
         "current_item_id": state.current_item_id,
-        "last_command_at": "2026-05-16T08:00:00+00:00",
+        "last_command_at": datetime.fromisoformat("2026-05-16T08:00:00+00:00"),
     }
     values.update(overrides)
     return QueueRunTracking(**values)

@@ -90,7 +90,7 @@ async def test_docked_paused_tank_problem_blocks_commands_and_records_caller(
         QueueRunTracking(
             run_id=queue.run_id,
             current_item_id=queue.current_item_id,
-            last_command_at="2026-01-01T00:00:00+00:00",
+            last_command_at=datetime.fromisoformat("2026-01-01T00:00:00+00:00"),
         )
     )
     with pytest.raises(HomeAssistantError, match="dirty_water_tank_not_ready"):
@@ -993,7 +993,7 @@ async def test_start_queue_service_dispatches_first_room_and_updates_runtime_sta
     assert run_tracking.current_item_id == running_item.item_id
     assert run_tracking.dispatch_retry_count == 0
     assert run_tracking.task_status_cleared_since_dispatch is False
-    datetime.fromisoformat(run_tracking.last_command_at)
+    assert run_tracking.last_command_at.tzinfo is not None
     assert response == {
         ATTR_COMPLETED_ITEMS: 0,
         ATTR_PENDING_ITEMS: 0,
@@ -1018,7 +1018,7 @@ async def test_start_queue_service_dispatches_first_room_and_updates_runtime_sta
         ATTR_ACTIVE_ROOM_CONFIRMED_SINCE_DISPATCH: False,
         ATTR_CURRENT_ITEM_ID: running_item.item_id,
         ATTR_DISPATCH_RETRY_COUNT: 0,
-        ATTR_LAST_COMMAND_AT: run_tracking.last_command_at,
+        ATTR_LAST_COMMAND_AT: run_tracking.last_command_at.isoformat(),
         ATTR_POST_RUN_MAINTENANCE_SEEN: False,
         ATTR_RUN_ID: queue_state.run_id,
         ATTR_TASK_STATUS_CLEARED_SINCE_DISPATCH: False,
@@ -1387,7 +1387,7 @@ async def test_cancel_queue_service_rejects_disabled_command_gate_without_dispat
     run_tracking = QueueRunTracking(
         run_id=queue_state.run_id,
         current_item_id=queue_state.current_item_id,
-        last_command_at="2026-01-01T00:00:00+00:00",
+        last_command_at=datetime.fromisoformat("2026-01-01T00:00:00+00:00"),
     )
     entry.runtime_data.set_run_tracking(run_tracking)
 
@@ -1561,7 +1561,7 @@ async def test_resume_queue_service_rejects_disabled_command_gate_without_dispat
     run_tracking = QueueRunTracking(
         run_id=queue_state.run_id,
         current_item_id=queue_state.current_item_id,
-        last_command_at="2026-01-01T00:00:00+00:00",
+        last_command_at=datetime.fromisoformat("2026-01-01T00:00:00+00:00"),
     )
     entry.runtime_data.set_run_tracking(run_tracking)
     hass.states.async_set(vacuum_entity_id, "paused")
@@ -1629,7 +1629,7 @@ async def test_resume_queue_service_rejects_active_robot_without_dispatch(
         QueueRunTracking(
             run_id=queue_state.run_id,
             current_item_id=queue_state.current_item_id,
-            last_command_at="2026-01-01T00:00:00+00:00",
+            last_command_at=datetime.fromisoformat("2026-01-01T00:00:00+00:00"),
         )
     )
     hass.states.async_set(vacuum_entity_id, "cleaning")
@@ -1669,7 +1669,7 @@ async def test_resume_queue_service_starts_interrupted_robot_and_refreshes_track
     run_tracking = QueueRunTracking(
         run_id=queue_state.run_id,
         current_item_id=queue_state.current_item_id,
-        last_command_at="2026-01-01T00:00:00+00:00",
+        last_command_at=datetime.fromisoformat("2026-01-01T00:00:00+00:00"),
         dispatch_retry_count=2,
     )
     entry.runtime_data.set_run_tracking(run_tracking)
@@ -1730,7 +1730,7 @@ async def test_skip_current_room_service_rejects_disabled_command_gate_without_d
     run_tracking = QueueRunTracking(
         run_id=queue_state.run_id,
         current_item_id=queue_state.current_item_id,
-        last_command_at="2026-01-01T00:00:00+00:00",
+        last_command_at=datetime.fromisoformat("2026-01-01T00:00:00+00:00"),
     )
     entry.runtime_data.set_run_tracking(run_tracking)
 
@@ -1841,7 +1841,7 @@ async def test_skip_current_room_service_advances_and_dispatches_next_room(
     assert run_tracking.current_item_id == next_item.item_id
     assert run_tracking.dispatch_retry_count == 0
     assert run_tracking.task_status_cleared_since_dispatch is False
-    datetime.fromisoformat(run_tracking.last_command_at)
+    assert run_tracking.last_command_at.tzinfo is not None
     assert response == {
         ATTR_COMPLETED_ITEMS: 0,
         ATTR_PENDING_ITEMS: 0,

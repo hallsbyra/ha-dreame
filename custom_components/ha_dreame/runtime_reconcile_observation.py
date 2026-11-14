@@ -64,12 +64,17 @@ def evaluate_runtime_reconcile_observation(
     )
     expected_room_id = queue_item.room_id if queue_item is not None else None
     expected_room_name = queue_item.room_name if queue_item is not None else None
-    seconds_since_last_command = (
-        _seconds_since_last_command(run_tracking.last_command_at, now)
-        if awaiting_completion_event and run_tracking is not None
-        else None
-    )
+    if not awaiting_completion_event or run_tracking is None:
+        return RuntimeReconcileEvaluation(
+            decision=ReconcileDecision(),
+            awaiting_completion_event=False,
+            expected_room_id=expected_room_id,
+            expected_room_name=expected_room_name,
+            observed_room_id=observation.observed_room_id,
+            observed_room_name=observation.observed_room_name,
+        )
 
+    seconds_since_last_command = max(0.0, (now - run_tracking.last_command_at).total_seconds())
     decision = evaluate_reconcile_tick(
         vacuum_state=(
             "paused"
@@ -78,18 +83,9 @@ def evaluate_runtime_reconcile_observation(
         ),
         task_status=observation.task_status,
         vacuum_error_code=observation.vacuum_error_code,
-        awaiting_completion_event=awaiting_completion_event,
         seconds_since_last_command=seconds_since_last_command,
-        task_status_cleared_since_dispatch=(
-            run_tracking.task_status_cleared_since_dispatch
-            if awaiting_completion_event and run_tracking is not None
-            else False
-        ),
-        dispatch_retry_count=(
-            run_tracking.dispatch_retry_count
-            if awaiting_completion_event and run_tracking is not None
-            else 0
-        ),
+        task_status_cleared_since_dispatch=run_tracking.task_status_cleared_since_dispatch,
+        dispatch_retry_count=run_tracking.dispatch_retry_count,
         expected_room_id=expected_room_id,
         observed_room_id=observation.observed_room_id,
         is_dock_prep_state=observation.is_dock_prep_state,
@@ -101,21 +97,13 @@ def evaluate_runtime_reconcile_observation(
         water_tank_block_reason=observation.water_tank_block_reason,
         is_mop_maintenance_state=observation.is_mop_maintenance_state,
         is_post_run_maintenance_state=observation.is_post_run_maintenance_state,
-        post_run_maintenance_seen=(
-            run_tracking.post_run_maintenance_seen
-            if awaiting_completion_event and run_tracking is not None
-            else False
-        ),
-        active_room_confirmed_since_dispatch=(
-            run_tracking.active_room_confirmed_since_dispatch
-            if awaiting_completion_event and run_tracking is not None
-            else False
-        ),
+        post_run_maintenance_seen=run_tracking.post_run_maintenance_seen,
+        active_room_confirmed_since_dispatch=run_tracking.active_room_confirmed_since_dispatch,
     )
 
     return RuntimeReconcileEvaluation(
         decision=decision,
-        awaiting_completion_event=awaiting_completion_event,
+        awaiting_completion_event=True,
         expected_room_id=expected_room_id,
         expected_room_name=expected_room_name,
         observed_room_id=observation.observed_room_id,
@@ -139,28 +127,3 @@ def _is_awaiting_completion_event(
         queue_state.run_id == run_tracking.run_id
         and queue_state.current_item_id == run_tracking.current_item_id
     )
-
-
-def _seconds_since_last_command(command_at: str, now: datetime) -> float | None:
-    parsed_command_at = _parse_aware_datetime(command_at)
-    if parsed_command_at is None or now.tzinfo is None or now.utcoffset() is None:
-        return None
-
-    return max(0.0, (now - parsed_command_at).total_seconds())
-
-
-def _parse_aware_datetime(value: str) -> datetime | None:
-    timestamp = str(value or "").strip()
-    if not timestamp:
-        return None
-    if timestamp.endswith("Z"):
-        timestamp = f"{timestamp[:-1]}+00:00"
-
-    try:
-        parsed = datetime.fromisoformat(timestamp)
-    except ValueError:
-        return None
-
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        return None
-    return parsed

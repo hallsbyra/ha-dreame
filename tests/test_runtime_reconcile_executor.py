@@ -63,7 +63,7 @@ def _tracking(state, **overrides: object) -> QueueRunTracking:
     values = {
         "run_id": state.run_id,
         "current_item_id": state.current_item_id,
-        "last_command_at": "2026-05-16T09:00:00+00:00",
+        "last_command_at": datetime.fromisoformat("2026-05-16T09:00:00+00:00"),
     }
     values.update(overrides)
     return QueueRunTracking(**values)
@@ -139,7 +139,7 @@ async def test_runtime_reconcile_executor_dispatches_next_room_after_completion(
     assert run_tracking.current_item_id == result.queue_state.current_item_id
     assert run_tracking.dispatch_retry_count == 0
     assert run_tracking.task_status_cleared_since_dispatch is False
-    datetime.fromisoformat(run_tracking.last_command_at)
+    assert run_tracking.last_command_at.tzinfo is not None
 
 
 async def test_runtime_reconcile_executor_switches_mode_before_next_room(
@@ -337,7 +337,7 @@ async def test_runtime_reconcile_executor_executes_resume_intent_and_commits_tra
     assert entry.runtime_data.run_tracking.current_item_id == state.current_item_id
     assert entry.runtime_data.run_tracking.task_status_cleared_since_dispatch is True
     assert entry.runtime_data.run_tracking.last_command_at != tracking.last_command_at
-    assert datetime.fromisoformat(entry.runtime_data.run_tracking.last_command_at)
+    assert entry.runtime_data.run_tracking.last_command_at.tzinfo is not None
 
 
 async def test_runtime_reconcile_executor_resume_failure_preserves_runtime_state(

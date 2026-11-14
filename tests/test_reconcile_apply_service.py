@@ -1,5 +1,7 @@
 """Tests for the manual reconcile apply service."""
 
+from datetime import datetime
+
 import pytest
 
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -72,7 +74,7 @@ def _tracking(state: QueueState, **overrides: object) -> QueueRunTracking:
     values = {
         "run_id": state.run_id,
         "current_item_id": state.current_item_id,
-        "last_command_at": "2000-01-01T00:00:00+00:00",
+        "last_command_at": datetime.fromisoformat("2000-01-01T00:00:00+00:00"),
     }
     values.update(overrides)
     return QueueRunTracking(**values)

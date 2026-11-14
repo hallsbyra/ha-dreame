@@ -641,7 +641,7 @@ async def _async_resume_queue_response(
         replace(
             run_tracking,
             dispatch_retry_count=0,
-            last_command_at=datetime.now(UTC).isoformat(),
+            last_command_at=datetime.now(UTC),
             post_run_maintenance_seen=False,
         )
     )
@@ -1189,7 +1189,7 @@ def _new_run_tracking(queue_state: QueueState) -> QueueRunTracking:
     return QueueRunTracking(
         run_id=queue_state.run_id,
         current_item_id=queue_state.current_item_id,
-        last_command_at=datetime.now(UTC).isoformat(),
+        last_command_at=datetime.now(UTC),
     )
 
 
@@ -1204,7 +1204,7 @@ def _run_tracking_response(run_tracking: QueueRunTracking | None) -> dict[str, A
         ),
         ATTR_CURRENT_ITEM_ID: run_tracking.current_item_id,
         ATTR_DISPATCH_RETRY_COUNT: run_tracking.dispatch_retry_count,
-        ATTR_LAST_COMMAND_AT: run_tracking.last_command_at,
+        ATTR_LAST_COMMAND_AT: run_tracking.last_command_at.isoformat(),
         ATTR_POST_RUN_MAINTENANCE_SEEN: run_tracking.post_run_maintenance_seen,
         ATTR_RUN_ID: run_tracking.run_id,
         ATTR_TASK_STATUS_CLEARED_SINCE_DISPATCH: (run_tracking.task_status_cleared_since_dispatch),

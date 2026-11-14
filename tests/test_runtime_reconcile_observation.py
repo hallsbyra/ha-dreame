@@ -22,7 +22,7 @@ def test_paused_drying_never_automatically_resumes_after_tank_recovery() -> None
     state = _running_state()
     decision = evaluate_runtime_reconcile_observation(
         state,
-        _tracking(state, last_command_at=(NOW - timedelta(minutes=10)).isoformat()),
+        _tracking(state, last_command_at=NOW - timedelta(minutes=10)),
         RuntimeReconcileObservation(
             vacuum_state="docked",
             task_status="room_cleaning",
@@ -44,7 +44,7 @@ def test_dirty_tank_blocks_automatic_dispatch_retry() -> None:
     state = _running_state()
     decision = evaluate_runtime_reconcile_observation(
         state,
-        _tracking(state, last_command_at=(NOW - timedelta(minutes=10)).isoformat()),
+        _tracking(state, last_command_at=NOW - timedelta(minutes=10)),
         RuntimeReconcileObservation(
             vacuum_state="idle",
             task_status="room_cleaning",
@@ -79,7 +79,7 @@ def _tracking(state: QueueState, **overrides: object) -> QueueRunTracking:
     values = {
         "run_id": state.run_id,
         "current_item_id": state.current_item_id,
-        "last_command_at": (NOW - timedelta(seconds=10)).isoformat(),
+        "last_command_at": NOW - timedelta(seconds=10),
         "task_status_cleared_since_dispatch": True,
     }
     values.update(overrides)
@@ -134,7 +134,7 @@ def test_evaluate_observation_completed_after_cleared_status_completes_room() ->
         _tracking(
             state,
             task_status_cleared_since_dispatch=True,
-            last_command_at=(NOW - timedelta(seconds=30)).isoformat(),
+            last_command_at=NOW - timedelta(seconds=30),
         ),
         RuntimeReconcileObservation(
             vacuum_state="idle",
@@ -177,7 +177,7 @@ def test_evaluate_observation_delayed_non_active_state_retries() -> None:
 
     evaluation = evaluate_runtime_reconcile_observation(
         state,
-        _tracking(state, last_command_at=(NOW - timedelta(seconds=30)).isoformat()),
+        _tracking(state, last_command_at=NOW - timedelta(seconds=30)),
         RuntimeReconcileObservation(
             vacuum_state="idle",
             task_status="room_cleaning",
@@ -200,7 +200,7 @@ def test_evaluate_observation_active_room_mismatch_can_retry() -> None:
         _tracking(
             state,
             dispatch_retry_count=1,
-            last_command_at=(NOW - timedelta(seconds=30)).isoformat(),
+            last_command_at=NOW - timedelta(seconds=30),
         ),
         RuntimeReconcileObservation(
             vacuum_state="cleaning",
@@ -227,7 +227,7 @@ def test_evaluate_observation_late_room_mismatch_uses_default_completion_guard()
         _tracking(
             state,
             active_room_confirmed_since_dispatch=True,
-            last_command_at=(NOW - timedelta(seconds=30)).isoformat(),
+            last_command_at=NOW - timedelta(seconds=30),
         ),
         RuntimeReconcileObservation(
             vacuum_state="cleaning",
@@ -253,7 +253,7 @@ def test_evaluate_observation_mop_maintenance_waits_without_retry() -> None:
         _tracking(
             state,
             dispatch_retry_count=2,
-            last_command_at=(NOW - timedelta(seconds=120)).isoformat(),
+            last_command_at=NOW - timedelta(seconds=120),
         ),
         RuntimeReconcileObservation(
             vacuum_state="docked",
@@ -267,43 +267,3 @@ def test_evaluate_observation_mop_maintenance_waits_without_retry() -> None:
     assert evaluation.decision.retry_current_room is False
     assert evaluation.decision.mark_out_of_sync_reason is None
     assert evaluation.decision.event_reasons == ("mop_maintenance_waiting",)
-
-
-def test_evaluate_observation_bad_command_timestamp_does_not_retry() -> None:
-    """Test invalid command timestamps do not fabricate elapsed retry time."""
-    state = _running_state()
-
-    evaluation = evaluate_runtime_reconcile_observation(
-        state,
-        _tracking(state, last_command_at="not-a-timestamp"),
-        RuntimeReconcileObservation(
-            vacuum_state="idle",
-            task_status="room_cleaning",
-            observed_room_id=1,
-        ),
-        now=NOW,
-    )
-
-    assert evaluation.seconds_since_last_command is None
-    assert evaluation.decision.retry_current_room is False
-    assert evaluation.decision.mark_out_of_sync_reason is None
-
-
-def test_evaluate_observation_naive_command_timestamp_does_not_retry() -> None:
-    """Test timezone-naive command timestamps are treated as elapsed-time unknown."""
-    state = _running_state()
-
-    evaluation = evaluate_runtime_reconcile_observation(
-        state,
-        _tracking(state, last_command_at="2026-05-17T07:00:00"),
-        RuntimeReconcileObservation(
-            vacuum_state="idle",
-            task_status="room_cleaning",
-            observed_room_id=1,
-        ),
-        now=NOW,
-    )
-
-    assert evaluation.seconds_since_last_command is None
-    assert evaluation.decision.retry_current_room is False
-    assert evaluation.decision.mark_out_of_sync_reason is None

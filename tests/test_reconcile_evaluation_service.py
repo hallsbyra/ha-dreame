@@ -1,5 +1,7 @@
 """Tests for the read-only reconcile evaluation service."""
 
+from datetime import datetime
+
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 
@@ -69,7 +71,7 @@ def _tracking(state: QueueState, **overrides: object) -> QueueRunTracking:
     values = {
         "run_id": state.run_id,
         "current_item_id": state.current_item_id,
-        "last_command_at": "2000-01-01T00:00:00+00:00",
+        "last_command_at": datetime.fromisoformat("2000-01-01T00:00:00+00:00"),
         "task_status_cleared_since_dispatch": True,
     }
     values.update(overrides)

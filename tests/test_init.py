@@ -1,5 +1,7 @@
 """Tests for HA Dreame integration setup."""
 
+from datetime import datetime
+
 import pytest
 
 from homeassistant.core import HomeAssistant
@@ -83,7 +85,7 @@ async def test_runtime_data_updates_run_tracking(
     run_tracking = QueueRunTracking(
         run_id="run-1",
         current_item_id="item-1",
-        last_command_at="2026-05-15T18:00:00+00:00",
+        last_command_at=datetime.fromisoformat("2026-05-15T18:00:00+00:00"),
     )
     entry.runtime_data.set_run_tracking(run_tracking)
     await hass.async_block_till_done()

@@ -268,8 +268,7 @@ def evaluate_reconcile_tick(
     *,
     vacuum_state: str,
     task_status: str,
-    awaiting_completion_event: bool,
-    seconds_since_last_command: float | None,
+    seconds_since_last_command: float,
     task_status_cleared_since_dispatch: bool,
     dispatch_retry_count: int,
     expected_room_id: int | None,
@@ -287,10 +286,7 @@ def evaluate_reconcile_tick(
     post_run_maintenance_seen: bool = False,
     active_room_confirmed_since_dispatch: bool = False,
 ) -> ReconcileDecision:
-    """Evaluate one robot/queue reconciliation tick."""
-    if not awaiting_completion_event:
-        return ReconcileDecision()
-
+    """Evaluate one tick while the tracked current room awaits completion."""
     normalized_vacuum = (vacuum_state or "").lower()
     normalized_task = (task_status or "").lower()
     normalized_error = (vacuum_error_code or "").lower()
@@ -340,7 +336,6 @@ def evaluate_reconcile_tick(
             # fresh dispatch. Give an unconfirmed room one retry interval to show itself.
             if (
                 not active_room_confirmed_since_dispatch
-                and seconds_since_last_command is not None
                 and seconds_since_last_command < DISPATCH_RETRY_INTERVAL_SEC
             ):
                 return ReconcileDecision(
@@ -419,11 +414,7 @@ def evaluate_reconcile_tick(
                 reset_dispatch_retry_count=True,
                 event_reasons=tuple(event_reasons + [VACUUM_ERROR_WAIT_REASON]),
             )
-        if (
-            dock_prep_resume_ready
-            and seconds_since_last_command is not None
-            and seconds_since_last_command >= DISPATCH_RETRY_INTERVAL_SEC
-        ):
+        if dock_prep_resume_ready and seconds_since_last_command >= DISPATCH_RETRY_INTERVAL_SEC:
             return ReconcileDecision(
                 resume_current_room=True,
                 set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
@@ -479,10 +470,7 @@ def evaluate_reconcile_tick(
             event_reasons=tuple(event_reasons + ["dispatch_retry_exhausted"]),
         )
 
-    if (
-        seconds_since_last_command is not None
-        and seconds_since_last_command >= DISPATCH_RETRY_INTERVAL_SEC
-    ):
+    if seconds_since_last_command >= DISPATCH_RETRY_INTERVAL_SEC:
         return ReconcileDecision(
             retry_current_room=True,
             set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,
@@ -508,7 +496,7 @@ def _evaluate_active_reconcile(
     normalized_expected_room_name: str,
     normalized_observed_room_name: str,
     cleaning_progress: int | None,
-    seconds_since_last_command: float | None,
+    seconds_since_last_command: float,
     dispatch_retry_count: int,
     active_room_confirmed_since_dispatch: bool,
 ) -> ReconcileDecision:
@@ -584,10 +572,7 @@ def _evaluate_active_reconcile(
             event_reasons=tuple(event_reasons + ["active_room_mismatch_retry_exhausted"]),
         )
 
-    if (
-        seconds_since_last_command is not None
-        and seconds_since_last_command >= DISPATCH_RETRY_INTERVAL_SEC
-    ):
+    if seconds_since_last_command >= DISPATCH_RETRY_INTERVAL_SEC:
         return ReconcileDecision(
             retry_current_room=True,
             set_task_status_cleared_since_dispatch=set_task_status_cleared_since_dispatch,

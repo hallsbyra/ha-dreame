@@ -12,7 +12,6 @@ def _decision(**overrides: object) -> ReconcileDecision:
     kwargs = {
         "vacuum_state": "cleaning",
         "task_status": "room_cleaning",
-        "awaiting_completion_event": True,
         "seconds_since_last_command": 5,
         "task_status_cleared_since_dispatch": True,
         "dispatch_retry_count": 0,
@@ -22,13 +21,6 @@ def _decision(**overrides: object) -> ReconcileDecision:
     }
     kwargs.update(overrides)
     return evaluate_reconcile_tick(**kwargs)
-
-
-def test_reconcile_noop_when_not_awaiting_completion() -> None:
-    """Test reconciliation does nothing when no room is awaiting completion."""
-    decision = _decision(awaiting_completion_event=False)
-
-    assert decision == ReconcileDecision()
 
 
 def test_reconcile_sets_task_status_cleared_after_dispatch() -> None:
