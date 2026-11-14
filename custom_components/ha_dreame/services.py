@@ -404,6 +404,12 @@ def async_remove_services(hass: HomeAssistant) -> None:
     hass.services.async_remove(DOMAIN, SERVICE_UPDATE_RUNNING_OVERRIDE)
 
 
+def _require_commands(runtime_data: HaDreameRuntimeData) -> None:
+    """Reject a command handler before it changes queue state without the robot."""
+    if not runtime_data.commands_enabled:
+        raise HomeAssistantError("HA Dreame robot commands are disabled")
+
+
 def _runtime_entry(hass: HomeAssistant, config_entry_id: str) -> ConfigEntry:
     """Return a loaded HA Dreame entry for service handling."""
     entry = hass.data.get(DOMAIN, {}).get(config_entry_id)
@@ -481,8 +487,7 @@ async def _async_apply_reconcile_response(
     entry = _runtime_entry(hass, config_entry_id)
     runtime_data = entry.runtime_data
 
-    if not runtime_data.commands_enabled:
-        raise HomeAssistantError("HA Dreame robot commands are disabled")
+    _require_commands(runtime_data)
 
     outcome = await async_evaluate_and_apply_runtime_reconcile(
         hass,
@@ -506,8 +511,7 @@ async def _async_cancel_queue_response(
     entry = _runtime_entry(hass, config_entry_id)
     runtime_data = entry.runtime_data
 
-    if not runtime_data.commands_enabled:
-        raise HomeAssistantError("HA Dreame robot commands are disabled")
+    _require_commands(runtime_data)
 
     if runtime_data.queue_state.run_state == "waiting_for_tanks":
         runtime_data.set_queue_state(cancel_run(runtime_data.queue_state))
@@ -516,17 +520,17 @@ async def _async_cancel_queue_response(
 
     await async_call_robot_service(
         hass,
+        runtime_data,
         VACUUM_DOMAIN,
         "stop",
         {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
-        blocking=True,
     )
     await async_call_robot_service(
         hass,
+        runtime_data,
         VACUUM_DOMAIN,
         "return_to_base",
         {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
-        blocking=True,
     )
 
     try:
@@ -547,9 +551,6 @@ async def _async_skip_current_room_response(
     entry = _runtime_entry(hass, config_entry_id)
     runtime_data = entry.runtime_data
 
-    if not runtime_data.commands_enabled:
-        raise HomeAssistantError("HA Dreame robot commands are disabled")
-
     try:
         queue_state = skip_current_room(runtime_data.queue_state, reason="skip_pressed")
         item = current_item(queue_state)
@@ -568,18 +569,14 @@ async def _async_skip_current_room_response(
     if queue_state.run_state == "running":
         await async_call_robot_service(
             hass,
+            runtime_data,
             VACUUM_DOMAIN,
             "stop",
             {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
-            blocking=True,
         )
         if plan is None:
             raise HomeAssistantError("No next room to dispatch")
-        await async_execute_dispatch_plan(
-            hass,
-            plan,
-            commands_enabled=runtime_data.commands_enabled,
-        )
+        await async_execute_dispatch_plan(hass, runtime_data, plan)
         runtime_data.set_queue_state(queue_state)
         runtime_data.set_run_tracking(_new_run_tracking(queue_state))
         return _queue_status_response(entry)
@@ -587,17 +584,17 @@ async def _async_skip_current_room_response(
     # Stop first, as cancel does: a bare dock command is ignored during dock preparation.
     await async_call_robot_service(
         hass,
+        runtime_data,
         VACUUM_DOMAIN,
         "stop",
         {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
-        blocking=True,
     )
     await async_call_robot_service(
         hass,
+        runtime_data,
         VACUUM_DOMAIN,
         "return_to_base",
         {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
-        blocking=True,
     )
     runtime_data.set_queue_state(queue_state)
     runtime_data.set_run_tracking(None)
@@ -612,8 +609,6 @@ async def _async_resume_queue_response(
     entry = _runtime_entry(hass, config_entry_id)
     runtime_data = entry.runtime_data
 
-    if not runtime_data.commands_enabled:
-        raise HomeAssistantError("HA Dreame robot commands are disabled")
     if runtime_data.queue_state.run_state != "running":
         raise HomeAssistantError("Queue is not running")
 
@@ -632,10 +627,10 @@ async def _async_resume_queue_response(
 
     await async_call_robot_service(
         hass,
+        runtime_data,
         VACUUM_DOMAIN,
         "start",
         {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
-        blocking=True,
     )
     runtime_data.set_run_tracking(
         replace(
@@ -731,8 +726,6 @@ async def _async_update_running_override_response(
     entry = _runtime_entry(hass, config_entry_id)
     runtime_data = entry.runtime_data
 
-    if not runtime_data.commands_enabled:
-        raise HomeAssistantError("HA Dreame robot commands are disabled")
     if runtime_data.queue_state.run_state != "running":
         raise HomeAssistantError("Queue is not running")
 
@@ -744,7 +737,7 @@ async def _async_update_running_override_response(
     if hass.states.get(entity_id) is None:
         raise HomeAssistantError(f"Running override entity is not available: {entity_id}")
 
-    await async_call_robot_service(hass, domain, service, data, blocking=True)
+    await async_call_robot_service(hass, runtime_data, domain, service, data)
     return {
         CONF_CONFIG_ENTRY_ID: entry.entry_id,
         CONF_FIELD: field,
@@ -761,8 +754,7 @@ async def _async_start_queue_response(
     entry = _runtime_entry(hass, config_entry_id)
     runtime_data = entry.runtime_data
 
-    if not runtime_data.commands_enabled:
-        raise HomeAssistantError("HA Dreame robot commands are disabled")
+    _require_commands(runtime_data)
 
     observation = build_runtime_reconcile_observation(
         hass,
@@ -797,11 +789,7 @@ async def _async_start_queue_response(
         )
         return _queue_status_response(entry)
 
-    await async_execute_dispatch_plan(
-        hass,
-        plan,
-        commands_enabled=runtime_data.commands_enabled,
-    )
+    await async_execute_dispatch_plan(hass, runtime_data, plan)
 
     runtime_data.set_queue_state(queue_state)
     runtime_data.set_run_tracking(_new_run_tracking(queue_state))

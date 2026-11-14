@@ -10,6 +10,23 @@ from custom_components.ha_dreame.dispatch_executor import (
     async_execute_dispatch_plan,
 )
 from custom_components.ha_dreame.dispatch_plan import DispatchServiceCall
+from custom_components.ha_dreame.runtime import HaDreameRuntimeData
+
+from .helpers import mock_entry, register_entity
+
+pytestmark = pytest.mark.usefixtures("mock_dreame_vacuum_dependency")
+
+
+async def _runtime(hass: HomeAssistant, *, commands_enabled: bool = True) -> HaDreameRuntimeData:
+    vacuum_entity_id = register_entity(hass, "vacuum.robot")
+    entry = mock_entry(
+        {"vacuum_entity_id": vacuum_entity_id},
+        options={"allow_robot_commands": commands_enabled},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    return entry.runtime_data
 
 
 def _plan() -> tuple[DispatchServiceCall, ...]:
@@ -53,8 +70,8 @@ async def test_execute_dispatch_plan_rejects_disabled_command_gate(
     with pytest.raises(HomeAssistantError, match="robot commands are disabled"):
         await async_execute_dispatch_plan(
             hass,
+            await _runtime(hass, commands_enabled=False),
             _plan(),
-            commands_enabled=False,
         )
 
     assert calls == []
@@ -79,11 +96,7 @@ async def test_execute_dispatch_plan_calls_services_in_order(
         "vacuum_clean_segment",
         _record_call,
     )
-    await async_execute_dispatch_plan(
-        hass,
-        _plan(),
-        commands_enabled=True,
-    )
+    await async_execute_dispatch_plan(hass, await _runtime(hass), _plan())
 
     assert calls == [
         (
@@ -132,10 +145,6 @@ async def test_execute_dispatch_plan_stops_after_service_failure(
     )
 
     with pytest.raises(HomeAssistantError, match="dispatch failed"):
-        await async_execute_dispatch_plan(
-            hass,
-            _plan(),
-            commands_enabled=True,
-        )
+        await async_execute_dispatch_plan(hass, await _runtime(hass), _plan())
 
     assert calls == [(DREAME_VACUUM_DOMAIN, "vacuum_set_custom_cleaning")]

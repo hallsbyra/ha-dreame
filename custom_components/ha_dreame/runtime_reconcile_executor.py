@@ -79,11 +79,7 @@ async def _async_dispatch_current_room_intent(
     previous_run_tracking = runtime_data.run_tracking
     _commit_runtime_state(runtime_data, result.queue_state, run_tracking)
     try:
-        await async_execute_dispatch_plan(
-            hass,
-            plan,
-            commands_enabled=runtime_data.commands_enabled,
-        )
+        await async_execute_dispatch_plan(hass, runtime_data, plan)
     except Exception:
         _commit_runtime_state(runtime_data, previous_queue_state, previous_run_tracking)
         raise
@@ -95,17 +91,15 @@ async def _async_resume_current_room_intent(
     runtime_data: HaDreameRuntimeData,
     result: RuntimeReconcileResult,
 ) -> RuntimeReconcileResult:
-    if not runtime_data.commands_enabled:
-        raise HomeAssistantError("HA Dreame robot commands are disabled")
     # Resume intents are only produced for the tracked current room.
     assert result.run_tracking is not None
 
     await async_call_robot_service(
         hass,
+        runtime_data,
         VACUUM_DOMAIN,
         "start",
         {ATTR_ENTITY_ID: runtime_data.vacuum_entity_id},
-        blocking=True,
     )
     return replace(
         result,

@@ -16,9 +16,9 @@ from homeassistant.core import (
     ServiceCall,
     callback,
 )
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.event import async_track_state_change_event
 
-from .const import DOMAIN
 from .runtime import HaDreameRuntimeData
 
 _LOGGER = logging.getLogger(__name__)
@@ -115,43 +115,36 @@ def service_audit(runtime: HaDreameRuntimeData, call: ServiceCall | None):
 
 async def async_call_robot_service(
     hass: HomeAssistant,
+    runtime: HaDreameRuntimeData,
     domain: str,
     service: str,
     data: dict[str, Any],
-    *,
-    blocking: bool = True,
 ) -> None:
-    """Send a command with provenance and distinguish acceptance from physical start."""
+    """Send one gated robot command with provenance.
+
+    Every command the integration sends goes through here, whichever entity it targets.
+    `accepted` means the service call returned, not that the robot physically started.
+    """
+    if not runtime.commands_enabled:
+        raise HomeAssistantError("HA Dreame robot commands are disabled")
     call = _CALL.get()
     context = call.context if call else Context()
     source = f"ha_dreame.{call.service}" if call else "automatic_reconcile"
-    runtime = next(
-        (
-            entry.runtime_data
-            for entry in hass.data.get(DOMAIN, {}).values()
-            if entry.runtime_data.vacuum_entity_id == data.get("entity_id")
-        ),
-        None,
-    )
     action = f"{domain}.{service}"
-    if runtime is not None:
-        record_activity(runtime, action, "requested", context=context, source=source)
+    record_activity(runtime, action, "requested", context=context, source=source)
     try:
-        await hass.services.async_call(domain, service, data, blocking=blocking, context=context)
+        await hass.services.async_call(domain, service, data, blocking=True, context=context)
     except Exception as err:
-        if runtime is not None:
-            record_activity(
-                runtime,
-                action,
-                "rejected",
-                context=context,
-                source=source,
-                reason=type(err).__name__,
-            )
+        record_activity(
+            runtime,
+            action,
+            "rejected",
+            context=context,
+            source=source,
+            reason=type(err).__name__,
+        )
         raise
-    else:
-        if runtime is not None:
-            record_activity(runtime, action, "accepted", context=context, source=source)
+    record_activity(runtime, action, "accepted", context=context, source=source)
 
 
 def register_external_command_audit(hass: HomeAssistant, runtime: HaDreameRuntimeData):

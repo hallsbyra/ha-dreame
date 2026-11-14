@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
 
-from .dispatch_plan import DispatchServiceCall, cleaning_mode_entity_id
 from .audit import async_call_robot_service
+from .dispatch_plan import DispatchServiceCall, cleaning_mode_entity_id
+from .runtime import HaDreameRuntimeData
 
 
 def observed_cleaning_mode(hass: HomeAssistant, vacuum_entity_id: str) -> str | None:
@@ -17,19 +17,15 @@ def observed_cleaning_mode(hass: HomeAssistant, vacuum_entity_id: str) -> str | 
 
 async def async_execute_dispatch_plan(
     hass: HomeAssistant,
+    runtime_data: HaDreameRuntimeData,
     plan: tuple[DispatchServiceCall, ...],
-    *,
-    commands_enabled: bool,
 ) -> None:
-    """Execute planned dispatch service calls when robot commands are enabled."""
-    if not commands_enabled:
-        raise HomeAssistantError("HA Dreame robot commands are disabled")
-
+    """Execute planned dispatch service calls in order through the command gate."""
     for planned_call in plan:
         await async_call_robot_service(
             hass,
+            runtime_data,
             planned_call.domain,
             planned_call.service,
             dict(planned_call.data),
-            blocking=True,
         )

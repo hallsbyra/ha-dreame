@@ -2,6 +2,7 @@
 
 import pytest
 from homeassistant.core import Context, HomeAssistant, ServiceCall
+from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.ha_dreame.audit import (
     async_call_robot_service,
@@ -16,7 +17,7 @@ pytestmark = pytest.mark.usefixtures("mock_dreame_vacuum_dependency")
 
 async def test_audit_correlates_user_automatic_and_external_commands(hass: HomeAssistant) -> None:
     vacuum = register_entity(hass, "vacuum.dreame_robot")
-    entry = mock_entry({"vacuum_entity_id": vacuum})
+    entry = mock_entry({"vacuum_entity_id": vacuum}, options={"allow_robot_commands": True})
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
@@ -29,7 +30,9 @@ async def test_audit_correlates_user_automatic_and_external_commands(hass: HomeA
     caller = Context(user_id="test-user")
     call = ServiceCall(hass, DOMAIN, "resume_queue", {}, context=caller)
     with service_audit(entry.runtime_data, call):
-        await async_call_robot_service(hass, "vacuum", "start", {"entity_id": vacuum})
+        await async_call_robot_service(
+            hass, entry.runtime_data, "vacuum", "start", {"entity_id": vacuum}
+        )
     await hass.async_block_till_done()
     assert contexts[-1] == caller
     events = list(entry.runtime_data.recent_activity)
@@ -43,7 +46,9 @@ async def test_audit_correlates_user_automatic_and_external_commands(hass: HomeA
     assert not any(e["outcome"] == "observed_request" for e in events)
 
     with service_audit(entry.runtime_data, call), automatic_audit():
-        await async_call_robot_service(hass, "vacuum", "start", {"entity_id": vacuum})
+        await async_call_robot_service(
+            hass, entry.runtime_data, "vacuum", "start", {"entity_id": vacuum}
+        )
     await hass.async_block_till_done()
     assert any(e["source"] == "automatic_reconcile" for e in entry.runtime_data.recent_activity)
 
@@ -128,3 +133,27 @@ async def test_audit_records_cleaning_mode_switch_before_dispatch(hass: HomeAssi
         ("dreame_vacuum.vacuum_clean_segment", "requested", "ha_dreame.start_queue", caller.id),
         ("dreame_vacuum.vacuum_clean_segment", "accepted", "ha_dreame.start_queue", caller.id),
     ]
+
+
+async def test_robot_commands_are_refused_while_commands_are_disabled(hass: HomeAssistant) -> None:
+    vacuum = register_entity(hass, "vacuum.dreame_robot")
+    entry = mock_entry({"vacuum_entity_id": vacuum})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    calls = []
+
+    async def record(call: ServiceCall) -> None:
+        calls.append(call)
+
+    hass.services.async_register("select", "select_option", record)
+    with pytest.raises(HomeAssistantError, match="robot commands are disabled"):
+        await async_call_robot_service(
+            hass,
+            entry.runtime_data,
+            "select",
+            "select_option",
+            {"entity_id": "select.dreame_robot_cleaning_mode", "option": "sweeping"},
+        )
+    assert calls == []
+    assert not entry.runtime_data.recent_activity
