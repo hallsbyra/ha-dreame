@@ -45,6 +45,7 @@ class DispatchTracking:
     active_room_confirmed_since_dispatch: bool = False
     task_status_cleared_since_dispatch: bool = False
     post_run_maintenance_seen: bool = False
+    tank_interruption_seen: bool = False
 
 
 @dataclass(frozen=True)
@@ -363,6 +364,7 @@ def queue_state_to_dict(state: QueueState) -> dict[str, Any]:
             "active_room_confirmed_since_dispatch": dispatch.active_room_confirmed_since_dispatch,
             "task_status_cleared_since_dispatch": dispatch.task_status_cleared_since_dispatch,
             "post_run_maintenance_seen": dispatch.post_run_maintenance_seen,
+            "tank_interruption_seen": dispatch.tank_interruption_seen,
         },
     }
 
@@ -417,6 +419,10 @@ def _dispatch_from_dict(data: object) -> DispatchTracking:
         ),
         task_status_cleared_since_dispatch=_field(data, "task_status_cleared_since_dispatch", bool),
         post_run_maintenance_seen=_field(data, "post_run_maintenance_seen", bool),
+        # Stores written before this flag existed have no tank memory.
+        tank_interruption_seen=bool(
+            _field(data, "tank_interruption_seen", bool, optional=True) or False
+        ),
     )
 
 

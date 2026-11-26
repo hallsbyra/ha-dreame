@@ -359,6 +359,7 @@ async def _async_resume_queue(
                 dispatch_retry_count=0,
                 last_command_at=datetime.now(UTC),
                 post_run_maintenance_seen=False,
+                tank_interruption_seen=False,
             ),
         )
     )

@@ -16,6 +16,20 @@ DISPATCH_RETRY_MAX = 2
 ACTIVE_ROOM_MISMATCH_MIN_PROGRESS = 1
 ACTIVE_ROOM_MISMATCH_MAX_PROGRESS = 90
 NO_ERROR_CODES = frozenset({"", "unknown", "unavailable", "no_error"})
+# Reported after a finished task; the robot can still clean, so it is not an error.
+ADVISORY_ERROR_CODES = frozenset({"clean_mop_pad"})
+# Error codes that mean a dock or robot water tank stopped the room.
+TANK_ERROR_CODES = frozenset(
+    {
+        "dirty_tank_not_installed",
+        "dirty_water_tank",
+        "dirty_water_tank_full",
+        "no_tank_box",
+        "water_box_empty",
+        "water_tank",
+        "water_tank_dry",
+    }
+)
 VACUUM_ERROR_WAIT_REASON = "vacuum_error_waiting_user_action"
 
 Action = Literal["hold", "complete", "retry", "resume", "fail"]
@@ -58,7 +72,7 @@ class Decision:
 
 def is_meaningful_error(error_code: str) -> bool:
     """Return whether a normalized Dreame error code is an actionable robot error."""
-    return error_code not in NO_ERROR_CODES
+    return error_code not in NO_ERROR_CODES and error_code not in ADVISORY_ERROR_CODES
 
 
 def decide(
@@ -80,6 +94,10 @@ def decide(
         if not tracking.task_status_cleared_since_dispatch:
             tracking = replace(tracking, task_status_cleared_since_dispatch=True)
             reasons.append("task_status_cleared_after_dispatch")
+
+    tank_problem = observation.water_tank_block_reason or error in TANK_ERROR_CODES
+    if tank_problem and not tracking.tank_interruption_seen:
+        tracking = replace(tracking, tank_interruption_seen=True)
 
     def hold(*extra: str, **changes: Any) -> Decision:
         return Decision("hold", replace(tracking, **changes), (*reasons, *extra))
@@ -153,6 +171,20 @@ def decide(
     if observation.water_tank_block_reason:
         return hold(observation.water_tank_block_reason)
 
+    # A room the tanks stopped continues once they are back, even while the dock dries
+    # the mop or the robot sleeps in it; only a pause without a tank problem waits for
+    # the user.
+    if tracking.tank_interruption_seen and _stopped_in_dock(observation, vacuum, task):
+        if is_meaningful_error(error):
+            return wait_for_user_action()
+        if seconds_since_command < DISPATCH_RETRY_INTERVAL_SEC:
+            return hold("tank_recovered_waiting_retry_interval")
+        return Decision(
+            "resume",
+            replace(tracking, tank_interruption_seen=False),
+            (*reasons, "tank_recovered_resume_requested"),
+        )
+
     # Paused drying needs explicit continuation; it is not a resumable paused wash.
     dock_prep_paused = observation.is_dock_prep_paused and not observation.is_drying_state
     if observation.is_dock_prep_state and dock_prep_paused and not task.endswith("_paused"):
@@ -180,7 +212,11 @@ def decide(
                 return hold()
             if tracking.dispatch_retry_count > 0:
                 reasons.append("dispatch_retry_reset_after_active_confirmation")
-            return hold(active_room_confirmed_since_dispatch=True, dispatch_retry_count=0)
+            return hold(
+                active_room_confirmed_since_dispatch=True,
+                dispatch_retry_count=0,
+                tank_interruption_seen=False,
+            )
 
         # Redispatching a robot that is already cleaning only resets its target, and the
         # room sensor flips at doorways. Once the room is confirmed, a mismatch is never
@@ -220,6 +256,15 @@ def decide(
     if seconds_since_command >= DISPATCH_RETRY_INTERVAL_SEC:
         return retry(f"retry_dispatch_requested:{tracking.dispatch_retry_count + 1}")
     return hold()
+
+
+def _stopped_in_dock(observation: Observation, vacuum: str, task: str) -> bool:
+    """Return whether the robot stopped its room task, rather than still working on it."""
+    if vacuum == "paused" or task.endswith("_paused"):
+        return True
+    if observation.is_dock_prep_paused or observation.is_drying_state:
+        return True
+    return vacuum in {"docked", "idle"} and not observation.is_dock_prep_state
 
 
 def _room_matches(observation: Observation, item: QueueItem) -> bool | None:

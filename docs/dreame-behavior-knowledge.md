@@ -107,10 +107,43 @@ examples only.
   reports `not_installed_or_full`. The persistent tank sensor must block robot dispatch,
   manual resume and automatic recovery. Present but unavailable tank sensors also
   block; an absent optional sensor remains compatible with existing installations.
-- Paused drying requires explicit continuation. It must not be treated as paused
-  washing that automatically resumes after a refill. The card shows `Paused` and
-  the tank problem instead of claiming that a room is being cleaned.
+- A pause with no tank problem in the current room still requires explicit continuation;
+  paused drying is not treated as paused washing. The card shows `Paused` and the tank
+  problem instead of claiming that a room is being cleaned.
 - Regression coverage exercises the combined signals, tank recovery and command gates.
+
+### A Room Stopped By The Tanks Continues Once They Are Back (2026-11-26)
+
+- Confidence: `Observed`.
+- Behavior: during pre-wash a full dirty-water tank raised `dirty_water_tank` and the tank
+  sensor reported `not_installed_or_full`. The robot paused (`washing_paused`), the error
+  cleared within a minute, and the dock moved on to `drying` with task `room_cleaning`.
+  After the tank was emptied and reinstalled the robot stayed in the dock, first with
+  status `paused` and later `sleeping`, and never continued the room on its own. The
+  vendor app offers Continue in that state.
+- Controller implication: the dispatch tracking remembers `tank_interruption_seen` when a
+  tank sensor blocks or a tank error code is reported while the room awaits completion.
+  Once no tank blocks and no other error is present, a room that stopped in the dock
+  (paused, task `*_paused`, paused dock prep, drying, or docked/idle without dock work)
+  is resumed with `vacuum.start` after the normal retry interval, once. Confirmed active
+  cleaning, a manual resume or a resume decision clears the flag. A robot that is already
+  washing, cleaning or returning is left alone. This replaces the 2026-09-05 rule that
+  paused drying always waits for the user, which left a refilled queue stuck.
+- Test implication: cover the flag from tank sensor and tank error code, resume from
+  paused drying, sleeping in the dock and `*_paused`, the retry interval, a remaining error
+  or tank block, a working robot, and older stored tracking without the flag.
+
+### The Mop Pad Reminder After A Task Is Not An Error (2026-11-26)
+
+- Confidence: `Inferred`: `dreame_vacuum` classifies `clean_mop_pad` (fault 114) as a
+  dismissible warning; a start with it present was not attempted before this rule.
+- Behavior: after a finished task the robot can report `sensor.<robot>_error=clean_mop_pad`
+  ("the cleaning task is complete, please clean the mop pad washboard"). It stays until
+  the warning is cleared, also after the washboard is cleaned.
+- Controller implication: treat `clean_mop_pad` like no error. Start, resume and the
+  reconcile error holds ignore it. Other `dreame_vacuum` warnings such as an empty water
+  tank or a removed mop still block, because they stop cleaning.
+- Test implication: cover start readiness and the error classification with the reminder.
 
 ### The Queue Survives Home Assistant Restarts
 
