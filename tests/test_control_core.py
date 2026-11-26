@@ -121,6 +121,14 @@ def test_robot_error_rejects_start(observation: Observation) -> None:
     assert _decide(_pending(), observation).reason(START) == "robot_error"
 
 
+def test_mop_pad_reminder_after_a_finished_task_does_not_block_start() -> None:
+    """Dreame asks to clean the washboard after a task; that is a reminder, not an error."""
+    observation = replace(READY, vacuum_error_code="clean_mop_pad")
+
+    assert start_readiness(observation) is None
+    assert _decide(_pending(), observation).allows(START)
+
+
 @pytest.mark.parametrize(
     "observation",
     [TANK, replace(TANK, vacuum_state="docked", robot_paused=True)],

@@ -5,7 +5,12 @@ from datetime import UTC, datetime
 import pytest
 
 from custom_components.ha_dreame.queue_core import QueueItem
-from custom_components.ha_dreame.reconcile_core import Decision, Observation, decide
+from custom_components.ha_dreame.reconcile_core import (
+    Decision,
+    Observation,
+    decide,
+    is_meaningful_error,
+)
 from custom_components.ha_dreame.queue_core import DispatchTracking
 
 NOW = datetime(2026, 5, 17, 8, 0, tzinfo=UTC)
@@ -14,6 +19,7 @@ TRACKING_FIELDS = (
     "dispatch_retry_count",
     "post_run_maintenance_seen",
     "active_room_confirmed_since_dispatch",
+    "tank_interruption_seen",
 )
 
 
@@ -793,8 +799,8 @@ def test_reconcile_paused_robot_is_paused_unless_in_error() -> None:
     assert decision.blocked is True
 
 
-def test_paused_drying_never_automatically_resumes_after_tank_recovery() -> None:
-    """Test paused drying is not resumable dock preparation, even when refill is ready."""
+def test_paused_drying_without_a_tank_interruption_waits_for_the_user() -> None:
+    """Test paused drying is not resumable dock preparation when no tank stopped the room."""
     decision = _decision(
         vacuum_state="docked",
         task_status="room_cleaning",
@@ -808,6 +814,149 @@ def test_paused_drying_never_automatically_resumes_after_tank_recovery() -> None
 
     assert decision.action == "hold"
     assert "vacuum_paused_waiting" in decision.reasons
+
+
+def test_tank_problem_during_a_room_is_remembered() -> None:
+    """Test a tank problem marks the room as interrupted by the tanks."""
+    decision = _decision(
+        vacuum_state="docked",
+        task_status="room_cleaning",
+        robot_paused=True,
+        water_tank_block_reason="dirty_water_tank_not_ready",
+        seconds_since_last_command=120,
+    )
+
+    assert decision.action == "hold"
+    assert decision.tracking.tank_interruption_seen is True
+    assert decision.reasons == ("dirty_water_tank_not_ready",)
+
+
+def test_tank_error_during_a_room_is_remembered() -> None:
+    """Test a tank error code marks the room even before the tank sensor reports it."""
+    decision = _decision(
+        vacuum_state="error",
+        task_status="room_cleaning",
+        vacuum_error_code="dirty_water_tank",
+        seconds_since_last_command=120,
+    )
+
+    assert decision.tracking.tank_interruption_seen is True
+    assert decision.reasons == ("vacuum_error_waiting_user_action",)
+
+
+@pytest.mark.parametrize(
+    "observation",
+    [
+        # Paused while the dock dries the mop, right after the tank was fixed.
+        {
+            "robot_paused": True,
+            "is_drying_state": True,
+            "is_dock_prep_state": True,
+            "is_dock_prep_paused": True,
+            "dock_prep_resume_ready": True,
+        },
+        # Later the robot falls asleep in the dock with the room task still open.
+        {"is_drying_state": True, "is_dock_prep_state": True},
+        {"vacuum_state": "paused", "task_status": "room_cleaning_paused"},
+        {},
+    ],
+)
+def test_room_resumes_once_the_tanks_are_back(observation: dict) -> None:
+    """Test a room stopped by the tanks continues by itself once they are ready again."""
+    values = {"vacuum_state": "docked", "task_status": "room_cleaning", **observation}
+    decision = _decision(
+        **values,
+        vacuum_error_code="no_error",
+        tank_interruption_seen=True,
+        seconds_since_last_command=600,
+    )
+
+    assert decision.action == "resume"
+    assert decision.reasons == ("tank_recovered_resume_requested",)
+    assert decision.tracking.tank_interruption_seen is False
+
+
+def test_tank_recovery_resume_waits_for_the_retry_interval() -> None:
+    decision = _decision(
+        vacuum_state="docked",
+        task_status="room_cleaning",
+        is_drying_state=True,
+        is_dock_prep_state=True,
+        tank_interruption_seen=True,
+        seconds_since_last_command=10,
+    )
+
+    assert decision.action == "hold"
+    assert decision.reasons == ("tank_recovered_waiting_retry_interval",)
+    assert decision.tracking.tank_interruption_seen is True
+
+
+def test_tank_recovery_does_not_resume_past_a_robot_error() -> None:
+    decision = _decision(
+        vacuum_state="docked",
+        task_status="room_cleaning",
+        robot_paused=True,
+        vacuum_error_code="mop_removed",
+        tank_interruption_seen=True,
+        seconds_since_last_command=600,
+    )
+
+    assert decision.action == "hold"
+    assert decision.reasons == ("vacuum_error_waiting_user_action",)
+
+
+def test_tank_recovery_does_not_resume_while_a_tank_is_still_missing() -> None:
+    decision = _decision(
+        vacuum_state="docked",
+        task_status="room_cleaning",
+        robot_paused=True,
+        water_tank_block_reason="dirty_water_tank_not_ready",
+        tank_interruption_seen=True,
+        seconds_since_last_command=600,
+    )
+
+    assert decision.action == "hold"
+    assert decision.reasons == ("dirty_water_tank_not_ready",)
+
+
+@pytest.mark.parametrize(
+    "observation",
+    [
+        # The robot continued by itself and washes the mop before leaving the dock.
+        {"vacuum_state": "docked", "is_dock_prep_state": True},
+        {"vacuum_state": "cleaning"},
+        {"vacuum_state": "returning"},
+    ],
+)
+def test_tank_recovery_leaves_a_working_robot_alone(observation: dict) -> None:
+    """Test the robot is not sent start while it is already working on the room."""
+    decision = _decision(
+        **observation,
+        task_status="room_cleaning",
+        tank_interruption_seen=True,
+        seconds_since_last_command=600,
+    )
+
+    assert decision.action == "hold"
+
+
+def test_confirmed_cleaning_forgets_the_tank_interruption() -> None:
+    """Test a room that is cleaned again no longer counts as stopped by the tanks."""
+    decision = _decision(
+        vacuum_state="cleaning",
+        task_status="room_cleaning",
+        tank_interruption_seen=True,
+        seconds_since_last_command=600,
+    )
+
+    assert decision.action == "hold"
+    assert decision.tracking.tank_interruption_seen is False
+
+
+def test_mop_pad_reminder_is_not_a_robot_error() -> None:
+    """Test the post-task reminder to clean the washboard does not count as an error."""
+    assert is_meaningful_error("clean_mop_pad") is False
+    assert is_meaningful_error("dirty_water_tank") is True
 
 
 def test_dirty_tank_blocks_automatic_dispatch_retry() -> None:

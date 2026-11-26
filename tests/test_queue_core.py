@@ -492,6 +492,7 @@ def test_queue_state_round_trips_through_stored_data() -> None:
             active_room_confirmed_since_dispatch=True,
             task_status_cleared_since_dispatch=True,
             post_run_maintenance_seen=False,
+            tank_interruption_seen=True,
         ),
     )
 
@@ -518,6 +519,17 @@ def test_queue_state_round_trips_through_stored_data() -> None:
 )
 def test_queue_states_without_tracking_round_trip(state: QueueState) -> None:
     assert queue_state_from_dict(queue_state_to_dict(state)) == state
+
+
+def test_tracking_stored_before_tank_memory_reads_as_no_tank_interruption() -> None:
+    """Test a queue saved by an older version still loads."""
+    stored = _stored_running_queue()
+    del stored["dispatch"]["tank_interruption_seen"]
+
+    dispatch = queue_state_from_dict(stored).dispatch
+
+    assert dispatch is not None
+    assert dispatch.tank_interruption_seen is False
 
 
 def _stored_running_queue() -> dict:
@@ -552,6 +564,7 @@ def _broken(change) -> dict:
         _broken(lambda data: data["dispatch"].update(last_command_at="2026-11-01T08:00:00")),
         _broken(lambda data: data["dispatch"].update(dispatch_retry_count="1")),
         _broken(lambda data: data["dispatch"].update(post_run_maintenance_seen="no")),
+        _broken(lambda data: data["dispatch"].update(tank_interruption_seen="no")),
         _broken(lambda data: data.update(dispatch="soon")),
     ],
 )
